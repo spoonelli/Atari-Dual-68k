@@ -1,0 +1,19 @@
+name: CI smoke test
+
+# Minimal job used to confirm the account can acquire a GitHub-hosted runner at all.
+# If this cannot get a runner, the problem is account-level (billing/verification),
+# not the Quartus build workflow.
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm runner
+        run: |
+          echo "Hosted runner acquired successfully."
+          uname -a
+          echo "If you can read this in the logs, hosted runners work for this account."
