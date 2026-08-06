@@ -5,7 +5,7 @@
             "platform_ids": ["atari_escape"],
             "shortname": "Atari Multi 68k",
             "description": "Atari 'Escape' hardware (dual 68000). Escape from the Planet of the Robot Monsters, Klax (proto), Guts n' Glory (proto).",
-            "author": "djslloyd",
+            "author": "spoonelli",
             "url": "https://github.com/spoonelli/Atari-Multi-68k",
             "version": "0.0.1",
             "date_release": "2026-08-06"
