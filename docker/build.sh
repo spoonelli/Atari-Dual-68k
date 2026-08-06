@@ -7,11 +7,10 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="atari-multi-68k-quartus:18.1"
 PLATFORM="linux/amd64"
 
-# 1. Build the Quartus image once (cached afterwards)
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  echo ">> Building Quartus Lite 18.1 image (one-time; large, slow under emulation)..."
-  docker build --platform "$PLATFORM" -t "$IMAGE" "$REPO_ROOT/docker"
-fi
+# 1. Build the Quartus image (Docker reuses cached layers; the ~3 GB download layer
+#    only runs the first time). Safe to run every time.
+echo ">> Building/refreshing Quartus Lite 18.1 image..."
+docker build --platform "$PLATFORM" -t "$IMAGE" "$REPO_ROOT/docker"
 
 # 2. Compile ap_core (revision defined in src/fpga/ap_core.qsf)
 echo ">> Compiling ap_core with Quartus..."
