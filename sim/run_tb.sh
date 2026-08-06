@@ -8,12 +8,13 @@ IMAGE="ghdl/ghdl:ubuntu20-mcode"
 TB="${1:-tb_syngen}"
 exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work -w /work "$IMAGE" bash -c "
   set -e
-  STD='--std=08 -fsynopsys -frelaxed'; W=sim/work
+  STD='--std=08 -fsynopsys -frelaxed'; W=sim/build
   rm -rf \$W; mkdir -p \$W
   RTL=third_party/Arcade-Atari-system1_MiSTer/rtl
+  SIMLIB=\$(find sim/lib -iname '*.vhd' | sort)
   OURS=\$(find src/fpga/core/rtl -iname '*.vhd' 2>/dev/null | sort)
-  FILES=\"sim/lib/dpram_sim.vhd \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd)\"
+  FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd)\"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W $TB >/dev/null
-  ghdl -r \$STD --workdir=\$W $TB --stop-time=500us
+  ghdl -r \$STD --workdir=\$W $TB --ieee-asserts=disable --stop-time=500us
 "
