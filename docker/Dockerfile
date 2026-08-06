@@ -26,6 +26,16 @@ RUN BASE="https://downloads.intel.com/akdlm/software/acdsinst/18.1std/625/ib_ins
         --disable-components quartus_help,quartus_update \
  && rm -rf /tmp/qinstall
 
+# Runtime libs Quartus needs at compile time (libgthread via libglib2.0-0) plus a UTF-8
+# locale. Kept as a separate layer AFTER the large download so tweaking it doesn't
+# invalidate the cached Quartus install layer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libglib2.0-0 locales \
+    && sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
 ENV PATH="/opt/intelFPGA_lite/18.1/quartus/bin:${PATH}"
 WORKDIR /work
 CMD ["quartus_sh", "--version"]
