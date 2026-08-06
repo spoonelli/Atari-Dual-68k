@@ -1,0 +1,27 @@
+# Quartus build artifacts
+src/fpga/db/
+src/fpga/incremental_db/
+src/fpga/output_files/*.rpt
+src/fpga/output_files/*.summary
+src/fpga/output_files/*.pin
+src/fpga/output_files/*.done
+src/fpga/output_files/*.smsg
+src/fpga/output_files/*.jdi
+src/fpga/output_files/*.sof
+src/fpga/output_files/*.qws
+src/fpga/*.qws
+src/fpga/PLLJ_PLLSPE_INFO.txt
+src/fpga/c5_pin_model_dump.txt
+
+# Simulation
+*.wlf
+transcript
+work/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
