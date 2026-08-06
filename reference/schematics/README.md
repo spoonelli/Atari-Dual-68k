@@ -1,9 +1,12 @@
 # Schematics
 
 **Atari Games Schematic Package SP-332** (1st printing, 1989) — *Escape From the
-Planet of the Robot Monsters*. Source: arcade-museum.com. © Atari Games Corporation.
-Kept here as engineering reference for the RTL. (This repo is private; if it is ever
-made public, reconsider redistributing the copyrighted PDF.)
+Planet of the Robot Monsters*. © Atari Games Corporation ("Reproduction forbidden").
+
+The PDF is **not** committed to this public repo (it's git-ignored). Download your own
+copy for reference — it is archived publicly at arcade-museum.com — and place it at
+`reference/schematics/Escape_Schematic_Package.pdf`. The factual memory map transcribed
+in `docs/ARCHITECTURE.md` is not copyrightable and stays in the repo.
 
 ## Sheet index → RTL module
 

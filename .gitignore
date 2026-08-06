@@ -28,3 +28,6 @@ Thumbs.db
 
 # Rendered schematic previews (derived from the source PDF)
 reference/schematics/_png/
+
+# Copyrighted schematic PDF kept local-only (not redistributed)
+reference/schematics/*.pdf

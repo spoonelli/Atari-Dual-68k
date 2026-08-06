@@ -46,8 +46,15 @@ Quartus Prime does **not** run on macOS. This repo is set up to compile the bits
 in **GitHub Actions** (see `.github/workflows/build.yml`) so you never install Quartus
 locally. The workflow produces `bitstream.rbf_r` as a build artifact.
 
+## License
+
+**GPL-3.0** — see [`LICENSE`](LICENSE). The RTL is based on
+[`MiSTer-devel/Arcade-Atari-system1_MiSTer`](https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer)
+(GPL-3.0); the openFPGA APF framework is from
+[`open-fpga/core-template`](https://github.com/open-fpga/core-template).
+
 ## Legal
 
-This core contains no copyrighted ROM data. Escape from the Planet of the Robot Monsters,
-Klax, and Guts n' Glory are trademarks of their respective rights holders. Use only with
-software you are legally entitled to.
+This core contains no copyrighted ROM data, and no copyrighted schematics. Escape from the
+Planet of the Robot Monsters, Klax, and Guts n' Glory are trademarks of their respective
+rights holders. Use only with software you are legally entitled to.
