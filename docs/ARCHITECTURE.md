@@ -23,48 +23,111 @@ is compiled into the core. Consult the schematic sheet(s) listed per roadmap ste
   alpha/text 64×31), 2048-color palette with RGB intensity, SLAPSTIC bank protection.
 - **Display**: 336×240 active, ~57.6 Hz (456×262 total).
 
-## Main-CPU memory map (eprom / eprom2)
+## Memory map — authoritative (schematic SP-332, sheet 16)
 
-| Range              | Function                 |
-|--------------------|--------------------------|
-| `0x000000–0x09FFFF`| Program ROM (640 KB)     |
-| `0x0E0000–0x0E03FF`| EEPROM                   |
-| `0x160000–0x16FFFF`| Shared RAM               |
-| `0x16CC00`         | Sync register            |
-| `0x260000–0x260027`| I/O ports                |
-| `0x2E0000`         | Watchdog                 |
-| `0x360000–0x360031`| Video control            |
-| `0x3E0000–0x3E0FFF`| Palette RAM              |
-| `0x3F0000–0x3F1FFF`| Playfield VRAM           |
-| `0x3F2000–0x3F3FFF`| Motion-object VRAM       |
-| `0x3F4000–0x3F4F7F`| Alpha VRAM               |
-| `0x3F8000–0x3F9FFF`| Playfield extension      |
+Transcribed from the original Atari memory map. This supersedes the MAME-approximated
+version; note the differences (EEPROM range, per-layer color RAM, SLIP pointers).
 
-(`guts` uses an inverted layout with video RAM at `0xFF8000–0xFFCFFF`.)
+### Video CPU (main 68000) — byte or word
 
-## Building blocks (open cores to vendor as submodules)
+| Range               | R/W | Data    | Function |
+|---------------------|-----|---------|----------|
+| `000000–05FFFF`     | R   | D15–D0  | Program ROM |
+| `080000–09FFFF`     | R   | D15–D0  | Program ROM |
+| `0E0001–0E2FFF`     | R/W | D7–D0   | EEPROM |
+| `1Fxxxx`            | W   |         | Unlock EEPROM |
+| `2E0000`            | W   |         | Watchdog (128 ms timeout) |
+| `3E0000–3E01FF`     | R/W | D15–D0  | Color RAM — Alpha |
+| `3E0200–3E03FF`     | R/W | D15–D0  | Color RAM — Motion Object |
+| `3E0400–3E05FF`     | R/W | D15–D0  | Color RAM — Playfield |
+| `3E0600–3E07FF`     | R/W | D15–D0  | Color RAM — Playfield Shadow |
+| `3E0800–3E0FFF`     | R/W | D15–D0  | Color RAM — STAIN |
+| `3F0000–3F1FFF`     | R/W | D15–D0  | Playfield picture RAM |
+| `3F2000–3F3FFF`     | R/W | D15–D0  | Motion Object RAM (link, picture, H/V pos) |
+| `3F4000–3F4EFF`     | R/W | D15–D0  | AlphaNumerics RAM |
+| `3F4F00–3F4F7F`     | R/W | D15–D0  | Scroll and MOB config |
+| `3F4F80–3F4FFF`     | R/W | D9–D0   | SLIP pointers (M.O. link) |
+| `3F5000–3F7FFF`     | R/W | D15–D0  | Working RAM |
+| `3F8000–3F9FFF`     | R/W | D11–D8  | Playfield palette RAM |
 
-| Need            | Core            | Source                                  |
-|-----------------|-----------------|-----------------------------------------|
-| 68000 ×2        | `fx68k`         | https://github.com/ijor/fx68k           |
-| 6502 (JSA)      | `T65`           | (opencores / MiSTer)                    |
-| YM2151          | `jt51`          | https://github.com/jotego/jt51          |
-| OKI6295 (JSA-II)| `jt6295`        | https://github.com/jotego/jt6295        |
-| POKEY           | `pokey`         | (MiSTer Atari cores)                     |
+### Extra CPU (second 68000)
+
+| Range           | R/W | Data   | Function |
+|-----------------|-----|--------|----------|
+| `000000–05FFFF` | R   | D15–D0 | Program ROM |
+| (common below)  |     |        |          |
+
+### Common (both processors)
+
+| Range           | R/W | Data   | Function |
+|-----------------|-----|--------|----------|
+| `060000–07FFFF` | R   | D15–D0 | Program ROM |
+| `160000–16FFFF` | R/W | D15–D0 | Program RAM (shared) |
+
+### I/O — word mode only
+
+| Address    | R/W | Bits | Function |
+|------------|-----|------|----------|
+| `260000`   | R   | D8–D11 | Player 1 input |
+| `260010`   | R   | D8–D11 | Player 2 input (D11 duck, D9 fire, D8 start) |
+| `260010`   | R   | D0   | VBLANK (active lo) |
+| `260010`   | R   | D1   | Self-test |
+| `260010`   | R   | D2/D3| Input/Output buffer full (SCOM @260030) |
+| `260010`   | R   | D4   | ADEOC end-of-conversion (active hi) |
+| `260020/22/24/26` | R | D0–D7 | ADC0–3 (analog Hall-effect joystick) |
+| `260030`   | R   | D0–D7 | Read Sound Processor (SCOM) |
+| `360000`   | W   |      | VBLANK interrupt ack |
+| `360010`   | W   | D5   | Video Off (0=on) |
+| `360010`   | W   | D4–D1| Video Intensity (0=full on) |
+| `360010`   | W   | D0   | EXTRA CPU reset (lo = reset) |
+| `360020`   | W   |      | Sound Processor reset |
+| `360030`   | W   | D0–D7 | Write Sound Processor (SCOM) |
+
+**Design notes vs Atari System 1 (our RTL base):**
+- Dual 68000 sharing RAM at `160000–16FFFF` + `EXTRA CPU reset` bit — System 1 is single-CPU.
+- **Analog** Hall-effect joystick via ADC0–3 → the Pocket d-pad/stick must be mapped to
+  analog values (see sheet 16 hall-sensor schematic).
+- Sound via **SCOM** mailbox (`260030` read / `360030` write), not a shared audio bus.
+- Motion objects use **SLIP pointers** (`3F4F80`); per-layer color RAM (alpha/MO/pf/shadow/stain).
+- **No SLAPSTIC** window appears in Escape's map (System 1 has one) — verify, but likely unused.
+
+## Strategy: adapt Arcade-Atari-system1_MiSTer (GPL-3.0)
+
+Rather than build from scratch, base the RTL on **`MiSTer-devel/Arcade-Atari-system1_MiSTer`**
+(GPL-3.0, VHDL) — the closest open, complete implementation of Escape's video/sound family.
+`MiSTer-devel/Arcade-Gauntlet_MiSTer` is a second reference. Reusing this RTL makes **our
+core GPL-3.0** (the `LICENSE` is set accordingly).
+
+Reusable blocks (already in the System 1 core unless noted):
+
+| Need                | Reuse                                             |
+|---------------------|---------------------------------------------------|
+| Motion objects      | `MOHLB_LSI.vhd` / `MOHLB_TTL.vhd` (adapt to SLIP) |
+| Playfield / scroll  | `PFHS.vhd`, `VIDEO.vhd`                            |
+| Sync generation     | `SYNGEN.vhd`, `LINECTR.vhd`, `LINEBUF.vhd`         |
+| Palette / color     | `CRAMS.vhd`, `RGBI.vhd`                            |
+| 6502 (sound)        | `T65/`                                            |
+| 68000               | `TG68K/` (or swap in `fx68k`); Escape needs **two** |
+| POKEY               | `lib/POKEY.vhd`                                    |
+| TMS5220 speech      | `TMS5220.vhd`                                      |
+| SLAPSTIC            | `SLAPSTIC.vhd` (likely unused by Escape — verify)  |
+| YM2151              | `jotego/jt51` (Pocket-proven)                      |
+| OKI6295 (guts/klaxp)| `jotego/jt6295`                                   |
+| 93C46 EEPROM        | `jotego/jteeprom`                                 |
 
 ## Roadmap
 
 1. **[done]** APF scaffold — builds a gray screen, packages for the Pocket.
 2. **CI build** — confirm a working Quartus image in GitHub Actions; produce `.rbf_r`.
-3. **CPU bring-up** — integrate fx68k, wire program ROM (via APF data slot) + work RAM;
-   get the main 68000 running with a stub video.
-4. **Video** — playfield tilemap → alpha layer → motion objects → palette; hit 336×240.
-5. **Dual-CPU** — second 68000 + shared RAM + sync register.
-6. **Sound** — JSA-I: 6502 + jt51 (YM2151); then POKEY / TMS5220.
-7. **SLAPSTIC** — protection state machine (needed to boot correctly).
-8. **ROM loading** — define `data.json` slots + an `.mra`-style ROM manifest so users
-   supply their own dumps; map them to the correct address spaces.
-9. **Variants** — expose eprom / eprom2 / klaxp / guts selection.
+3. **Import base** — bring the Atari System 1 RTL into `src/fpga/core/`, get it elaborating
+   under Quartus (mixed VHDL + Verilog APF).
+4. **Memory map** — rework decode to Escape's map (sheet 16): ROM/RAM regions, SCOM, ADCs.
+5. **CPU** — dual 68000 + shared RAM at `160000–16FFFF` + `EXTRA CPU reset`.
+6. **Video** — adapt motion objects to **SLIP pointers**; per-layer color RAM; 336×240.
+7. **Sound** — JSA-I via SCOM mailbox: 6502 + jt51 (YM2151) + TMS5220 (+ POKEY if present).
+8. **Inputs** — map Pocket d-pad/stick to the analog Hall-effect joystick (ADC0–3).
+9. **ROM loading** — `data.json` slots + `.mra`-style manifest; user-supplied dumps only.
+10. **Variants** — eprom / eprom2 / klaxp / guts (JSA-II adds OKI6295).
 
 ## ROM strategy
 
