@@ -31,3 +31,6 @@ reference/schematics/_png/
 
 # Copyrighted schematic PDF kept local-only (not redistributed)
 reference/schematics/*.pdf
+
+# GHDL simulation work dir
+sim/work/
