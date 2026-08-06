@@ -5,7 +5,7 @@
 # we're adapting for Escape.
 set -uo pipefail
 STD="--std=08 -fsynopsys -frelaxed"
-W=sim/work
+W=sim/build
 rm -rf "$W"; mkdir -p "$W"
 RTL=third_party/Arcade-Atari-system1_MiSTer/rtl
 

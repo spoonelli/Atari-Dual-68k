@@ -34,3 +34,6 @@ reference/schematics/*.pdf
 
 # GHDL simulation work dir
 sim/work/
+
+# GHDL work library
+sim/build/
