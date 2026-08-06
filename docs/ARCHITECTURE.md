@@ -1,9 +1,16 @@
 # Architecture & Implementation Roadmap
 
-Hardware reference: MAME `reference/eprom.cpp` and its device dependencies
-(`atarijsa`, `atarimo`, `slapstic`, `atarigen`). MAME is C++ *software emulation* —
-we use it to understand the hardware and re-implement the behavior in Verilog for the
-Cyclone V. Nothing from MAME is compiled into the core.
+Hardware references, in order of authority:
+
+1. **Original schematics** — `reference/schematics/` (Atari SP-332, 1989). Ground truth
+   for clocking, sync generation, memory decode, and custom-chip wiring. See that folder's
+   `README.md` for the sheet→module index (main PCB = sheets 2–10, audio = 11–14,
+   memory map = sheet 16).
+2. **MAME** — `reference/eprom.cpp` and device deps (`atarijsa`, `atarimo`, `slapstic`,
+   `atarigen`). C++ *software emulation*: excellent for behavior and register semantics.
+
+We use both to re-implement the hardware in Verilog for the Cyclone V. Nothing from MAME
+is compiled into the core. Consult the schematic sheet(s) listed per roadmap step below.
 
 ## System overview (Atari "Escape" board)
 

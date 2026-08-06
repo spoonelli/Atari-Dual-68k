@@ -25,3 +25,6 @@ Thumbs.db
 # Editor
 .vscode/
 *.swp
+
+# Rendered schematic previews (derived from the source PDF)
+reference/schematics/_png/
