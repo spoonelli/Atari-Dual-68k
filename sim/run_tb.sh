@@ -11,7 +11,8 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work -w /work "$IMA
   STD='--std=08 -fsynopsys -frelaxed'; W=sim/work
   rm -rf \$W; mkdir -p \$W
   RTL=third_party/Arcade-Atari-system1_MiSTer/rtl
-  FILES=\"sim/lib/dpram_sim.vhd \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' | sort) \$(ls sim/tb/*.vhd)\"
+  OURS=\$(find src/fpga/core/rtl -iname '*.vhd' 2>/dev/null | sort)
+  FILES=\"sim/lib/dpram_sim.vhd \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd)\"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W $TB >/dev/null
   ghdl -r \$STD --workdir=\$W $TB --stop-time=500us
