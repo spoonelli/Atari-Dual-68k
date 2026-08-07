@@ -583,21 +583,21 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                 // data enable. this is the active region of the line
                 vidout_de <= 1;
 
-                // diagnostic bands, top to bottom (30 px each), green=ok red=fail:
-                //   1 SDRAM init done          2 ROM slot download complete
-                //   3 SDRAM self-check done    4 self-check DATA OK (word0==0x003F)
-                //   5 CPU issued a ROM fetch   6 video CPU executed reset PC
-                //   7 extra CPU released       8 gray reference
-                case(visible_y[7:5])
-                    3'd0: vidout_rgb <= sdram_init_done_s       ? 24'h00A000 : 24'hA00000;
-                    3'd1: vidout_rgb <= dataslot_allcomplete_s  ? 24'h00A000 : 24'hA00000;
-                    3'd2: vidout_rgb <= chk_done_s              ? 24'h00A000 : 24'hA00000;
-                    3'd3: vidout_rgb <= chk_ok_s                ? 24'h00A000 : 24'hA00000;
-                    3'd4: vidout_rgb <= rom_req_seen            ? 24'h00A000 : 24'hA00000;
-                    3'd5: vidout_rgb <= dbg_v_pc_fetch          ? 24'h00A000 : 24'hA00000;
-                    3'd6: vidout_rgb <= dbg_e_running           ? 24'h00A000 : 24'hA00000;
-                    default: vidout_rgb <= 24'h3C3C3C;
-                endcase
+                // alpha (text) layer, with a 6px diagnostic strip at the bottom:
+                // 7 segments left->right = init/slot/chk/ok/fetch/pc/extra
+                if(visible_y >= 'd234) begin
+                    case(visible_x[8:6])
+                        3'd0: vidout_rgb <= sdram_init_done_s      ? 24'h00A000 : 24'hA00000;
+                        3'd1: vidout_rgb <= dataslot_allcomplete_s ? 24'h00A000 : 24'hA00000;
+                        3'd2: vidout_rgb <= chk_done_s             ? 24'h00A000 : 24'hA00000;
+                        3'd3: vidout_rgb <= chk_ok_s               ? 24'h00A000 : 24'hA00000;
+                        3'd4: vidout_rgb <= rom_req_seen           ? 24'h00A000 : 24'hA00000;
+                        3'd5: vidout_rgb <= dbg_v_pc_fetch         ? 24'h00A000 : 24'hA00000;
+                        default: vidout_rgb <= dbg_e_running       ? 24'h00A000 : 24'hA00000;
+                    endcase
+                end else begin
+                    vidout_rgb <= alpha_rgb;
+                end
 
             end
         end
@@ -759,27 +759,53 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     // the known first ROM word (0x003F = high word of the reset SP). Proves the
     // download+readback path with no CPU involvement. Runs before the CPU is released.
     reg        chk_done, chk_ok;
-    reg [1:0]  chk_state;
+    reg [2:0]  chk_state;
+    // char ROM DMA: combined image 0x110000..0x113FFF -> 8192x16 BRAM
+    reg [13:0] chr_dma_word;         // word index 0..8191
+    reg        chr_we;
+    reg [15:0] chr_wdata;
     wire       allcomplete_sd;
 synch_3 s_acsd(dataslot_allcomplete, allcomplete_sd, clk_sdram);
 
 always @(posedge clk_sdram) begin
     case(chk_state)
-    2'd0: if(sdram_init_done && allcomplete_sd) begin
+    3'd0: if(sdram_init_done && allcomplete_sd) begin
         sd_rd_req <= 1;
-        chk_state <= 2'd1;
+        chk_state <= 3'd1;
     end
-    2'd1: if(sd_rd_ack) begin
+    3'd1: if(sd_rd_ack) begin
         chk_ok    <= (sd_rd_data == 16'h003F);
         sd_rd_req <= 0;
-        chk_state <= 2'd2;
+        chk_state <= 3'd2;
     end
-    2'd2: if(!sd_rd_ack) begin
-        chk_done  <= 1;
-        chk_state <= 2'd3;
+    3'd2: if(!sd_rd_ack) begin
+        chk_state <= 3'd3;          // now DMA the char ROM into BRAM
     end
-    2'd3: begin
-        // CPU fetch service (only after self-check owns the port no longer)
+    3'd3: begin                     // issue one char-ROM read
+        chr_we <= 0;
+        if(!sd_rd_ack) begin
+            sd_rd_req <= 1;
+            chk_state <= 3'd4;
+        end
+    end
+    3'd4: if(sd_rd_ack) begin       // capture -> BRAM write
+        sd_rd_req <= 0;
+        chr_wdata <= sd_rd_data;
+        chr_we    <= 1;
+        chk_state <= 3'd5;
+    end
+    3'd5: begin
+        chr_we <= 0;
+        if(chr_dma_word == 14'd8191) begin
+            chk_done  <= 1;         // DMA finished: release the CPUs
+            chk_state <= 3'd6;
+        end else begin
+            chr_dma_word <= chr_dma_word + 14'd1;
+            chk_state <= 3'd3;
+        end
+    end
+    3'd6: begin
+        // CPU fetch service
         if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
             sd_rd_req <= 1;
         end
@@ -790,6 +816,7 @@ always @(posedge clk_sdram) begin
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
     end
+    default: chk_state <= 3'd6;
     endcase
 end
 
@@ -812,7 +839,9 @@ sdram_simple sdr (
     .wr_data    ( sd_wr_data ),
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
-    .rd_addr    ( chk_done ? {1'b0, core_rom_addr} : 25'd0 ),
+    .rd_addr    ( chk_done   ? {1'b0, core_rom_addr} :
+                  (chk_state >= 3'd3) ? (25'h0110000 + {10'd0, chr_dma_word, 1'b0}) :
+                  25'd0 ),
     .rd_data    ( sd_rd_data ),
     .init_done  ( sdram_init_done )
 );
@@ -836,6 +865,77 @@ end
     // vblank from the raster generator
     wire vblank_w = ~((y_count >= VID_V_BPORCH) && (y_count < VID_V_BPORCH+VID_V_ACTIVE));
 
+    // ---------------- char ROM BRAM: 8192x16, written by DMA (sdram clk), read by scanout
+    reg [15:0] chr_ram [0:8191];
+    always @(posedge clk_sdram) begin
+        if(chr_we) chr_ram[chr_dma_word] <= chr_wdata;
+    end
+    reg  [15:0] chr_q;
+    reg  [12:0] chr_raddr;
+    always @(posedge clk_sys_7159) chr_q <= chr_ram[chr_raddr];
+
+    // ---------------- alpha scanout pipeline (pixel clock domain)
+    // char cell: 8x8. During pixel phases 4..7 of each cell we prefetch the NEXT cell:
+    //   phase 4: present alpha map address    phase 5: latch alpha word (BRAM reg'd)
+    //   phase 6: present char row address     phase 7: latch char row + attributes
+    wire [10:0] alpha_vaddr;
+    wire [15:0] alpha_vdata;
+    reg  [10:0] color_vaddr;
+    wire [15:0] color_vdata;
+    wire [3:0]  eintensity;
+    wire        evideo_off;
+
+    reg  [15:0] a_word;       // latched alpha entry (next cell)
+    reg  [15:0] a_row;        // latched char row bits (next cell)
+    reg  [5:0]  a_color;      // latched color (next cell)
+    reg  [15:0] r_row;        // active cell shift source
+    reg  [5:0]  r_color;      // active cell color
+    reg         r_opaque;
+
+    wire [9:0]  next_x   = x_count - VID_H_BPORCH + 10'd8;   // cell being prefetched
+    wire [5:0]  cell_col = next_x[8:3];
+    wire [4:0]  cell_row = visible_y[7:3];
+    assign alpha_vaddr = {cell_row, cell_col};               // row*64 + col
+
+    always @(posedge clk_sys_7159) begin
+        case(x_count[2:0])
+            3'd5: begin
+                a_word <= alpha_vdata;
+            end
+            3'd6: begin
+                chr_raddr <= {alpha_vdata[9:0], visible_y[2:0]};  // code*8 + line
+                a_color   <= {alpha_vdata[14], 1'b0, alpha_vdata[13:10]};
+            end
+            3'd7: ;
+            3'd0: begin
+                r_row    <= chr_q;
+                r_color  <= a_color;
+                r_opaque <= a_word[15];
+            end
+            default: ;
+        endcase
+    end
+
+    // pixel extraction: n = x within cell; MSB plane in high nibbles, LSB in low
+    wire [2:0] pxn = visible_x[2:0];
+    wire       msb = pxn[2] ? r_row[7  - pxn[1:0]] : r_row[15 - pxn[1:0]];
+    wire       lsb = pxn[2] ? r_row[3  - pxn[1:0]] : r_row[11 - pxn[1:0]];
+    wire [1:0] pix = {msb, lsb};
+
+    // pen -> color RAM (alpha section: pens 0..255)
+    always @(posedge clk_sys_7159) color_vaddr <= {3'b000, r_color, pix};
+
+    // palette: IRGB4444 with intensity: i=(I+1)*(4-intensity), ch8 = ch4*i/4
+    wire [3:0] ints   = (eintensity > 4'd4) ? 4'd4 : eintensity;
+    wire [6:0] ifac   = ({3'd0, color_vdata[15:12]} + 7'd1) * (7'd4 - {5'd0, ints[2:0]});
+    wire [10:0] r_m   = color_vdata[11:8] * ifac;
+    wire [10:0] g_m   = color_vdata[7:4]  * ifac;
+    wire [10:0] b_m   = color_vdata[3:0]  * ifac;
+    wire [7:0] pal_r  = (r_m[10:2] > 9'd255) ? 8'd255 : r_m[9:2];
+    wire [7:0] pal_g  = (g_m[10:2] > 9'd255) ? 8'd255 : g_m[9:2];
+    wire [7:0] pal_b  = (b_m[10:2] > 9'd255) ? 8'd255 : b_m[9:2];
+    wire [23:0] alpha_rgb = evideo_off ? 24'h000000 : {pal_r, pal_g, pal_b};
+
     wire dbg_v_pc_fetch, dbg_e_running;
 escape_core ecore (
     .clk        ( clk_sys_7159 ),
@@ -848,8 +948,12 @@ escape_core ecore (
     // {duck, spare, fire, jump} = Pocket {X, -, B, A}   (schematic sheet 3: CD11..CD8)
     .p1_buttons ( {cont1_key[6], 1'b0, cont1_key[5], cont1_key[4]} ),
     .p2_buttons ( 4'b0000 ),
-    .alpha_vaddr( 11'd0 ),
-    .alpha_vdata(  ),
+    .alpha_vaddr( alpha_vaddr ),
+    .alpha_vdata( alpha_vdata ),
+    .color_vaddr( color_vaddr ),
+    .color_vdata( color_vdata ),
+    .intensity_out( eintensity ),
+    .video_off_out( evideo_off ),
     .dbg_v_pc_fetch ( dbg_v_pc_fetch ),
     .dbg_e_running  ( dbg_e_running )
 );

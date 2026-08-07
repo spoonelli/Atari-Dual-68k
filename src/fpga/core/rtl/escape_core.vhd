@@ -30,9 +30,13 @@ entity escape_core is
         p1_buttons : in  std_logic_vector(3 downto 0);  -- D11 duck..D8 start
         p2_buttons : in  std_logic_vector(3 downto 0);
 
-        -- video-RAM read ports for the (upcoming) video chain
-        alpha_vaddr : in  std_logic_vector(10 downto 0);
+        -- video-side read ports + latches for the video chain
+        alpha_vaddr : in  std_logic_vector(10 downto 0) := (others => '0');
         alpha_vdata : out std_logic_vector(15 downto 0);
+        color_vaddr : in  std_logic_vector(10 downto 0) := (others => '0');
+        color_vdata : out std_logic_vector(15 downto 0);
+        intensity_out : out std_logic_vector(3 downto 0);
+        video_off_out : out std_logic;
 
         -- debug/observation
         dbg_v_pc_fetch : out std_logic;
@@ -201,9 +205,12 @@ begin
     pfpal_ram : entity work.spram_bytelane generic map ( awidth=>12 )
         port map ( clk=>clk, addr=>v_addr(12 downto 1), din=>v_do, we=>we_pfpal,
                    uds_n=>v_uds_n, lds_n=>v_lds_n, q=>pfpal_q );
-    color_ram : entity work.spram_bytelane generic map ( awidth=>11 )
-        port map ( clk=>clk, addr=>v_addr(11 downto 1), din=>v_do, we=>we_color,
-                   uds_n=>v_uds_n, lds_n=>v_lds_n, q=>color_q );
+    color_ram : entity work.dpram_bytelane_syn generic map ( awidth => 11 )
+        port map ( clk=>clk,
+                   addr_a=>v_addr(11 downto 1), din_a=>v_do,
+                   we_a=>we_color, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>color_q,
+                   addr_b=>color_vaddr, din_b=>(others=>'0'),
+                   we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>color_vdata );
     cfg_ram   : entity work.spram_bytelane generic map ( awidth=>7 )
         port map ( clk=>clk, addr=>v_addr(7 downto 1), din=>v_do, we=>we_cfg,
                    uds_n=>v_uds_n, lds_n=>v_lds_n, q=>cfg_q );
@@ -246,6 +253,8 @@ begin
     end process;
     dbg_v_pc_fetch <= v_pc_seen;
     dbg_e_running  <= extra_release;
+    intensity_out  <= intensity;
+    video_off_out  <= video_off;
 
     ---------------------------------------------------------------- read muxes
     -- I/O: 260000 P1 (D11-D8), 260010 status+P2, 260020-26 ADC (centered), 260030 SCOM
