@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-IMAGE="atari-multi-68k-quartus:18.1"
+IMAGE="atari-dual-68k-quartus:18.1"
 PLATFORM="linux/amd64"
 
 # 1. Build the Quartus image (Docker reuses cached layers; the ~3 GB download layer
