@@ -497,7 +497,7 @@ core_bridge_cmd icb (
 
 
 // video generation
-// ~12,288,000 hz pixel clock
+// ~7,159,091 hz pixel clock (Atari Escape native: 456x262 total, 336x240 active, ~59.92 Hz)
 //
 // we want our video mode of 320x240 @ 60hz, this results in 204800 clocks per frame
 // we need to add hblank and vblank times to this, so there will be a nondisplay area. 
@@ -508,20 +508,20 @@ core_bridge_cmd icb (
 // PLL output has a minimum output frequency anyway.
 
 
-assign video_rgb_clock = clk_core_12288;
-assign video_rgb_clock_90 = clk_core_12288_90deg;
+assign video_rgb_clock = clk_sys_7159;
+assign video_rgb_clock_90 = clk_sys_7159_90deg;
 assign video_rgb = vidout_rgb;
 assign video_de = vidout_de;
 assign video_skip = vidout_skip;
 assign video_vs = vidout_vs;
 assign video_hs = vidout_hs;
 
-    localparam  VID_V_BPORCH = 'd10;
+    localparam  VID_V_BPORCH = 'd12;
     localparam  VID_V_ACTIVE = 'd240;
-    localparam  VID_V_TOTAL = 'd512;
-    localparam  VID_H_BPORCH = 'd10;
-    localparam  VID_H_ACTIVE = 'd320;
-    localparam  VID_H_TOTAL = 'd400;
+    localparam  VID_V_TOTAL = 'd262;
+    localparam  VID_H_BPORCH = 'd60;
+    localparam  VID_H_ACTIVE = 'd336;
+    localparam  VID_H_TOTAL = 'd456;
 
     reg [15:0]  frame_count;
     
@@ -540,7 +540,7 @@ assign video_hs = vidout_hs;
     reg [9:0]   square_x = 'd135;
     reg [9:0]   square_y = 'd95;
 
-always @(posedge clk_core_12288 or negedge reset_n) begin
+always @(posedge clk_sys_7159 or negedge reset_n) begin
 
     if(~reset_n) begin
     
@@ -653,8 +653,8 @@ end
 ///////////////////////////////////////////////
 
 
-    wire    clk_core_12288;
-    wire    clk_core_12288_90deg;
+    wire    clk_sys_7159;
+    wire    clk_sys_7159_90deg;
     
     wire    pll_core_locked;
     wire    pll_core_locked_s;
@@ -664,8 +664,8 @@ mf_pllbase mp1 (
     .refclk         ( clk_74a ),
     .rst            ( 0 ),
     
-    .outclk_0       ( clk_core_12288 ),
-    .outclk_1       ( clk_core_12288_90deg ),
+    .outclk_0       ( clk_sys_7159 ),
+    .outclk_1       ( clk_sys_7159_90deg ),
     
     .locked         ( pll_core_locked )
 );
