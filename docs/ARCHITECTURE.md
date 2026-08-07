@@ -118,9 +118,10 @@ Reusable blocks (already in the System 1 core unless noted):
 ## Roadmap
 
 1. **[done]** APF scaffold — builds a gray screen, packages for the Pocket.
-2. **CI build** — Quartus image validated (install + Cyclone V download work); blocked only
-   by GitHub-hosted-runner acquisition on the account. Local Docker+Quartus fails under
-   Apple-Silicon x86 emulation (`quartus_map` crash). Bitstream deferred; not blocking RTL.
+2. **[done]** CI build — compiles in `theypsilon/quartus-lite-c5:18.1` on a native-x86
+   runner; produces `bitstream.rbf_r` as an artifact in ~2 min per push. (Our own Quartus
+   install was incomplete — `quartus_map` crashed in synthesis even natively; the prebuilt
+   image fixed it. Local Docker still emulates on Apple Silicon, so use CI for bitstreams.)
 3. **[done]** Import base + native sim — System 1 RTL added as submodule; **GHDL** sim
    harness (`sim/`) runs on the Mac with no Quartus. 16/18 base modules elaborate; `SYNGEN`
    verified at **456 clocks/line == Escape's raster**. Verification path secured.
