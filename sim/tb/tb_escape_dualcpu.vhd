@@ -52,7 +52,7 @@ begin
     e_resn <= resn and extra_release;
 
     ---------------------------------------------------------------- Video CPU
-    vcpu : entity work.TG68K generic map ( CPU => "00" )
+    vcpu : entity work.TG68K generic map ( CPU => "01" )
         port map ( CLK=>clk, RESET=>resn, HALT=>resn, BERR=>'0', IPL=>"111",
                    ADDR=>v_addr, FC=>v_fc, DATAI=>v_di, DATAO=>v_do,
                    AS=>v_as_n, UDS=>v_uds_n, LDS=>v_lds_n, RW=>v_rw_n,
@@ -79,7 +79,7 @@ begin
             v_hi_d   when v_sel_hi='1'  else (others=>'0');
 
     ---------------------------------------------------------------- Extra CPU
-    ecpu : entity work.TG68K generic map ( CPU => "00" )
+    ecpu : entity work.TG68K generic map ( CPU => "01" )
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>"111",
                    ADDR=>e_addr, FC=>e_fc, DATAI=>e_di, DATAO=>e_do,
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,

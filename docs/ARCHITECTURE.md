@@ -83,6 +83,25 @@ version; note the differences (EEPROM range, per-layer color RAM, SLIP pointers)
 | `360020`   | W   |      | Sound Processor reset |
 | `360030`   | W   | D0–D7 | Write Sound Processor (SCOM) |
 
+**Findings from the full schematic re-scan (sheets 2–5), 2026-08-07:**
+- **Both CPUs are 68010s** (sheet 4: 45J `U68010`; sheet 5: 20P `U68010`) — MAME models
+  them as 68000. TG68K `CPU=>"01"` throughout. Exception frames differ; this matters.
+- **Interrupts are autovectored** via VPA asserted on FC=111 (sheet 4, 60L/55L). VBLANK
+  /VINT hits both CPUs (IRQ4); /SINT is the sound IRQ (IRQ6, main CPU only).
+- **SLAPSTIC is physically present** (sheet 4: 60E `SLAPSTK5`, driving ROM bank selects
+  BS13/BS14, `/STIK` decode) even though MAME's eprom map shows no slapstic window and
+  boots without it. Watch-item for hardware bring-up.
+- **SCOM is a serial link chip** (sheet 2): sound comms travel over a serial cable
+  (JSCM: /DATA /CLK FIN FOUT /SCBSY FULL /SINT) to the stand-alone audio PCB — not a
+  parallel latch. Real JSA integration must model or bypass this serializer.
+- **I/O details (sheet 3)**: buttons are DUCK/SPARE/FIRE/**JUMP** on CD11–CD8; status
+  bits at 260010: D4 ADEOC, D3 /SCBSY, D2 /SINT, D1 S-TEST (1=normal play), D0 /VBLANK;
+  ADC is an ADC0809 (IN0–3 = P1-U/D, P1-L/R, P2-U/D, P2-L/R). 360010 latch: CD5 VIDOFF,
+  CD4–1 intensity IM3–0, CD0 /ERESET.
+- **Common ROM lives on the ECPU side** (sheet 5: `CROM` U27512 pair at 40K/50K) with a
+  wait-state arbiter (EWAI / PAL16L8 50P) — both CPUs access it with waits; our SDRAM
+  request/ack arbitration reproduces the same contract.
+
 **Design notes vs Atari System 1 (our RTL base):**
 - Dual 68000 sharing RAM at `160000–16FFFF` + `EXTRA CPU reset` bit — System 1 is single-CPU.
 - **Analog** Hall-effect joystick via ADC0–3 → the Pocket d-pad/stick must be mapped to

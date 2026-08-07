@@ -42,7 +42,7 @@ begin
 
     ----------------------------------------------------------------------------
     cpu : entity work.TG68K
-        generic map ( CPU => "00" )            -- 68000 (Escape); System 1 used 68010
+        generic map ( CPU => "01" )            -- 68000 (Escape); System 1 used 68010
         port map (
             CLK => clk, RESET => resn, HALT => resn, BERR => '0',
             IPL => "111", ADDR => cpu_addr, FC => fc,
@@ -118,6 +118,26 @@ begin
             n := n + 1;
             exit when n >= 20 or done;
         end loop;
+        -- keep running deeper into boot, logging only I/O (26xxxx/36xxxx) traffic so we
+        -- can see whether boot blocks on the sound (SCOM) handshake
+        while n < 4000 loop
+            wait until falling_edge(as_n);
+            wait until dtack_n = '0';
+            wait until rising_edge(clk);
+            if cpu_addr(23 downto 16) = x"26" or cpu_addr(23 downto 16) = x"36"
+               or cpu_addr(23 downto 16) = x"2E" then
+                if rw_n = '1' then
+                    report "io  " & integer'image(n) & " R addr=0x"
+                           & to_hstring(cpu_addr(23 downto 0)) & " data=0x" & to_hstring(cpu_di);
+                else
+                    report "io  " & integer'image(n) & " W addr=0x"
+                           & to_hstring(cpu_addr(23 downto 0)) & " data=0x" & to_hstring(cpu_do);
+                end if;
+            end if;
+            n := n + 1;
+        end loop;
+        report "deep-boot scan done at cycle " & integer'image(n)
+               & ", last PC region 0x" & to_hstring(cpu_addr(23 downto 0));
         if pc_hit then
             report "BRING-UP OK: CPU fetched at reset PC 0x000694 (executing ROM)" severity note;
         else

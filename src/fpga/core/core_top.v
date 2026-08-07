@@ -285,15 +285,7 @@ assign cram1_we_n = 1;
 assign cram1_ub_n = 1;
 assign cram1_lb_n = 1;
 
-assign dram_a = 'h0;
-assign dram_ba = 'h0;
-assign dram_dq = {16{1'bZ}};
-assign dram_dqm = 'h0;
-assign dram_clk = 'h0;
-assign dram_cke = 'h0;
-assign dram_ras_n = 'h1;
-assign dram_cas_n = 'h1;
-assign dram_we_n = 'h1;
+// dram is driven by sdram_simple + escape integration below
 
 assign sram_a = 'h0;
 assign sram_dq = {16{1'bZ}};
@@ -590,12 +582,20 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
             if(y_count >= VID_V_BPORCH && y_count < VID_V_ACTIVE+VID_V_BPORCH) begin
                 // data enable. this is the active region of the line
                 vidout_de <= 1;
-                
-                vidout_rgb[23:16] <= 8'd60;
-                vidout_rgb[15:8]  <= 8'd60;
-                vidout_rgb[7:0]   <= 8'd60;
-                
-            end 
+
+                // boot-status debug overlay ("hello world" indicator):
+                //   top band    : green = video CPU fetched its reset PC, red = not
+                //   middle band : green = extra CPU released (360010 D0), red = not
+                //   bottom band : gray reference
+                if(visible_y < 'd80) begin
+                    vidout_rgb <= dbg_v_pc_fetch ? 24'h00A000 : 24'hA00000;
+                end else if(visible_y < 'd160) begin
+                    vidout_rgb <= dbg_e_running ? 24'h00A000 : 24'hA00000;
+                end else begin
+                    vidout_rgb <= 24'h3C3C3C;
+                end
+
+            end
         end
     end
 end
@@ -655,6 +655,8 @@ end
 
     wire    clk_sys_7159;
     wire    clk_sys_7159_90deg;
+    wire    clk_85_909;
+    wire    clk_85_909_chip;
     
     wire    pll_core_locked;
     wire    pll_core_locked_s;
@@ -666,10 +668,151 @@ mf_pllbase mp1 (
     
     .outclk_0       ( clk_sys_7159 ),
     .outclk_1       ( clk_sys_7159_90deg ),
+    .outclk_2       ( clk_85_909 ),
+    .outclk_3       ( clk_85_909_chip ),
     
     .locked         ( pll_core_locked )
 );
 
 
-    
+
+///////////////////////////////////////////////
+// Atari Dual 68k integration: SDRAM + ROM download + escape_core
+///////////////////////////////////////////////
+
+assign dram_clk = clk_85_909_chip;
+
+    // ---------------- bridge ROM download (0x10000000 region) -> SDRAM
+    // Each bridge write is one 32-bit big-endian word = two 16-bit SDRAM words.
+    reg         dl_req_74;          // toggle
+    reg  [24:0] dl_addr_74;
+    reg  [31:0] dl_data_74;
+always @(posedge clk_74a) begin
+    if(bridge_wr && bridge_addr[31:24] == 8'h10) begin
+        dl_addr_74 <= bridge_addr[24:0];
+        dl_data_74 <= bridge_wr_data;
+        dl_req_74  <= ~dl_req_74;
+    end
+end
+
+    wire dl_req_s;
+synch_3 s_dl(dl_req_74, dl_req_s, clk_85_909);
+
+    reg        dl_req_last;
+    reg  [1:0] dl_phase;      // 0 idle, 1 write hi word, 2 write lo word
+    reg        sd_wr_req;
+    reg [24:0] sd_wr_addr;
+    reg [15:0] sd_wr_data;
+    wire       sd_wr_ack;
+always @(posedge clk_85_909) begin
+    case(dl_phase)
+    2'd0: begin
+        if(dl_req_s != dl_req_last) begin
+            dl_req_last <= dl_req_s;
+            sd_wr_addr <= dl_addr_74;
+            sd_wr_data <= dl_data_74[31:16];
+            sd_wr_req  <= 1;
+            dl_phase   <= 2'd1;
+        end
+    end
+    2'd1: begin
+        if(sd_wr_ack) begin
+            sd_wr_req <= 0;
+            dl_phase  <= 2'd2;
+        end
+    end
+    2'd2: begin
+        if(!sd_wr_ack) begin
+            sd_wr_addr <= sd_wr_addr + 25'd2;
+            sd_wr_data <= dl_data_74[15:0];
+            sd_wr_req  <= 1;
+            dl_phase   <= 2'd3;
+        end
+    end
+    2'd3: begin
+        if(sd_wr_ack) begin
+            sd_wr_req <= 0;
+            dl_phase  <= 2'd0;
+        end
+    end
+    endcase
+end
+
+    // ---------------- escape_core ROM fetch (7.159 domain) -> SDRAM (85.9 domain)
+    wire [23:0] core_rom_addr;
+    wire        core_rom_req;
+    wire        core_rom_req_s;
+    reg         core_rom_ack_85;
+    wire        core_rom_ack_s;
+    wire [15:0] sd_rd_data;
+    reg  [15:0] core_rom_data;
+    reg         sd_rd_req;
+    wire        sd_rd_ack;
+synch_3 s_rr(core_rom_req, core_rom_req_s, clk_85_909);
+synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
+
+always @(posedge clk_85_909) begin
+    if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
+        sd_rd_req <= 1;
+    end
+    if(sd_rd_req && sd_rd_ack) begin
+        sd_rd_req <= 0;
+        core_rom_data <= sd_rd_data;
+        core_rom_ack_85 <= 1;
+    end
+    if(!core_rom_req_s) core_rom_ack_85 <= 0;
+end
+
+    // ---------------- SDRAM controller
+    wire sdram_init_done;
+sdram_simple sdr (
+    .clk        ( clk_85_909 ),
+    .reset_n    ( pll_core_locked ),
+    .dram_a     ( dram_a ),
+    .dram_ba    ( dram_ba ),
+    .dram_dq    ( dram_dq ),
+    .dram_dqm   ( dram_dqm ),
+    .dram_cas_n ( dram_cas_n ),
+    .dram_ras_n ( dram_ras_n ),
+    .dram_we_n  ( dram_we_n ),
+    .dram_cke   ( dram_cke ),
+    .wr_req     ( sd_wr_req ),
+    .wr_ack     ( sd_wr_ack ),
+    .wr_addr    ( sd_wr_addr ),
+    .wr_data    ( sd_wr_data ),
+    .rd_req     ( sd_rd_req ),
+    .rd_ack     ( sd_rd_ack ),
+    .rd_addr    ( {1'b0, core_rom_addr} ),
+    .rd_data    ( sd_rd_data ),
+    .init_done  ( sdram_init_done )
+);
+
+    // ---------------- core reset: wait for ROM fully downloaded + sdram up
+    wire dataslot_allcomplete_s, sdram_init_done_s;
+synch_3 s_ac(dataslot_allcomplete, dataslot_allcomplete_s, clk_sys_7159);
+synch_3 s_id(sdram_init_done, sdram_init_done_s, clk_sys_7159);
+    wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s;
+
+    // vblank from the raster generator
+    wire vblank_w = ~((y_count >= VID_V_BPORCH) && (y_count < VID_V_BPORCH+VID_V_ACTIVE));
+
+    wire dbg_v_pc_fetch, dbg_e_running;
+escape_core ecore (
+    .clk        ( clk_sys_7159 ),
+    .reset_n    ( core_reset_n ),
+    .rom_addr   ( core_rom_addr ),
+    .rom_data   ( core_rom_data ),
+    .rom_req    ( core_rom_req ),
+    .rom_ack    ( core_rom_ack_s ),
+    .vblank_in  ( vblank_w ),
+    // {duck, spare, fire, jump} = Pocket {X, -, B, A}   (schematic sheet 3: CD11..CD8)
+    .p1_buttons ( {cont1_key[6], 1'b0, cont1_key[5], cont1_key[4]} ),
+    .p2_buttons ( 4'b0000 ),
+    .alpha_vaddr( 11'd0 ),
+    .alpha_vdata(  ),
+    .dbg_v_pc_fetch ( dbg_v_pc_fetch ),
+    .dbg_e_running  ( dbg_e_running )
+);
+
 endmodule
+
