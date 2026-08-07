@@ -36,7 +36,7 @@ begin
     a24  <= cpu_addr(23 downto 0);
 
     cpu : entity work.TG68K
-        generic map ( CPU => "00" )
+        generic map ( CPU => "01" )
         port map (
             CLK => clk, RESET => resn, HALT => resn, BERR => '0',
             IPL => "111", ADDR => cpu_addr, FC => fc,

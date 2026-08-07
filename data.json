@@ -8,7 +8,10 @@
                 "required": true,
                 "parameters": "0x00000000",
                 "filename": "atari_escape.rom",
-                "extensions": ["rom"]
+                "extensions": [
+                    "rom"
+                ],
+                "address": "0x10000000"
             }
         ]
     }
