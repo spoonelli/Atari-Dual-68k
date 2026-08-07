@@ -80,15 +80,28 @@ begin
         wait;
     end process;
 
-    trace : process(clk)
+    -- CPU-bus level trace via VHDL-2008 external names: log each completed bus cycle
+    cpu_trace : process(clk)
+        alias xv_addr  is << signal .tb_escape_core.uut.v_addr  : std_logic_vector(31 downto 0) >>;
+        alias xv_as_n  is << signal .tb_escape_core.uut.v_as_n  : std_logic >>;
+        alias xv_rw_n  is << signal .tb_escape_core.uut.v_rw_n  : std_logic >>;
+        alias xv_dtack is << signal .tb_escape_core.uut.v_dtack_n : std_logic >>;
+        alias xv_di    is << signal .tb_escape_core.uut.v_di    : std_logic_vector(15 downto 0) >>;
         variable n : integer := 0;
+        variable in_cycle : boolean := false;
     begin
         if rising_edge(clk) then
-            if rom_ack='1' and n < 12 then
-                report "romtx " & integer'image(n) & " addr=0x" & to_hstring(rom_addr)
-                       & " data=0x" & to_hstring(rom_data);
+            if xv_as_n='0' and xv_dtack='0' and not in_cycle and n < 25 then
+                if xv_rw_n='1' then
+                    report "cpu " & integer'image(n) & " R a=0x" & to_hstring(xv_addr(23 downto 0))
+                           & " di=0x" & to_hstring(xv_di);
+                else
+                    report "cpu " & integer'image(n) & " W a=0x" & to_hstring(xv_addr(23 downto 0));
+                end if;
                 n := n + 1;
+                in_cycle := true;
             end if;
+            if xv_as_n='1' then in_cycle := false; end if;
         end if;
     end process;
 

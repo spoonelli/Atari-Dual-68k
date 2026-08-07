@@ -71,6 +71,7 @@ architecture rtl of escape_core is
     signal rom_addr_i : std_logic_vector(23 downto 0);
     signal rom_req_i  : std_logic;
     signal v_rom_pend, e_rom_pend, v_rom_dtack, e_rom_dtack : std_logic;
+    signal v_rom_hold, e_rom_hold : std_logic_vector(15 downto 0);
 
     signal shr_qa, shr_qb : std_logic_vector(15 downto 0);
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
@@ -143,12 +144,18 @@ begin
                             rom_req_i <= '1';
                         end if;
                     when OWN_V =>
-                        if rom_ack='1' then
-                            rom_req_i <= '0'; v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
+                        if v_as_n='1' then                       -- CPU ended cycle: abort
+                            rom_req_i <= '0'; rom_owner <= OWN_IDLE;
+                        elsif rom_ack='1' then
+                            rom_req_i <= '0'; v_rom_hold <= rom_data;
+                            v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                         end if;
                     when OWN_E =>
-                        if rom_ack='1' then
-                            rom_req_i <= '0'; e_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
+                        if e_as_n='1' then
+                            rom_req_i <= '0'; rom_owner <= OWN_IDLE;
+                        elsif rom_ack='1' then
+                            rom_req_i <= '0'; e_rom_hold <= rom_data;
+                            e_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                         end if;
                 end case;
             end if;
@@ -238,7 +245,7 @@ begin
 
     ---------------------------------------------------------------- read muxes
     -- I/O: 260000 P1 (D11-D8), 260010 status+P2, 260020-26 ADC (centered), 260030 SCOM
-    v_di <= rom_data when v_sel_rom='1' else
+    v_di <= v_rom_hold when v_sel_rom='1' else
             shr_qa   when v_sel_ram='1' else
             pf_q     when v_sel_pf='1' else
             mo_q     when v_sel_mo='1' else
@@ -258,7 +265,7 @@ begin
             x"0000" when v_sel_io='1' else
             (others => '0');
 
-    e_di <= rom_data when e_sel_rom='1' else
+    e_di <= e_rom_hold when e_sel_rom='1' else
             shr_qb   when e_sel_ram='1' else
             (others => '0');
 
