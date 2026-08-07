@@ -37,3 +37,7 @@ sim/work/
 
 # GHDL work library
 sim/build/
+
+# Assembled ROM images (user-supplied data, never committed)
+*.rom
+dist/assets/**/*.rom
