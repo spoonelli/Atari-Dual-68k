@@ -14,6 +14,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 RBF="${1:?usage: package.sh <bitstream.rbf_r> [out.zip]}"
 OUT="${2:-$REPO/output/AtariDual68k-pocket.zip}"
+case "$OUT" in /*) ;; *) OUT="$PWD/$OUT";; esac
 
 AUTHOR="spoonelli"
 SHORT="Atari Dual 68k"           # must match core.json metadata.shortname
