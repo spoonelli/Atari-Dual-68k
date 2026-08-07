@@ -1,10 +1,9 @@
 name: Build core (Quartus)
 
-# Compiles the Cyclone V bitstream. Runs the compile INSIDE our Quartus Docker image
-# (docker/Dockerfile) — the same image validated locally to contain the Cyclone V
-# device. On the native-x86 GitHub runner there is no emulation, so quartus_map runs
-# cleanly. The image layers (incl. the ~3 GB Quartus download) are cached via GHA so
-# only the first build is slow.
+# Compiles the Cyclone V bitstream inside theypsilon/quartus-lite-c5:18.1 — a
+# community-maintained Quartus Lite 18.1 + Cyclone V image (purpose-built for Pocket
+# cores). Our own install was subtly incomplete (quartus_map crashed even on native
+# x86); this image is known-good. Runs on the native-x86 runner, so no emulation.
 
 on:
   push:
@@ -21,21 +20,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Quartus image (cached layers)
-        uses: docker/build-push-action@v6
-        with:
-          context: docker
-          load: true
-          tags: quartus-escape:local
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Compile ap_core
         run: |
-          docker run --rm -v "$PWD":/work -w /work/src/fpga quartus-escape:local \
+          docker run --rm -v "$PWD":/work -w /work/src/fpga \
+            theypsilon/quartus-lite-c5:18.1 \
             quartus_sh --flow compile ap_core
 
       - name: Bit-reverse .rbf -> .rbf_r

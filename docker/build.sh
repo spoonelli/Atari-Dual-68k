@@ -1,24 +1,20 @@
 #!/usr/bin/env bash
-# Compile the core locally with Quartus in Docker (Quartus can't run on macOS).
-# First run builds the Quartus image (large/slow under x86 emulation); it is then cached.
+# Compile the core with Quartus in Docker, using the community Quartus Lite 18.1 +
+# Cyclone V image (theypsilon/quartus-lite-c5:18.1). On Apple Silicon this runs under
+# x86 emulation, which can crash quartus_map during synthesis — the reliable build is
+# CI (.github/workflows/build.yml) on a native-x86 runner. This script is for machines
+# where the container runs natively (x86 Linux) or to try locally.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-IMAGE="atari-dual-68k-quartus:18.1"
+IMAGE="theypsilon/quartus-lite-c5:18.1"
 PLATFORM="linux/amd64"
 
-# 1. Build the Quartus image (Docker reuses cached layers; the ~3 GB download layer
-#    only runs the first time). Safe to run every time.
-echo ">> Building/refreshing Quartus Lite 18.1 image..."
-docker build --platform "$PLATFORM" -t "$IMAGE" "$REPO_ROOT/docker"
-
-# 2. Compile ap_core (revision defined in src/fpga/ap_core.qsf)
-echo ">> Compiling ap_core with Quartus..."
+echo ">> Compiling ap_core with Quartus ($IMAGE)..."
 docker run --rm --platform "$PLATFORM" \
   -v "$REPO_ROOT":/work -w /work/src/fpga \
   "$IMAGE" quartus_sh --flow compile ap_core
 
-# 3. Bit-reverse .rbf -> .rbf_r for the Pocket loader (host python3)
 RBF="$REPO_ROOT/src/fpga/output_files/ap_core.rbf"
 OUT="$REPO_ROOT/output/bitstream.rbf_r"
 if [ ! -f "$RBF" ]; then
