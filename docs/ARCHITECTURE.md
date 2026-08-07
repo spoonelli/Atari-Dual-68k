@@ -133,8 +133,20 @@ Reusable blocks (already in the System 1 core unless noted):
 6. **Video** — adapt motion objects to **SLIP pointers**; per-layer color RAM; 336×240.
 7. **Sound** — JSA-I via SCOM mailbox: 6502 + jt51 (YM2151) + TMS5220 (+ POKEY if present).
 8. **Inputs** — map Pocket d-pad/stick to the analog Hall-effect joystick (ADC0–3).
-9. **ROM loading** — `data.json` slots + `.mra`-style manifest; user-supplied dumps only.
+9. **ROM loading** — *assembler + data slot done*: `support/build_rom.py` builds one
+   0x220000 SDRAM image from user dumps; `data.json` declares the slot (see docs/ROMS.md).
+   **Remaining:** core-side SDRAM memory controller to serve it (part of step 6/core_top).
 10. **Variants** — eprom / eprom2 / klaxp / guts (JSA-II adds OKI6295).
+
+## Big remaining phase: core_top integration (hardware path)
+
+Everything above the line is verified in GHDL sim. Turning it into a core that runs on
+the Pocket is a large, separate effort: an **SDRAM memory controller** (ROMs are ~2 MB,
+too big for BRAM), wiring the CPUs + decoder + memories + **Escape-specific video**
+(playfield/alpha/motion-objects reading VRAM, per-layer palette, SLIP pointers) into the
+Verilog `core_top`, PLL clocking, and APF video/audio output. This is multi-step RTL and
+its final validation needs real hardware. Sim (fx68k/TG68K + our RTL) de-risks each piece
+first; CI (`theypsilon/quartus-lite-c5`) gives fit/timing feedback per push.
 
 ## ROM strategy
 
