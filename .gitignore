@@ -41,3 +41,7 @@ sim/build/
 # Assembled ROM images (user-supplied data, never committed)
 *.rom
 dist/assets/**/*.rom
+
+# Built release packages + stale bitstreams
+output/*.zip
+output/*.rbf_r

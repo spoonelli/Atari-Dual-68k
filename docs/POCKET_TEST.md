@@ -15,7 +15,11 @@ Native Escape raster (456×262 @ ~59.9 Hz, 336×240 visible).
 
 1. **Get the bitstream**: download the `bitstream` artifact from the latest green
    [Actions run](https://github.com/spoonelli/Atari-Dual-68k/actions) → unzip →
-   `bitstream.rbf_r`.
+   `bitstream.rbf_r`. Then build the SD package (correct Analogue layout, no ROM):
+   ```bash
+   ./support/package.sh path/to/bitstream.rbf_r
+   ```
+   and merge the resulting zip's `Cores/ Platforms/ Assets/` onto the SD card root.
 2. **SD card layout** (Pocket firmware 1.1+, jailbroken for unofficial cores):
    ```
    /Cores/spoonelli.Atari Dual 68k/
