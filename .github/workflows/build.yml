@@ -1,11 +1,10 @@
 name: Build core (Quartus)
 
-# Compiles the Cyclone V bitstream in the cloud, because Quartus does not run on macOS.
-# Produces `bitstream.rbf_r` as a downloadable artifact on every push / manual run.
-#
-# NOTE: The "Install Quartus" step is the one piece to validate on the first run
-# (image tag / download URL / disk space). The compile + bit-reverse steps below are
-# correct for this project (revision `ap_core`, top `apf_top`, Quartus 18.1 Lite).
+# Compiles the Cyclone V bitstream. Runs the compile INSIDE our Quartus Docker image
+# (docker/Dockerfile) — the same image validated locally to contain the Cyclone V
+# device. On the native-x86 GitHub runner there is no emulation, so quartus_map runs
+# cleanly. The image layers (incl. the ~3 GB Quartus download) are cached via GHA so
+# only the first build is slow.
 
 on:
   push:
@@ -22,51 +21,34 @@ jobs:
         with:
           submodules: recursive
 
-      # --- Install Quartus Prime Lite 18.1 (Cyclone V) -----------------------
-      # Uses Intel's public archive installer. Large download; first run validates it.
-      - name: Cache Quartus
-        id: cache-quartus
-        uses: actions/cache@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Quartus image (cached layers)
+        uses: docker/build-push-action@v6
         with:
-          path: /opt/intelFPGA_lite/18.1
-          key: quartus-lite-18.1-cyclonev
+          context: docker
+          load: true
+          tags: quartus-escape:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Install Quartus Prime Lite 18.1
-        if: steps.cache-quartus.outputs.cache-hit != 'true'
-        run: |
-          set -e
-          sudo apt-get update
-          sudo apt-get install -y libc6-i386 lib32ncurses6 libxext6 libxft2 || true
-          BASE="https://downloads.intel.com/akdlm/software/acdsinst/18.1std/625/ib_installers"
-          curl -fL "$BASE/QuartusLiteSetup-18.1.0.625-linux.run" -o quartus.run
-          curl -fL "$BASE/cyclonev-18.1.0.625.qdz" -o cyclonev.qdz
-          chmod +x quartus.run
-          ./quartus.run --mode unattended --unattendedmodeui none \
-            --installdir /opt/intelFPGA_lite/18.1 \
-            --accept_eula 1 --disable-components quartus_help
-
-      - name: Add Quartus to PATH
-        run: echo "/opt/intelFPGA_lite/18.1/quartus/bin" >> "$GITHUB_PATH"
-
-      # --- Compile -----------------------------------------------------------
       - name: Compile ap_core
-        working-directory: src/fpga
-        run: quartus_sh --flow compile ap_core
+        run: |
+          docker run --rm -v "$PWD":/work -w /work/src/fpga quartus-escape:local \
+            quartus_sh --flow compile ap_core
 
-      # --- Package -----------------------------------------------------------
       - name: Bit-reverse .rbf -> .rbf_r
         run: |
+          test -f src/fpga/output_files/ap_core.rbf
+          mkdir -p output
           python3 support/reverse_bits.py \
-            src/fpga/output_files/ap_core.rbf \
-            dist/cores/bitstream.rbf_r || \
-          python3 support/reverse_bits.py \
-            src/fpga/output_files/ap_core.rbf \
-            bitstream.rbf_r
+            src/fpga/output_files/ap_core.rbf output/bitstream.rbf_r
 
       - name: Upload bitstream
         uses: actions/upload-artifact@v4
         with:
           name: bitstream
           path: |
-            **/bitstream.rbf_r
+            output/bitstream.rbf_r
             src/fpga/output_files/ap_core.rbf
