@@ -68,6 +68,7 @@ architecture rtl of escape_core is
 
     type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E);
     signal rom_owner : rom_owner_t;
+    signal last_was_v : std_logic;   -- fair round-robin: alternate priority
     signal rom_addr_i : std_logic_vector(23 downto 0);
     signal rom_req_i  : std_logic;
     signal v_rom_pend, e_rom_pend, v_rom_dtack, e_rom_dtack : std_logic;
@@ -125,22 +126,25 @@ begin
     begin
         if rising_edge(clk) then
             if reset_n='0' then
-                rom_owner <= OWN_IDLE; rom_req_i <= '0';
+                rom_owner <= OWN_IDLE; rom_req_i <= '0'; last_was_v <= '0';
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
             else
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
                 case rom_owner is
                     when OWN_IDLE =>
+                        -- fair round-robin: whoever was NOT served last gets priority,
+                        -- otherwise the video CPU's constant fetch stream starves the
+                        -- extra CPU (observed on hardware as an ERESET retry loop)
                         if rom_ack='1' then
                             null;                        -- wait out previous ack (4-phase)
-                        elsif v_rom_pend='1' then
-                            rom_owner <= OWN_V;
-                            rom_addr_i <= x"0" & v_addr(19 downto 1) & '0';
-                            rom_req_i <= '1';
-                        elsif e_rom_pend='1' then
-                            rom_owner <= OWN_E;
+                        elsif e_rom_pend='1' and (last_was_v='1' or v_rom_pend='0') then
+                            rom_owner <= OWN_E; last_was_v <= '0';
                             rom_addr_i <= std_logic_vector(
                                 unsigned(x"0" & e_addr(19 downto 1) & '0') + x"080000");
+                            rom_req_i <= '1';
+                        elsif v_rom_pend='1' then
+                            rom_owner <= OWN_V; last_was_v <= '1';
+                            rom_addr_i <= x"0" & v_addr(19 downto 1) & '0';
                             rom_req_i <= '1';
                         end if;
                     when OWN_V =>
