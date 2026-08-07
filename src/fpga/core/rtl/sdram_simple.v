@@ -1,6 +1,6 @@
 //
 // Minimal single-beat SDRAM controller for the Pocket's MT48LC16M16A2 (16-bit),
-// running in the 85.909 MHz domain. Two clients over 4-phase toggle-free
+// running in the 28.636 MHz SDRAM domain (4x CPU; generous timing margins). Two clients over 4-phase toggle-free
 // level handshakes (both synchronized externally):
 //   - write port: ROM download from the APF bridge
 //   - read port:  escape_core program-ROM fetches
@@ -99,7 +99,7 @@ module sdram_simple (
         end else begin
             cmd(CMD_NOP);
             refresh_ctr <= refresh_ctr + 10'd1;
-            if (refresh_ctr == 10'd500) begin      // ~5.8us @ 85.9MHz
+            if (refresh_ctr == 10'd200) begin      // ~7us @ 28.6MHz
                 refresh_due <= 1'b1;
                 refresh_ctr <= 10'd0;
             end

@@ -583,17 +583,21 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                 // data enable. this is the active region of the line
                 vidout_de <= 1;
 
-                // boot-status debug overlay ("hello world" indicator):
-                //   top band    : green = video CPU fetched its reset PC, red = not
-                //   middle band : green = extra CPU released (360010 D0), red = not
-                //   bottom band : gray reference
-                if(visible_y < 'd80) begin
-                    vidout_rgb <= dbg_v_pc_fetch ? 24'h00A000 : 24'hA00000;
-                end else if(visible_y < 'd160) begin
-                    vidout_rgb <= dbg_e_running ? 24'h00A000 : 24'hA00000;
-                end else begin
-                    vidout_rgb <= 24'h3C3C3C;
-                end
+                // diagnostic bands, top to bottom (30 px each), green=ok red=fail:
+                //   1 SDRAM init done          2 ROM slot download complete
+                //   3 SDRAM self-check done    4 self-check DATA OK (word0==0x003F)
+                //   5 CPU issued a ROM fetch   6 video CPU executed reset PC
+                //   7 extra CPU released       8 gray reference
+                case(visible_y[7:5])
+                    3'd0: vidout_rgb <= sdram_init_done_s       ? 24'h00A000 : 24'hA00000;
+                    3'd1: vidout_rgb <= dataslot_allcomplete_s  ? 24'h00A000 : 24'hA00000;
+                    3'd2: vidout_rgb <= chk_done_s              ? 24'h00A000 : 24'hA00000;
+                    3'd3: vidout_rgb <= chk_ok_s                ? 24'h00A000 : 24'hA00000;
+                    3'd4: vidout_rgb <= rom_req_seen            ? 24'h00A000 : 24'hA00000;
+                    3'd5: vidout_rgb <= dbg_v_pc_fetch          ? 24'h00A000 : 24'hA00000;
+                    3'd6: vidout_rgb <= dbg_e_running           ? 24'h00A000 : 24'hA00000;
+                    default: vidout_rgb <= 24'h3C3C3C;
+                endcase
 
             end
         end
@@ -655,8 +659,8 @@ end
 
     wire    clk_sys_7159;
     wire    clk_sys_7159_90deg;
-    wire    clk_85_909;
-    wire    clk_85_909_chip;
+    wire    clk_sdram;
+    wire    clk_sdram_chip;
     
     wire    pll_core_locked;
     wire    pll_core_locked_s;
@@ -668,8 +672,8 @@ mf_pllbase mp1 (
     
     .outclk_0       ( clk_sys_7159 ),
     .outclk_1       ( clk_sys_7159_90deg ),
-    .outclk_2       ( clk_85_909 ),
-    .outclk_3       ( clk_85_909_chip ),
+    .outclk_2       ( clk_sdram ),
+    .outclk_3       ( clk_sdram_chip ),
     
     .locked         ( pll_core_locked )
 );
@@ -680,7 +684,7 @@ mf_pllbase mp1 (
 // Atari Dual 68k integration: SDRAM + ROM download + escape_core
 ///////////////////////////////////////////////
 
-assign dram_clk = clk_85_909_chip;
+assign dram_clk = clk_sdram_chip;
 
     // ---------------- bridge ROM download (0x10000000 region) -> SDRAM
     // Each bridge write is one 32-bit big-endian word = two 16-bit SDRAM words.
@@ -696,7 +700,7 @@ always @(posedge clk_74a) begin
 end
 
     wire dl_req_s;
-synch_3 s_dl(dl_req_74, dl_req_s, clk_85_909);
+synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
 
     reg        dl_req_last;
     reg  [1:0] dl_phase;      // 0 idle, 1 write hi word, 2 write lo word
@@ -704,7 +708,7 @@ synch_3 s_dl(dl_req_74, dl_req_s, clk_85_909);
     reg [24:0] sd_wr_addr;
     reg [15:0] sd_wr_data;
     wire       sd_wr_ack;
-always @(posedge clk_85_909) begin
+always @(posedge clk_sdram) begin
     case(dl_phase)
     2'd0: begin
         if(dl_req_s != dl_req_last) begin
@@ -748,25 +752,51 @@ end
     reg  [15:0] core_rom_data;
     reg         sd_rd_req;
     wire        sd_rd_ack;
-synch_3 s_rr(core_rom_req, core_rom_req_s, clk_85_909);
+synch_3 s_rr(core_rom_req, core_rom_req_s, clk_sdram);
 synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
 
-always @(posedge clk_85_909) begin
-    if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
+    // SDRAM self-check: after init + full ROM download, read word 0 and compare with
+    // the known first ROM word (0x003F = high word of the reset SP). Proves the
+    // download+readback path with no CPU involvement. Runs before the CPU is released.
+    reg        chk_done, chk_ok;
+    reg [1:0]  chk_state;
+    wire       allcomplete_sd;
+synch_3 s_acsd(dataslot_allcomplete, allcomplete_sd, clk_sdram);
+
+always @(posedge clk_sdram) begin
+    case(chk_state)
+    2'd0: if(sdram_init_done && allcomplete_sd) begin
         sd_rd_req <= 1;
+        chk_state <= 2'd1;
     end
-    if(sd_rd_req && sd_rd_ack) begin
+    2'd1: if(sd_rd_ack) begin
+        chk_ok    <= (sd_rd_data == 16'h003F);
         sd_rd_req <= 0;
-        core_rom_data <= sd_rd_data;
-        core_rom_ack_85 <= 1;
+        chk_state <= 2'd2;
     end
-    if(!core_rom_req_s) core_rom_ack_85 <= 0;
+    2'd2: if(!sd_rd_ack) begin
+        chk_done  <= 1;
+        chk_state <= 2'd3;
+    end
+    2'd3: begin
+        // CPU fetch service (only after self-check owns the port no longer)
+        if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
+            sd_rd_req <= 1;
+        end
+        if(sd_rd_req && sd_rd_ack) begin
+            sd_rd_req <= 0;
+            core_rom_data <= sd_rd_data;
+            core_rom_ack_85 <= 1;
+        end
+        if(!core_rom_req_s) core_rom_ack_85 <= 0;
+    end
+    endcase
 end
 
     // ---------------- SDRAM controller
     wire sdram_init_done;
 sdram_simple sdr (
-    .clk        ( clk_85_909 ),
+    .clk        ( clk_sdram ),
     .reset_n    ( pll_core_locked ),
     .dram_a     ( dram_a ),
     .dram_ba    ( dram_ba ),
@@ -782,7 +812,7 @@ sdram_simple sdr (
     .wr_data    ( sd_wr_data ),
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
-    .rd_addr    ( {1'b0, core_rom_addr} ),
+    .rd_addr    ( chk_done ? {1'b0, core_rom_addr} : 25'd0 ),
     .rd_data    ( sd_rd_data ),
     .init_done  ( sdram_init_done )
 );
@@ -791,7 +821,17 @@ sdram_simple sdr (
     wire dataslot_allcomplete_s, sdram_init_done_s;
 synch_3 s_ac(dataslot_allcomplete, dataslot_allcomplete_s, clk_sys_7159);
 synch_3 s_id(sdram_init_done, sdram_init_done_s, clk_sys_7159);
-    wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s;
+    wire chk_done_s, chk_ok_s;
+synch_3 s_cd(chk_done, chk_done_s, clk_sys_7159);
+synch_3 s_co(chk_ok,   chk_ok_s,   clk_sys_7159);
+    wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s & chk_done_s;
+
+    // sticky: CPU has issued at least one ROM fetch
+    reg rom_req_seen;
+always @(posedge clk_sys_7159) begin
+    if(!core_reset_n) rom_req_seen <= 0;
+    else if(core_rom_req) rom_req_seen <= 1;
+end
 
     // vblank from the raster generator
     wire vblank_w = ~((y_count >= VID_V_BPORCH) && (y_count < VID_V_BPORCH+VID_V_ACTIVE));
