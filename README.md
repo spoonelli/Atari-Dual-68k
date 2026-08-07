@@ -24,7 +24,7 @@ No game video or sound yet — the screen currently shows diagnostics, not the g
 | Native simulation (GHDL, no Quartus) | ✅ full boot verified pre-hardware |
 | ROM loading (data slot → SDRAM) | ✅ verified on hardware (self-check green) |
 | Video CPU (68010) | ✅ executes real code on hardware |
-| Extra CPU (68010) + shared RAM | 🔄 boots; fair-arbitration fix for SDRAM starvation in test |
+| Extra CPU (68010) + shared RAM | ✅ both CPUs run concurrently on hardware; handshake verified |
 | Video: raster/sync (456×262 native) | ✅ on hardware · game layers (alpha → playfield → motion objects) not started |
 | Sound (JSA-I: 6502 + YM2151 + TMS5220) | ⬜ stubbed (SCOM returns buffers-empty) |
 | Inputs | ✅ buttons mapped · ADC (Hall stick) stubbed centered |
