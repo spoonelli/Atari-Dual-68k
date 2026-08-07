@@ -1,4 +1,4 @@
-Atari Multi 68k
+Atari Dual 68k
 
 An openFPGA core for Atari Games' "Escape" arcade hardware (dual 68000):
 Escape from the Planet of the Robot Monsters (E.P.R.O.M.), plus the Klax
