@@ -124,8 +124,11 @@ Reusable blocks (already in the System 1 core unless noted):
 3. **[done]** Import base + native sim — System 1 RTL added as submodule; **GHDL** sim
    harness (`sim/`) runs on the Mac with no Quartus. 16/18 base modules elaborate; `SYNGEN`
    verified at **456 clocks/line == Escape's raster**. Verification path secured.
-4. **Memory map** — rework decode to Escape's map (sheet 16): ROM/RAM regions, SCOM, ADCs.
-5. **CPU** — dual 68000 + shared RAM at `160000–16FFFF` + `EXTRA CPU reset`.
+4. **[done]** Memory map — `escape_decode.vhd` (our RTL), 42-check testbench passes.
+5. **CPU** — *both* 68000s verified booting their real code in sim (`tb_escape_cpu`,
+   `tb_escape_extracpu`): main SP=0x3F7F00/PC=0x694, extra SP=0x16FFDC/PC=0x342, extra
+   polls the shared-RAM mailbox @0x16FFE0. **Remaining:** wire both onto one shared RAM
+   (arbitration) so the handshake completes + `EXTRA CPU reset` bit.
 6. **Video** — adapt motion objects to **SLIP pointers**; per-layer color RAM; 336×240.
 7. **Sound** — JSA-I via SCOM mailbox: 6502 + jt51 (YM2151) + TMS5220 (+ POKEY if present).
 8. **Inputs** — map Pocket d-pad/stick to the analog Hall-effect joystick (ADC0–3).
