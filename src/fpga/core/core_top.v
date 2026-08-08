@@ -704,10 +704,10 @@ end
 synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
 
     reg        dl_req_last;
-    reg  [1:0] dl_phase;      // 0 idle, 1 write hi word, 2 write lo word
+    reg  [1:0] dl_phase;      // 0 idle, 1 wait ack, 2 wait ack-drop
     reg        sd_wr_req;
     reg [24:0] sd_wr_addr;
-    reg [15:0] sd_wr_data;
+    reg [31:0] sd_wr_data;
     wire       sd_wr_ack;
 always @(posedge clk_sdram) begin
     case(dl_phase)
@@ -715,7 +715,7 @@ always @(posedge clk_sdram) begin
         if(dl_req_s != dl_req_last) begin
             dl_req_last <= dl_req_s;
             sd_wr_addr <= dl_addr_74;
-            sd_wr_data <= dl_data_74[31:16];
+            sd_wr_data <= dl_data_74;      // both halves: one burst write
             sd_wr_req  <= 1;
             dl_phase   <= 2'd1;
         end
@@ -727,19 +727,9 @@ always @(posedge clk_sdram) begin
         end
     end
     2'd2: begin
-        if(!sd_wr_ack) begin
-            sd_wr_addr <= sd_wr_addr + 25'd2;
-            sd_wr_data <= dl_data_74[15:0];
-            sd_wr_req  <= 1;
-            dl_phase   <= 2'd3;
-        end
+        if(!sd_wr_ack) dl_phase <= 2'd0;
     end
-    2'd3: begin
-        if(sd_wr_ack) begin
-            sd_wr_req <= 0;
-            dl_phase  <= 2'd0;
-        end
-    end
+    default: dl_phase <= 2'd0;
     endcase
 end
 
