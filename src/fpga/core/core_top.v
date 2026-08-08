@@ -585,7 +585,7 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
 
                 // alpha (text) layer, with a 6px diagnostic strip at the bottom:
                 // 7 segments left->right = init/slot/chk/ok/fetch/pc/extra
-                if(visible_y >= 'd228 && visible_y < 'd234) begin
+                if(diag_on && visible_y >= 'd228 && visible_y < 'd234) begin
                     // chk2_val bit display: 16 x 16px blocks from x=40 (MSB first)
                     if(visible_x >= 'd40 && visible_x < 'd296) begin
                         vidout_rgb <= chk2_val['d15 - ((visible_x - 'd40) >> 4)]
@@ -593,7 +593,7 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                     end else begin
                         vidout_rgb <= 24'h101010;
                     end
-                end else if(visible_y >= 'd234) begin
+                end else if(diag_on && visible_y >= 'd234) begin
                     case(visible_x[8:6])
                         3'd0: vidout_rgb <= sdram_init_done_s      ? 24'h00A000 : 24'hA00000;
                         3'd1: vidout_rgb <= dataslot_allcomplete_s ? 24'h00A000 : 24'hA00000;
@@ -603,7 +603,7 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                         3'd5: vidout_rgb <= (dbg_v_pc_fetch & dbg_e_running) ? 24'h00A000 : 24'hA00000;
                         default: vidout_rgb <= dbg_alpha_wr        ? 24'h00FF00 : 24'h404040;
                     endcase
-                end else if(in_hexrow) begin
+                end else if(diag_on && in_hexrow) begin
                     vidout_rgb <= hex_px ? 24'hFFFF00 : 24'h101040;
                 end else begin
                     vidout_rgb <= alpha_rgb;
@@ -773,6 +773,15 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg [15:0] probe0, probe1;      // words @0x000000 (expect 003F) and @0x110400 (expect 33CC)
 
     reg [23:0] recheck_ctr;
+    reg        vg_req_last, vg_done_85, cpu_owner;
+    reg [1:0]  vg_phase;
+    reg [31:0] vg_data;
+    wire       vg_req_s;
+    reg        vg_req_px;                 // pixel-domain request toggle
+    reg [23:0] vg_addr_px;                // stable while request in flight
+synch_3 s_vg(vg_req_px, vg_req_s, clk_sdram);
+    wire vg_done_s;
+synch_3 s_vgd(vg_done_85, vg_done_s, clk_sys_7159);
     reg [3:0]  chk_state;
     // char ROM DMA: combined image 0x110000..0x113FFF -> 8192x16 BRAM
     reg [13:0] chr_dma_word;         // word index 0..8191
@@ -840,12 +849,37 @@ always @(posedge clk_sdram) begin
         end
     end
     4'd10: begin
-        // CPU fetch service
-        if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
-            sd_rd_req <= 1;
+        // VIDEO gfx fetch: absolute priority over CPU (toggle req from pixel domain)
+        if(vg_req_s != vg_req_last && !sd_rd_req && !sd_rd_ack && vg_phase==2'd0) begin
+            vg_req_last <= vg_req_s;
+            sd_rd_req   <= 1;
+            vg_phase    <= 2'd1;
         end
-        if(sd_rd_req && sd_rd_ack) begin
+        if(vg_phase==2'd1 && sd_rd_ack) begin
+            vg_data[31:16] <= sd_rd_data;
             sd_rd_req <= 0;
+            vg_phase  <= 2'd2;
+        end
+        if(vg_phase==2'd2 && !sd_rd_ack) begin
+            sd_rd_req <= 1;
+            vg_phase  <= 2'd3;
+        end
+        if(vg_phase==2'd3 && sd_rd_ack) begin
+            vg_data[15:0] <= sd_rd_data;
+            sd_rd_req <= 0;
+            vg_done_85 <= ~vg_done_85;      // toggle-ack to pixel domain
+            vg_phase  <= 2'd0;
+        end
+        // CPU fetch service
+        if(vg_phase==2'd0 && vg_req_s == vg_req_last) begin
+            if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
+                sd_rd_req <= 1;
+                cpu_owner <= 1;
+            end
+        end
+        if(cpu_owner && sd_rd_req && sd_rd_ack) begin
+            sd_rd_req <= 0;
+            cpu_owner <= 0;
             core_rom_data <= sd_rd_data;
             core_rom_ack_85 <= 1;
         end
@@ -880,7 +914,8 @@ sdram_simple sdr (
     .wr_data    ( sd_wr_data ),
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
-    .rd_addr    ( (chk_state == 4'd1) ? 25'd0 :
+    .rd_addr    ( (chk_state == 4'd10 && !cpu_owner) ? {1'b0, vg_addr_px} :
+                  (chk_state == 4'd1) ? 25'd0 :
                   (chk_state == 4'd3) ? 25'h0110400 :
                   (chk_state == 4'd5) ? 25'h0110410 :
                   (chk_state == 4'd8 || chk_state == 4'd7) ? (25'h0110000 + {10'd0, chr_dma_word, 1'b0}) :
@@ -980,6 +1015,54 @@ end
     wire hex_px = hex_slot_on && hex_row[2'd3 - gx];
     wire in_hexrow = (visible_y >= 'd100) && (visible_y < 'd124) && (visible_x >= 'd44) && (visible_x < 'd268);
 
+    // ---------------- playfield pipeline (pixel domain)
+    // Prefetch 2 cells ahead: map lookup at phase 0, SDRAM gfx request at phase 3
+    // (chunky 4bpp row = 2 words via the priority video channel), show via
+    // fetch->show buffering at cell boundaries.
+    reg  [11:0] pf_vaddr;
+    wire [15:0] pf_vdata, pfx_vdata;
+    wire [8:0]  xscroll, yscroll;
+
+    wire [8:0] pf_y   = visible_y[8:0] + yscroll;           // scrolled row (mod 512)
+    wire [8:0] pf_x2  = vis_x[8:0] + 9'd16 + xscroll;       // scrolled col, 2 cells ahead
+    reg  [4:0] pfcol_q0, pfcol_q1, pfcol_show;              // {flip, color[3:0]}
+    reg  [31:0] pf_fetch, pf_show;
+    reg  vg_done_last;
+
+    always @(posedge clk_sys_7159) begin
+        case(vis_x[2:0])
+            3'd0: begin
+                pf_vaddr <= {pf_y[8:3], pf_x2[8:3]};        // map row*64 + col
+                // cell boundary: advance pipelines
+                pf_show    <= pf_fetch;
+                pfcol_show <= pfcol_q1;
+                pfcol_q1   <= pfcol_q0;
+            end
+            3'd3: begin
+                // request gfx for cell+2: chunky row = 4 bytes at code*32 + row*4
+                vg_addr_px <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
+                vg_req_px  <= ~vg_req_px;
+                pfcol_q0   <= {pf_vdata[15], pfx_vdata[11:8]};
+            end
+            default: ;
+        endcase
+        // capture SDRAM response whenever it lands
+        vg_done_last <= vg_done_s;
+        if(vg_done_s != vg_done_last) pf_fetch <= vg_data;
+    end
+
+    // pixel extraction: chunky nibbles px0..px7 across the 32-bit row; xflip reverses
+    wire [2:0] pf_n   = pfcol_show[4] ? (3'd7 - visible_x[2:0]) : visible_x[2:0];
+    reg  [3:0] pf_pix;
+    always @(*) begin
+        case(pf_n)
+            3'd0: pf_pix = pf_show[31:28]; 3'd1: pf_pix = pf_show[27:24];
+            3'd2: pf_pix = pf_show[23:20]; 3'd3: pf_pix = pf_show[19:16];
+            3'd4: pf_pix = pf_show[15:12]; 3'd5: pf_pix = pf_show[11:8];
+            3'd6: pf_pix = pf_show[7:4];   default: pf_pix = pf_show[3:0];
+        endcase
+    end
+
     // ---------------- alpha scanout pipeline (pixel clock domain)
     // char cell: 8x8. During pixel phases 4..7 of each cell we prefetch the NEXT cell:
     //   phase 4: present alpha map address    phase 5: latch alpha word (BRAM reg'd)
@@ -1018,7 +1101,7 @@ end
             default: test_code = 10'h000;
         endcase
     end
-    wire        inject   = (cell_row == 5'd0);
+    wire        inject   = (cell_row == 5'd0) && diag_on;
     wire [15:0] eff_alpha = inject ? {6'b000000, test_code} : alpha_vdata;
     reg         r_inject, a_inject;
 
@@ -1051,8 +1134,13 @@ end
     wire [1:0] pix = {msb, lsb};
 
     // pen -> color RAM (alpha section: pens 0..255)
-    wire [5:0] act_color = (pxn == 3'd0) ? a_color : r_color;
-    always @(posedge clk_sys_7159) color_vaddr <= {3'b000, act_color, pix};
+    wire [5:0] act_color  = (pxn == 3'd0) ? a_color : r_color;
+    wire       act_opaque = (pxn == 3'd0) ? a_word[15] : r_opaque;
+    wire       alpha_vis  = (pix != 2'b00) || act_opaque;
+    // pens: alpha 0..255 = {3'b000,color6,pix2}; playfield 512..767 = {3'b010,color4,pix4}
+    always @(posedge clk_sys_7159)
+        color_vaddr <= alpha_vis ? {3'b000, act_color, pix}
+                                 : {3'b010, pfcol_show[3:0], pf_pix};
 
     // palette: IRGB4444 with intensity: i=(I+1)*(4-intensity), ch8 = ch4*i/4
     wire [3:0] ints   = (eintensity > 4'd4) ? 4'd4 : eintensity;
@@ -1075,6 +1163,8 @@ end
                             inj_px2    ? inj_rgb    : {pal_r, pal_g, pal_b};
 
     wire dbg_v_pc_fetch, dbg_e_running, dbg_alpha_wr;
+    wire diag_on;
+synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
 escape_core ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
@@ -1090,6 +1180,12 @@ escape_core ecore (
     .alpha_vdata( alpha_vdata ),
     .color_vaddr( color_vaddr ),
     .color_vdata( color_vdata ),
+    .pf_vaddr   ( pf_vaddr ),
+    .pf_vdata   ( pf_vdata ),
+    .pfx_vaddr  ( pf_vaddr ),
+    .pfx_vdata  ( pfx_vdata ),
+    .xscroll_out( xscroll ),
+    .yscroll_out( yscroll ),
     .intensity_out( eintensity ),
     .video_off_out( evideo_off ),
     .dbg_v_pc_fetch ( dbg_v_pc_fetch ),

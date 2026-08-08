@@ -66,11 +66,27 @@ def main() -> int:
     b = rd(romdir, JSA); img[0x100000:0x100000+len(b)] = b
     # chars @0x110000
     b = rd(romdir, CHARS, 0x04000); img[0x110000:0x110000+len(b)] = b
-    # sprites @0x120000 (sequential, bit-inverted)
-    off = 0x120000
+    # sprites @0x120000: repacked to CHUNKY 4bpp for single-burst tile-row fetches.
+    # Source is 4 planar banks of 256KB (RGN_FRAC(n,4), plane0 = MSB), bit-inverted
+    # (ROMREGION_INVERT). Output: per tile-row, 4 bytes = 8 pixels of 4-bit chunky:
+    # byte0 = px0px1, byte1 = px2px3, byte2 = px4px5, byte3 = px6px7.
     inv = bytes(b ^ 0xFF for b in range(256))
+    planar = bytearray()
     for name in SPRITES:
-        b = rd(romdir, name).translate(inv); img[off:off+len(b)] = b; off += len(b)
+        planar += rd(romdir, name).translate(inv)
+    plane_sz = len(planar) // 4                       # 256KB per plane
+    chunky = bytearray(len(planar))
+    for i in range(plane_sz):                         # i = tile*8 + row
+        b0 = planar[i]; b1 = planar[plane_sz + i]
+        b2 = planar[2*plane_sz + i]; b3 = planar[3*plane_sz + i]
+        for half in range(4):                         # 2 pixels per output byte
+            n0 = half*2; n1 = half*2 + 1
+            p0 = (((b0 >> (7-n0)) & 1) << 3) | (((b1 >> (7-n0)) & 1) << 2) | \
+                 (((b2 >> (7-n0)) & 1) << 1) | ((b3 >> (7-n0)) & 1)
+            p1 = (((b0 >> (7-n1)) & 1) << 3) | (((b1 >> (7-n1)) & 1) << 2) | \
+                 (((b2 >> (7-n1)) & 1) << 1) | ((b3 >> (7-n1)) & 1)
+            chunky[i*4 + half] = (p0 << 4) | p1
+    img[0x120000:0x120000+len(chunky)] = chunky
 
     with open(out, "wb") as f:
         f.write(img)
