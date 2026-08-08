@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Assemble a single combined ROM image for the Atari Dual 68k core from user dumps.
 
+Input: a folder OR a standard MAME eprom.zip containing the original chip dumps.
+Every chip is CRC32-verified against known-good values; wrong dumps are refused.
+No ROM data ships with this repository - you must supply your own.
+
 The Pocket loads this one file into SDRAM via an APF data slot (see data.json); the
 core's memory controller reads each region at the offsets below. ROMs are ~2 MB total,
 far larger than on-chip BRAM, so they live in SDRAM. This tool never ships ROM data —
@@ -16,12 +20,41 @@ Combined image layout (SDRAM byte offsets):
 Usage: build_rom.py [romset_dir] [out_file]
   defaults: romset_dir = ../eprom (next to project), out_file = dist/assets/.../atari_escape.rom
 """
-import os, sys
+import os, sys, zipfile, zlib
+
+# known-good CRC32s (MAME eprom set) - build refuses chips that do not match
+CRCS = {
+"136069-3025.50a":"08888dec","136069-3024.40a":"29cb1e97","136069-4027.50b":"702241c9",
+"136069-4026.40b":"fecbf9e2","136069-4029.50d":"0f2f1502","136069-4028.40d":"bc6f6ae8",
+"136069-2033.40k":"130650f6","136069-2032.50k":"1da21ed8","136069-2035.10s":"deff6469",
+"136069-2034.10u":"5d7afca2","136069-1040.7b":"86e93695",
+"136069-1020.47s":"0de9d98d","136069-1013.43s":"8eb106ad","136069-1018.38s":"bf3d0e18",
+"136069-1023.32s":"48fb2e42","136069-1016.76s":"602d939d","136069-1011.70s":"f6c973af",
+"136069-1017.64s":"9cd52e30","136069-1022.57s":"4e2c2e7e","136069-1012.47u":"e7edcced",
+"136069-1010.43u":"9d3e144d","136069-1015.38u":"23f40437","136069-1021.32u":"2a47ff7b",
+"136069-1008.76u":"b0cead58","136069-1009.70u":"fbc3934b","136069-1014.64u":"0e07493b",
+"136069-1019.57u":"34f8f0ed","136069-1007.125d":"409d818e",
+}
+
+_zip = None   # set in main() when romdir is a zip
 
 def rd(romdir, name, size=0x10000):
-    b = open(os.path.join(romdir, name), "rb").read()
+    if _zip is not None:
+        try:
+            b = _zip.read(name)
+        except KeyError:
+            raise SystemExit(f"missing {name} in {romdir}")
+    else:
+        path = os.path.join(romdir, name)
+        if not os.path.exists(path):
+            raise SystemExit(f"missing {name} in {romdir}")
+        b = open(path, "rb").read()
     if len(b) != size:
         raise SystemExit(f"size mismatch {name}: {len(b)} != {size}")
+    crc = format(zlib.crc32(b) & 0xffffffff, "08x")
+    if name in CRCS and crc != CRCS[name]:
+        raise SystemExit(f"CRC mismatch {name}: got {crc}, expected {CRCS[name]} "
+                         f"(wrong or modified dump - refusing to build)")
     return b
 
 def interleave(hi, lo):                       # 16-bit big-endian: even=hi byte, odd=lo byte
@@ -46,6 +79,9 @@ def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
     repo = os.path.abspath(os.path.join(here, ".."))
     romdir = sys.argv[1] if len(sys.argv) > 1 else os.path.abspath(os.path.join(repo, "..", "eprom"))
+    global _zip
+    if romdir.lower().endswith(".zip") and os.path.isfile(romdir):
+        _zip = zipfile.ZipFile(romdir)
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
         repo, "dist", "assets", "atari_escape", "common", "atari_escape.rom")
     os.makedirs(os.path.dirname(out), exist_ok=True)

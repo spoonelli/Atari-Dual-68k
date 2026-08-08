@@ -5,12 +5,16 @@ This core ships **no ROM data**. You supply your own verified dumps of the Atari
 
 ## 1. Assemble the combined ROM
 
-Put your dumps in a folder (the individual `136069-*.xxx` chips, as in a MAME `eprom`
-romset), then:
+Point the tool at your original dumps — either a folder of the individual
+`136069-*.xxx` chips or a standard MAME `eprom.zip`:
 
 ```bash
-python3 support/build_rom.py /path/to/eprom dist/assets/atari_escape/common/atari_escape.rom
+python3 support/build_rom.py /path/to/eprom.zip dist/assets/atari_escape/common/atari_escape.rom
 ```
+
+Every chip is **CRC32-verified** against known-good values; wrong or modified dumps
+are refused. The output stays local: `.rom` files are git-ignored, the release
+packager refuses to include them, and a pre-commit hook blocks them outright.
 
 This produces `atari_escape.rom` (2,228,224 bytes). Layout (SDRAM byte offsets):
 
