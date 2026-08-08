@@ -585,7 +585,15 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
 
                 // alpha (text) layer, with a 6px diagnostic strip at the bottom:
                 // 7 segments left->right = init/slot/chk/ok/fetch/pc/extra
-                if(visible_y >= 'd234) begin
+                if(visible_y >= 'd228 && visible_y < 'd234) begin
+                    // chk2_val bit display: 16 x 16px blocks from x=40 (MSB first)
+                    if(visible_x >= 'd40 && visible_x < 'd296) begin
+                        vidout_rgb <= chk2_val['d15 - ((visible_x - 'd40) >> 4)]
+                                      ? 24'hFFFFFF : 24'h303030;
+                    end else begin
+                        vidout_rgb <= 24'h101010;
+                    end
+                end else if(visible_y >= 'd234) begin
                     case(visible_x[8:6])
                         3'd0: vidout_rgb <= sdram_init_done_s      ? 24'h00A000 : 24'hA00000;
                         3'd1: vidout_rgb <= dataslot_allcomplete_s ? 24'h00A000 : 24'hA00000;
@@ -750,6 +758,8 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     // the known first ROM word (0x003F = high word of the reset SP). Proves the
     // download+readback path with no CPU involvement. Runs before the CPU is released.
     reg        chk_done, chk_ok, chk2_ok;
+    reg [15:0] chk2_val;
+    reg [23:0] recheck_ctr;
     reg [2:0]  chk_state;
     // char ROM DMA: combined image 0x110000..0x113FFF -> 8192x16 BRAM
     reg [13:0] chr_dma_word;         // word index 0..8191
@@ -774,9 +784,11 @@ always @(posedge clk_sdram) begin
         chk_state <= 3'd7;
     end
     3'd7: if(sd_rd_ack) begin
+        chk2_val  <= sd_rd_data;
         chk2_ok   <= (sd_rd_data == 16'h3388);
         sd_rd_req <= 0;
-        chk_state <= 3'd3;          // now DMA the char ROM into BRAM
+        chr_dma_word <= 14'd0;
+        chk_state <= 3'd3;          // (re)DMA the char ROM into BRAM
     end
     3'd3: begin                     // issue one char-ROM read
         chr_we <= 0;
@@ -812,6 +824,13 @@ always @(posedge clk_sdram) begin
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
+        // while the deep check fails, retry every ~0.6s and re-DMA chars on success
+        recheck_ctr <= recheck_ctr + 24'd1;
+        if(!chk2_ok && recheck_ctr == 24'hFFFFFF && !sd_rd_req && !sd_rd_ack
+           && !core_rom_ack_85) begin
+            sd_rd_req <= 1;
+            chk_state <= 3'd7;
+        end
     end
     default: chk_state <= 3'd6;
     endcase
