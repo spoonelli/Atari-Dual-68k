@@ -600,10 +600,11 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                         3'd2: vidout_rgb <= chk2_ok_s              ? 24'h00A000 : 24'hA00000;
                         3'd3: vidout_rgb <= chk_ok_s               ? 24'h00A000 : 24'hA00000;
                         3'd4: vidout_rgb <= rom_req_seen           ? 24'h00A000 : 24'hA00000;
-                        3'd5: vidout_rgb <= dbg_v_pc_fetch         ? 24'h00A000 : 24'hA00000;
-                        3'd5: vidout_rgb <= dbg_e_running          ? 24'h00A000 : 24'hA00000;
+                        3'd5: vidout_rgb <= (dbg_v_pc_fetch & dbg_e_running) ? 24'h00A000 : 24'hA00000;
                         default: vidout_rgb <= dbg_alpha_wr        ? 24'h00FF00 : 24'h404040;
                     endcase
+                end else if(in_hexrow) begin
+                    vidout_rgb <= hex_px ? 24'hFFFF00 : 24'h101040;
                 end else begin
                     vidout_rgb <= alpha_rgb;
                 end
@@ -769,8 +770,10 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     // download+readback path with no CPU involvement. Runs before the CPU is released.
     reg        chk_done, chk_ok, chk2_ok;
     reg [15:0] chk2_val;
+    reg [15:0] probe0, probe1;      // words @0x000000 (expect 003F) and @0x110400 (expect 33CC)
+
     reg [23:0] recheck_ctr;
-    reg [2:0]  chk_state;
+    reg [3:0]  chk_state;
     // char ROM DMA: combined image 0x110000..0x113FFF -> 8192x16 BRAM
     reg [13:0] chr_dma_word;         // word index 0..8191
     reg        chr_we;
@@ -780,50 +783,63 @@ synch_3 s_acsd(dataslot_allcomplete, allcomplete_sd, clk_sdram);
 
 always @(posedge clk_sdram) begin
     case(chk_state)
-    3'd0: if(sdram_init_done && allcomplete_sd && dl_quiet_sd) begin
-        sd_rd_req <= 1;
-        chk_state <= 3'd1;
+    4'd0: if(sdram_init_done && allcomplete_sd && dl_quiet_sd) begin
+        sd_rd_req <= 1;                       // probe0 @ 0x000000
+        chk_state <= 4'd1;
     end
-    3'd1: if(sd_rd_ack) begin
-        chk_ok    <= (sd_rd_data == 16'h003F);
+    4'd1: if(sd_rd_ack) begin
+        probe0 <= sd_rd_data;
+        chk_ok <= (sd_rd_data == 16'h003F);
         sd_rd_req <= 0;
-        chk_state <= 3'd2;
+        chk_state <= 4'd2;
     end
-    3'd2: if(!sd_rd_ack) begin
-        sd_rd_req <= 1;             // deep check: char region word (download integrity)
-        chk_state <= 3'd7;
+    4'd2: if(!sd_rd_ack) begin
+        sd_rd_req <= 1;                       // probe1 @ 0x110400
+        chk_state <= 4'd3;
     end
-    3'd7: if(sd_rd_ack) begin
-        chk2_val  <= sd_rd_data;
-        chk2_ok   <= (sd_rd_data == 16'h3388);
+    4'd3: if(sd_rd_ack) begin
+        probe1 <= sd_rd_data;
         sd_rd_req <= 0;
+        chk_state <= 4'd4;
+    end
+    4'd4: if(!sd_rd_ack) begin
+        sd_rd_req <= 1;                       // probe2 (deep check) @ 0x110410
+        chk_state <= 4'd5;
+    end
+    4'd5: if(sd_rd_ack) begin
+        chk2_val <= sd_rd_data;
+        chk2_ok  <= (sd_rd_data == 16'h3388);
+        sd_rd_req <= 0;
+        chk_state <= 4'd6;
+    end
+    4'd6: if(!sd_rd_ack) begin
         chr_dma_word <= 14'd0;
-        chk_state <= 3'd3;          // (re)DMA the char ROM into BRAM
+        chk_state <= 4'd7;                    // char-ROM DMA
     end
-    3'd3: begin                     // issue one char-ROM read
+    4'd7: begin
         chr_we <= 0;
         if(!sd_rd_ack) begin
             sd_rd_req <= 1;
-            chk_state <= 3'd4;
+            chk_state <= 4'd8;
         end
     end
-    3'd4: if(sd_rd_ack) begin       // capture -> BRAM write
+    4'd8: if(sd_rd_ack) begin
         sd_rd_req <= 0;
         chr_wdata <= sd_rd_data;
         chr_we    <= 1;
-        chk_state <= 3'd5;
+        chk_state <= 4'd9;
     end
-    3'd5: begin
+    4'd9: begin
         chr_we <= 0;
         if(chr_dma_word == 14'd8191) begin
-            chk_done  <= 1;         // DMA finished: release the CPUs
-            chk_state <= 3'd6;
+            chk_done  <= 1;
+            chk_state <= 4'd10;
         end else begin
             chr_dma_word <= chr_dma_word + 14'd1;
-            chk_state <= 3'd3;
+            chk_state <= 4'd7;
         end
     end
-    3'd6: begin
+    4'd10: begin
         // CPU fetch service
         if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
             sd_rd_req <= 1;
@@ -834,15 +850,14 @@ always @(posedge clk_sdram) begin
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
-        // while the deep check fails, retry every ~0.6s and re-DMA chars on success
+        // while failing, re-probe + re-DMA every ~0.6s
         recheck_ctr <= recheck_ctr + 24'd1;
         if(!chk2_ok && recheck_ctr == 24'hFFFFFF && !sd_rd_req && !sd_rd_ack
            && !core_rom_ack_85) begin
-            sd_rd_req <= 1;
-            chk_state <= 3'd7;
+            chk_state <= 4'd2;
         end
     end
-    default: chk_state <= 3'd6;
+    default: chk_state <= 4'd10;
     endcase
 end
 
@@ -865,10 +880,11 @@ sdram_simple sdr (
     .wr_data    ( sd_wr_data ),
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
-    .rd_addr    ( chk_done   ? {1'b0, core_rom_addr} :
-                  (chk_state == 3'd7) ? 25'h0110410 :
-                  (chk_state >= 3'd3) ? (25'h0110000 + {10'd0, chr_dma_word, 1'b0}) :
-                  25'd0 ),
+    .rd_addr    ( (chk_state == 4'd1) ? 25'd0 :
+                  (chk_state == 4'd3) ? 25'h0110400 :
+                  (chk_state == 4'd5) ? 25'h0110410 :
+                  (chk_state == 4'd8 || chk_state == 4'd7) ? (25'h0110000 + {10'd0, chr_dma_word, 1'b0}) :
+                  {1'b0, core_rom_addr} ),
     .rd_data    ( sd_rd_data ),
     .init_done  ( sdram_init_done )
 );
@@ -901,6 +917,67 @@ end
     reg  [15:0] chr_q;
     reg  [12:0] chr_raddr;
     always @(posedge clk_sys_7159) chr_q <= chr_ram[chr_raddr];
+
+    // ---------------- probe hex display: 4x6 font, 3 values of 4 digits
+    // rows 100-123 (4x scale), slots of 16px from x=44:
+    //   [p0 p0 p0 p0] _ [p1 p1 p1 p1] _ [p2 p2 p2 p2]   (14 slots, 224px)
+    function [3:0] hexfont(input [3:0] d, input [2:0] row);
+        case({d, row})
+        {4'h0,3'd0}: hexfont=4'b1111; {4'h0,3'd1}: hexfont=4'b1001; {4'h0,3'd2}: hexfont=4'b1001;
+        {4'h0,3'd3}: hexfont=4'b1001; {4'h0,3'd4}: hexfont=4'b1001; {4'h0,3'd5}: hexfont=4'b1111;
+        {4'h1,3'd0}: hexfont=4'b0010; {4'h1,3'd1}: hexfont=4'b0110; {4'h1,3'd2}: hexfont=4'b0010;
+        {4'h1,3'd3}: hexfont=4'b0010; {4'h1,3'd4}: hexfont=4'b0010; {4'h1,3'd5}: hexfont=4'b0111;
+        {4'h2,3'd0}: hexfont=4'b1111; {4'h2,3'd1}: hexfont=4'b0001; {4'h2,3'd2}: hexfont=4'b1111;
+        {4'h2,3'd3}: hexfont=4'b1000; {4'h2,3'd4}: hexfont=4'b1000; {4'h2,3'd5}: hexfont=4'b1111;
+        {4'h3,3'd0}: hexfont=4'b1111; {4'h3,3'd1}: hexfont=4'b0001; {4'h3,3'd2}: hexfont=4'b0111;
+        {4'h3,3'd3}: hexfont=4'b0001; {4'h3,3'd4}: hexfont=4'b0001; {4'h3,3'd5}: hexfont=4'b1111;
+        {4'h4,3'd0}: hexfont=4'b1001; {4'h4,3'd1}: hexfont=4'b1001; {4'h4,3'd2}: hexfont=4'b1111;
+        {4'h4,3'd3}: hexfont=4'b0001; {4'h4,3'd4}: hexfont=4'b0001; {4'h4,3'd5}: hexfont=4'b0001;
+        {4'h5,3'd0}: hexfont=4'b1111; {4'h5,3'd1}: hexfont=4'b1000; {4'h5,3'd2}: hexfont=4'b1111;
+        {4'h5,3'd3}: hexfont=4'b0001; {4'h5,3'd4}: hexfont=4'b0001; {4'h5,3'd5}: hexfont=4'b1111;
+        {4'h6,3'd0}: hexfont=4'b1111; {4'h6,3'd1}: hexfont=4'b1000; {4'h6,3'd2}: hexfont=4'b1111;
+        {4'h6,3'd3}: hexfont=4'b1001; {4'h6,3'd4}: hexfont=4'b1001; {4'h6,3'd5}: hexfont=4'b1111;
+        {4'h7,3'd0}: hexfont=4'b1111; {4'h7,3'd1}: hexfont=4'b0001; {4'h7,3'd2}: hexfont=4'b0010;
+        {4'h7,3'd3}: hexfont=4'b0100; {4'h7,3'd4}: hexfont=4'b0100; {4'h7,3'd5}: hexfont=4'b0100;
+        {4'h8,3'd0}: hexfont=4'b1111; {4'h8,3'd1}: hexfont=4'b1001; {4'h8,3'd2}: hexfont=4'b1111;
+        {4'h8,3'd3}: hexfont=4'b1001; {4'h8,3'd4}: hexfont=4'b1001; {4'h8,3'd5}: hexfont=4'b1111;
+        {4'h9,3'd0}: hexfont=4'b1111; {4'h9,3'd1}: hexfont=4'b1001; {4'h9,3'd2}: hexfont=4'b1111;
+        {4'h9,3'd3}: hexfont=4'b0001; {4'h9,3'd4}: hexfont=4'b0001; {4'h9,3'd5}: hexfont=4'b1111;
+        {4'hA,3'd0}: hexfont=4'b0110; {4'hA,3'd1}: hexfont=4'b1001; {4'hA,3'd2}: hexfont=4'b1111;
+        {4'hA,3'd3}: hexfont=4'b1001; {4'hA,3'd4}: hexfont=4'b1001; {4'hA,3'd5}: hexfont=4'b1001;
+        {4'hB,3'd0}: hexfont=4'b1110; {4'hB,3'd1}: hexfont=4'b1001; {4'hB,3'd2}: hexfont=4'b1110;
+        {4'hB,3'd3}: hexfont=4'b1001; {4'hB,3'd4}: hexfont=4'b1001; {4'hB,3'd5}: hexfont=4'b1110;
+        {4'hC,3'd0}: hexfont=4'b1111; {4'hC,3'd1}: hexfont=4'b1000; {4'hC,3'd2}: hexfont=4'b1000;
+        {4'hC,3'd3}: hexfont=4'b1000; {4'hC,3'd4}: hexfont=4'b1000; {4'hC,3'd5}: hexfont=4'b1111;
+        {4'hD,3'd0}: hexfont=4'b1110; {4'hD,3'd1}: hexfont=4'b1001; {4'hD,3'd2}: hexfont=4'b1001;
+        {4'hD,3'd3}: hexfont=4'b1001; {4'hD,3'd4}: hexfont=4'b1001; {4'hD,3'd5}: hexfont=4'b1110;
+        {4'hE,3'd0}: hexfont=4'b1111; {4'hE,3'd1}: hexfont=4'b1000; {4'hE,3'd2}: hexfont=4'b1110;
+        {4'hE,3'd3}: hexfont=4'b1000; {4'hE,3'd4}: hexfont=4'b1000; {4'hE,3'd5}: hexfont=4'b1111;
+        {4'hF,3'd0}: hexfont=4'b1111; {4'hF,3'd1}: hexfont=4'b1000; {4'hF,3'd2}: hexfont=4'b1110;
+        {4'hF,3'd3}: hexfont=4'b1000; {4'hF,3'd4}: hexfont=4'b1000; {4'hF,3'd5}: hexfont=4'b1000;
+        default: hexfont=4'b0000;
+        endcase
+    endfunction
+
+    wire [8:0] hx  = visible_x - 9'd44;
+    wire [3:0] slot = hx[8:4];                       // 16px per digit slot
+    wire [1:0] gx   = hx[3:2];                       // glyph column (4px scale)
+    wire [2:0] gy   = (visible_y - 'd100) >> 2;      // glyph row
+    reg  [3:0] hex_digit;
+    always @(*) begin
+        case(slot)
+        4'd0:  hex_digit = probe0[15:12];  4'd1:  hex_digit = probe0[11:8];
+        4'd2:  hex_digit = probe0[7:4];    4'd3:  hex_digit = probe0[3:0];
+        4'd5:  hex_digit = probe1[15:12];  4'd6:  hex_digit = probe1[11:8];
+        4'd7:  hex_digit = probe1[7:4];    4'd8:  hex_digit = probe1[3:0];
+        4'd10: hex_digit = chk2_val[15:12];4'd11: hex_digit = chk2_val[11:8];
+        4'd12: hex_digit = chk2_val[7:4];  4'd13: hex_digit = chk2_val[3:0];
+        default: hex_digit = 4'h0;
+        endcase
+    end
+    wire hex_slot_on = (slot!=4'd4 && slot!=4'd9 && slot<4'd14);
+    wire hex_px = hex_slot_on && hexfont(hex_digit, gy)[2'd3 - gx];
+    wire in_hexrow = (visible_y >= 'd100) && (visible_y < 'd124) && (visible_x >= 'd44) && (visible_x < 'd268);
 
     // ---------------- alpha scanout pipeline (pixel clock domain)
     // char cell: 8x8. During pixel phases 4..7 of each cell we prefetch the NEXT cell:
