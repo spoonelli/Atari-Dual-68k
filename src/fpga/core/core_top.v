@@ -700,13 +700,23 @@ assign dram_clk = clk_sdram_chip;
     reg         dl_req_74;          // toggle
     reg  [24:0] dl_addr_74;
     reg  [31:0] dl_data_74;
+    reg [21:0] dl_quiet_ctr;
+    reg        dl_seen;
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr[31:24] == 8'h10) begin
         dl_addr_74 <= bridge_addr[24:0];
         dl_data_74 <= bridge_wr_data;
         dl_req_74  <= ~dl_req_74;
+        dl_quiet_ctr <= 22'd0;
+        dl_seen      <= 1'b1;
+    end else if(!(&dl_quiet_ctr)) begin
+        dl_quiet_ctr <= dl_quiet_ctr + 22'd1;
     end
 end
+    // high ~56ms after the last download write (and only once a download was seen)
+    wire dl_quiet_74 = dl_seen && (&dl_quiet_ctr);
+    wire dl_quiet_sd;
+synch_3 s_dq(dl_quiet_74, dl_quiet_sd, clk_sdram);
 
     wire dl_req_s;
 synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
@@ -770,7 +780,7 @@ synch_3 s_acsd(dataslot_allcomplete, allcomplete_sd, clk_sdram);
 
 always @(posedge clk_sdram) begin
     case(chk_state)
-    3'd0: if(sdram_init_done && allcomplete_sd) begin
+    3'd0: if(sdram_init_done && allcomplete_sd && dl_quiet_sd) begin
         sd_rd_req <= 1;
         chk_state <= 3'd1;
     end
