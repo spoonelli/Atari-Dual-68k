@@ -892,13 +892,14 @@ end
     reg  [5:0]  r_color;      // active cell color
     reg         r_opaque;
 
-    wire [9:0]  next_x   = x_count - VID_H_BPORCH + 10'd8;   // cell being prefetched
+    wire [9:0]  vis_x    = x_count - VID_H_BPORCH;           // wraps during blanking; 456%8==0 keeps phase
+    wire [9:0]  next_x   = vis_x + 10'd8;                    // cell being prefetched
     wire [5:0]  cell_col = next_x[8:3];
     wire [4:0]  cell_row = visible_y[7:3];
     assign alpha_vaddr = {cell_row, cell_col};               // row*64 + col
 
     always @(posedge clk_sys_7159) begin
-        case(x_count[2:0])
+        case(vis_x[2:0])
             3'd5: begin
                 a_word <= alpha_vdata;
             end
@@ -918,12 +919,14 @@ end
 
     // pixel extraction: n = x within cell; MSB plane in high nibbles, LSB in low
     wire [2:0] pxn = visible_x[2:0];
-    wire       msb = pxn[2] ? r_row[7  - pxn[1:0]] : r_row[15 - pxn[1:0]];
-    wire       lsb = pxn[2] ? r_row[3  - pxn[1:0]] : r_row[11 - pxn[1:0]];
+    wire [15:0] act_row = (pxn == 3'd0) ? chr_q : r_row;
+    wire       msb = pxn[2] ? act_row[7  - pxn[1:0]] : act_row[15 - pxn[1:0]];
+    wire       lsb = pxn[2] ? act_row[3  - pxn[1:0]] : act_row[11 - pxn[1:0]];
     wire [1:0] pix = {msb, lsb};
 
     // pen -> color RAM (alpha section: pens 0..255)
-    always @(posedge clk_sys_7159) color_vaddr <= {3'b000, r_color, pix};
+    wire [5:0] act_color = (pxn == 3'd0) ? a_color : r_color;
+    always @(posedge clk_sys_7159) color_vaddr <= {3'b000, act_color, pix};
 
     // palette: IRGB4444 with intensity: i=(I+1)*(4-intensity), ch8 = ch4*i/4
     wire [3:0] ints   = (eintensity > 4'd4) ? 4'd4 : eintensity;
