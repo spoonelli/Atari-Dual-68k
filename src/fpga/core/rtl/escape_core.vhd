@@ -40,7 +40,8 @@ entity escape_core is
 
         -- debug/observation
         dbg_v_pc_fetch : out std_logic;
-        dbg_e_running  : out std_logic
+        dbg_e_running  : out std_logic;
+        dbg_alpha_wr   : out std_logic
     );
 end escape_core;
 
@@ -82,6 +83,7 @@ architecture rtl of escape_core is
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
     signal we_pf, we_mo, we_alpha, we_work, we_pfpal, we_color, we_cfg, we_ee : std_logic;
     signal v_wr, we_shr_a, we_shr_b : std_logic;
+    signal alpha_wr_stretch : unsigned(19 downto 0);
 begin
     ---------------------------------------------------------------- CPUs
     -- 68010 per schematic sheet 4 (45J "U68010"); autovectored IRQs via VPA
@@ -255,6 +257,19 @@ begin
     dbg_e_running  <= extra_release;
     intensity_out  <= intensity;
     video_off_out  <= video_off;
+
+    -- ~0.15 s pulse stretcher on alpha-RAM writes so activity is visible on screen
+    stretch : process(clk)
+    begin
+        if rising_edge(clk) then
+            if we_alpha='1' then
+                alpha_wr_stretch <= (others => '1');
+            elsif alpha_wr_stretch /= 0 then
+                alpha_wr_stretch <= alpha_wr_stretch - 1;
+            end if;
+        end if;
+    end process;
+    dbg_alpha_wr <= '1' when alpha_wr_stretch /= 0 else '0';
 
     ---------------------------------------------------------------- read muxes
     -- I/O: 260000 P1 (D11-D8), 260010 status+P2, 260020-26 ADC (centered), 260030 SCOM

@@ -593,7 +593,8 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                         3'd3: vidout_rgb <= chk_ok_s               ? 24'h00A000 : 24'hA00000;
                         3'd4: vidout_rgb <= rom_req_seen           ? 24'h00A000 : 24'hA00000;
                         3'd5: vidout_rgb <= dbg_v_pc_fetch         ? 24'h00A000 : 24'hA00000;
-                        default: vidout_rgb <= dbg_e_running       ? 24'h00A000 : 24'hA00000;
+                        3'd5: vidout_rgb <= dbg_e_running          ? 24'h00A000 : 24'hA00000;
+                        default: vidout_rgb <= dbg_alpha_wr        ? 24'h00FF00 : 24'h404040;
                     endcase
                 end else begin
                     vidout_rgb <= alpha_rgb;
@@ -898,20 +899,40 @@ end
     wire [4:0]  cell_row = visible_y[7:3];
     assign alpha_vaddr = {cell_row, cell_col};               // row*64 + col
 
+    // row-0 injected test text (ASCII-mapped font): proves the scanout end-to-end
+    reg [9:0] test_code;
+    always @(*) begin
+        case(cell_col)
+            6'd1:  test_code = "A"; 6'd2:  test_code = "T"; 6'd3:  test_code = "A";
+            6'd4:  test_code = "R"; 6'd5:  test_code = "I"; 6'd7:  test_code = "D";
+            6'd8:  test_code = "U"; 6'd9:  test_code = "A"; 6'd10: test_code = "L";
+            6'd12: test_code = "6"; 6'd13: test_code = "8"; 6'd14: test_code = "K";
+            6'd16: test_code = "A"; 6'd17: test_code = "L"; 6'd18: test_code = "P";
+            6'd19: test_code = "H"; 6'd20: test_code = "A"; 6'd22: test_code = "O";
+            6'd23: test_code = "K";
+            default: test_code = 10'h020;
+        endcase
+    end
+    wire        inject   = (cell_row == 5'd0);
+    wire [15:0] eff_alpha = inject ? {6'b000000, test_code} : alpha_vdata;
+    reg         r_inject, a_inject;
+
     always @(posedge clk_sys_7159) begin
         case(vis_x[2:0])
             3'd5: begin
-                a_word <= alpha_vdata;
+                a_word <= eff_alpha;
             end
             3'd6: begin
-                chr_raddr <= {alpha_vdata[9:0], visible_y[2:0]};  // code*8 + line
-                a_color   <= {alpha_vdata[14], 1'b0, alpha_vdata[13:10]};
+                chr_raddr <= {eff_alpha[9:0], visible_y[2:0]};    // code*8 + line
+                a_color   <= {eff_alpha[14], 1'b0, eff_alpha[13:10]};
+                a_inject  <= inject;
             end
             3'd7: ;
             3'd0: begin
                 r_row    <= chr_q;
                 r_color  <= a_color;
                 r_opaque <= a_word[15];
+                r_inject <= a_inject;
             end
             default: ;
         endcase
@@ -937,9 +958,18 @@ end
     wire [7:0] pal_r  = (r_m[10:2] > 9'd255) ? 8'd255 : r_m[9:2];
     wire [7:0] pal_g  = (g_m[10:2] > 9'd255) ? 8'd255 : g_m[9:2];
     wire [7:0] pal_b  = (b_m[10:2] > 9'd255) ? 8'd255 : b_m[9:2];
-    wire [23:0] alpha_rgb = evideo_off ? 24'h000000 : {pal_r, pal_g, pal_b};
+    reg  inj_px1, inj_px2;   // align inject flag with the 2-cycle color path
+    always @(posedge clk_sys_7159) begin
+        inj_px1 <= (pxn == 3'd0) ? a_inject : r_inject;
+        inj_px2 <= inj_px1;
+    end
+    reg  [1:0] pix_d1;
+    always @(posedge clk_sys_7159) pix_d1 <= pix;
+    wire [23:0] inj_rgb = (pix_d1 != 2'b00) ? 24'hFFFFFF : 24'h202020;
+    wire [23:0] alpha_rgb = evideo_off ? 24'h000000 :
+                            inj_px2    ? inj_rgb    : {pal_r, pal_g, pal_b};
 
-    wire dbg_v_pc_fetch, dbg_e_running;
+    wire dbg_v_pc_fetch, dbg_e_running, dbg_alpha_wr;
 escape_core ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
@@ -958,7 +988,8 @@ escape_core ecore (
     .intensity_out( eintensity ),
     .video_off_out( evideo_off ),
     .dbg_v_pc_fetch ( dbg_v_pc_fetch ),
-    .dbg_e_running  ( dbg_e_running )
+    .dbg_e_running  ( dbg_e_running ),
+    .dbg_alpha_wr   ( dbg_alpha_wr )
 );
 
 endmodule
