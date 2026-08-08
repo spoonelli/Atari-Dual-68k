@@ -35,6 +35,12 @@ entity escape_core is
         alpha_vdata : out std_logic_vector(15 downto 0);
         color_vaddr : in  std_logic_vector(10 downto 0) := (others => '0');
         color_vdata : out std_logic_vector(15 downto 0);
+        pf_vaddr    : in  std_logic_vector(11 downto 0) := (others => '0');
+        pf_vdata    : out std_logic_vector(15 downto 0);
+        pfx_vaddr   : in  std_logic_vector(11 downto 0) := (others => '0');
+        pfx_vdata   : out std_logic_vector(15 downto 0);
+        xscroll_out : out std_logic_vector(8 downto 0);
+        yscroll_out : out std_logic_vector(8 downto 0);
         intensity_out : out std_logic_vector(3 downto 0);
         video_off_out : out std_logic;
 
@@ -69,6 +75,7 @@ architecture rtl of escape_core is
     signal e_unused : std_logic_vector(12 downto 0);
 
     signal extra_release, video_off : std_logic;
+    signal xscroll, yscroll : std_logic_vector(8 downto 0);
     signal intensity : std_logic_vector(3 downto 0);
     signal virq, vblank_d, v_pc_seen : std_logic;
 
@@ -196,18 +203,24 @@ begin
     we_cfg   <= v_wr and (v_sel_mobc or v_sel_slip);
     we_ee    <= v_wr and v_sel_eeprom;
 
-    pf_ram    : entity work.spram_bytelane generic map ( awidth=>12 )
-        port map ( clk=>clk, addr=>v_addr(12 downto 1), din=>v_do, we=>we_pf,
-                   uds_n=>v_uds_n, lds_n=>v_lds_n, q=>pf_q );
+    pf_ram    : entity work.dpram_bytelane_syn generic map ( awidth=>12 )
+        port map ( clk=>clk,
+                   addr_a=>v_addr(12 downto 1), din_a=>v_do,
+                   we_a=>we_pf, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>pf_q,
+                   addr_b=>pf_vaddr, din_b=>(others=>'0'),
+                   we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>pf_vdata );
     mo_ram    : entity work.spram_bytelane generic map ( awidth=>12 )
         port map ( clk=>clk, addr=>v_addr(12 downto 1), din=>v_do, we=>we_mo,
                    uds_n=>v_uds_n, lds_n=>v_lds_n, q=>mo_q );
     work_ram  : entity work.spram_bytelane generic map ( awidth=>13 )
         port map ( clk=>clk, addr=>v_addr(13 downto 1), din=>v_do, we=>we_work,
                    uds_n=>v_uds_n, lds_n=>v_lds_n, q=>work_q );
-    pfpal_ram : entity work.spram_bytelane generic map ( awidth=>12 )
-        port map ( clk=>clk, addr=>v_addr(12 downto 1), din=>v_do, we=>we_pfpal,
-                   uds_n=>v_uds_n, lds_n=>v_lds_n, q=>pfpal_q );
+    pfpal_ram : entity work.dpram_bytelane_syn generic map ( awidth=>12 )
+        port map ( clk=>clk,
+                   addr_a=>v_addr(12 downto 1), din_a=>v_do,
+                   we_a=>we_pfpal, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>pfpal_q,
+                   addr_b=>pfx_vaddr, din_b=>(others=>'0'),
+                   we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>pfx_vdata );
     color_ram : entity work.dpram_bytelane_syn generic map ( awidth => 11 )
         port map ( clk=>clk,
                    addr_a=>v_addr(11 downto 1), din_a=>v_do,
@@ -236,6 +249,7 @@ begin
             if reset_n='0' then
                 extra_release <= '0'; video_off <= '0'; intensity <= (others=>'0');
                 virq <= '0'; vblank_d <= '0'; v_pc_seen <= '0';
+                xscroll <= (others=>'0'); yscroll <= (others=>'0');
             else
                 vblank_d <= vblank_in;
                 if vblank_in='1' and vblank_d='0' then virq <= '1'; end if;
@@ -251,6 +265,15 @@ begin
                 end if;
 
                 if v_as_n='0' and v_addr(23 downto 0)=x"000694" then v_pc_seen <= '1'; end if;
+
+                -- playfield scroll: latched from cfg writes (3F4F00 word0=X, word1=Y)
+                if we_cfg='1' then
+                    if v_addr(7 downto 1) = "0000000" then
+                        xscroll <= v_do(15 downto 7);
+                    elsif v_addr(7 downto 1) = "0000001" then
+                        yscroll <= v_do(15 downto 7);
+                    end if;
+                end if;
             end if;
         end if;
     end process;
@@ -258,6 +281,8 @@ begin
     dbg_e_running  <= extra_release;
     intensity_out  <= intensity;
     video_off_out  <= video_off;
+    xscroll_out    <= xscroll;
+    yscroll_out    <= yscroll;
 
     -- ~0.15 s pulse stretcher on alpha-RAM writes so activity is visible on screen
     stretch : process(clk)
