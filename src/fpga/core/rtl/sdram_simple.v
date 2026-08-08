@@ -85,6 +85,8 @@ module sdram_simple (
     localparam S_REFRESH   = 4'd7;
     localparam S_WR2       = 4'd8;
     localparam S_RD2       = 4'd9;
+    localparam S_DATA1     = 4'd11;
+    localparam S_RD2       = 4'd9;
     localparam S_DATA1     = 4'd10;
 
     always @(posedge clk) begin
@@ -174,9 +176,10 @@ module sdram_simple (
                 end
             end
 
-            S_CL: begin
-                wait_ctr <= wait_ctr - 4'd1;
-                if (wait_ctr == 0) state <= S_DATA;
+            S_RD2: begin
+                cmd(CMD_READ);
+                dram_a <= {4'b0010, word[8:1], 1'b1};        // col+1, auto-precharge
+                state <= S_DATA;                              // CL2: data0 next cycle
             end
 
             S_WR2: begin
@@ -189,7 +192,12 @@ module sdram_simple (
             end
 
             S_DATA: begin
-                rd_data <= dram_dq;
+                rd_data[31:16] <= dram_dq;                   // data0
+                state <= S_DATA1;
+            end
+
+            S_DATA1: begin
+                rd_data[15:0] <= dram_dq;                    // data1
                 rd_ack  <= 1'b1;
                 wait_ctr <= 4'd2;                            // tRP after auto-precharge
                 state <= S_PRECHG;
