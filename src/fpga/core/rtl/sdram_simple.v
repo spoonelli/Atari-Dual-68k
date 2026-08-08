@@ -25,10 +25,12 @@ module sdram_simple (
     output reg         dram_cke,
 
     // write client (level req / level ack, 4-phase)
+    // 32-bit burst: wr_data[31:16] -> wr_addr, wr_data[15:0] -> wr_addr+2
+    // (addresses are 32-bit aligned, so both words share one row)
     input  wire        wr_req,
     output reg         wr_ack,
     input  wire [24:0] wr_addr,       // byte address, bit0 ignored
-    input  wire [15:0] wr_data,
+    input  wire [31:0] wr_data,
 
     // read client (level req / level ack, 4-phase)
     input  wire        rd_req,
@@ -71,7 +73,7 @@ module sdram_simple (
     reg        refresh_due;
     reg [23:0] word;
     reg        is_write;
-    reg [15:0] wdata_l;
+    reg [31:0] wdata_l;
 
     localparam S_INIT      = 4'd0;
     localparam S_IDLE      = 4'd1;
@@ -81,7 +83,7 @@ module sdram_simple (
     localparam S_DATA      = 4'd5;
     localparam S_PRECHG    = 4'd6;
     localparam S_REFRESH   = 4'd7;
-    localparam S_DONE      = 4'd8;
+    localparam S_WR2       = 4'd8;
 
     always @(posedge clk) begin
         if (~reset_n) begin
@@ -159,10 +161,10 @@ module sdram_simple (
                 dram_a       <= {4'b0010, word[8:0]};        // A10=1: auto-precharge
                 if (is_write) begin
                     cmd(CMD_WRITE);
-                    dq_out <= wdata_l;
+                    dram_a <= {4'b0000, word[8:0]};          // first word: NO auto-precharge
+                    dq_out <= wdata_l[31:16];
                     dq_oe  <= 1'b1;
-                    wait_ctr <= 4'd3;                        // tWR+tRP
-                    state <= S_PRECHG;
+                    state <= S_WR2;
                 end else begin
                     cmd(CMD_READ);
                     wait_ctr <= 4'd1;                        // CL2: data 2 cycles later
@@ -173,6 +175,15 @@ module sdram_simple (
             S_CL: begin
                 wait_ctr <= wait_ctr - 4'd1;
                 if (wait_ctr == 0) state <= S_DATA;
+            end
+
+            S_WR2: begin
+                cmd(CMD_WRITE);
+                dram_a <= {4'b0010, word[8:1], 1'b1};        // second word: col+1, auto-precharge
+                dq_out <= wdata_l[15:0];
+                dq_oe  <= 1'b1;
+                wait_ctr <= 4'd3;                            // tWR + tRP
+                state <= S_PRECHG;
             end
 
             S_DATA: begin
