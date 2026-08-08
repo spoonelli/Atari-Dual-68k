@@ -589,7 +589,7 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                     case(visible_x[8:6])
                         3'd0: vidout_rgb <= sdram_init_done_s      ? 24'h00A000 : 24'hA00000;
                         3'd1: vidout_rgb <= dataslot_allcomplete_s ? 24'h00A000 : 24'hA00000;
-                        3'd2: vidout_rgb <= chk_done_s             ? 24'h00A000 : 24'hA00000;
+                        3'd2: vidout_rgb <= chk2_ok_s              ? 24'h00A000 : 24'hA00000;
                         3'd3: vidout_rgb <= chk_ok_s               ? 24'h00A000 : 24'hA00000;
                         3'd4: vidout_rgb <= rom_req_seen           ? 24'h00A000 : 24'hA00000;
                         3'd5: vidout_rgb <= dbg_v_pc_fetch         ? 24'h00A000 : 24'hA00000;
@@ -759,7 +759,7 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     // SDRAM self-check: after init + full ROM download, read word 0 and compare with
     // the known first ROM word (0x003F = high word of the reset SP). Proves the
     // download+readback path with no CPU involvement. Runs before the CPU is released.
-    reg        chk_done, chk_ok;
+    reg        chk_done, chk_ok, chk2_ok;
     reg [2:0]  chk_state;
     // char ROM DMA: combined image 0x110000..0x113FFF -> 8192x16 BRAM
     reg [13:0] chr_dma_word;         // word index 0..8191
@@ -780,6 +780,12 @@ always @(posedge clk_sdram) begin
         chk_state <= 3'd2;
     end
     3'd2: if(!sd_rd_ack) begin
+        sd_rd_req <= 1;             // deep check: char region word (download integrity)
+        chk_state <= 3'd7;
+    end
+    3'd7: if(sd_rd_ack) begin
+        chk2_ok   <= (sd_rd_data == 16'h3388);
+        sd_rd_req <= 0;
         chk_state <= 3'd3;          // now DMA the char ROM into BRAM
     end
     3'd3: begin                     // issue one char-ROM read
@@ -841,6 +847,7 @@ sdram_simple sdr (
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
     .rd_addr    ( chk_done   ? {1'b0, core_rom_addr} :
+                  (chk_state == 3'd7) ? 25'h0110410 :
                   (chk_state >= 3'd3) ? (25'h0110000 + {10'd0, chr_dma_word, 1'b0}) :
                   25'd0 ),
     .rd_data    ( sd_rd_data ),
@@ -851,9 +858,10 @@ sdram_simple sdr (
     wire dataslot_allcomplete_s, sdram_init_done_s;
 synch_3 s_ac(dataslot_allcomplete, dataslot_allcomplete_s, clk_sys_7159);
 synch_3 s_id(sdram_init_done, sdram_init_done_s, clk_sys_7159);
-    wire chk_done_s, chk_ok_s;
+    wire chk_done_s, chk_ok_s, chk2_ok_s;
 synch_3 s_cd(chk_done, chk_done_s, clk_sys_7159);
 synch_3 s_co(chk_ok,   chk_ok_s,   clk_sys_7159);
+synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
     wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s & chk_done_s;
 
     // sticky: CPU has issued at least one ROM fetch
@@ -910,7 +918,7 @@ end
             6'd16: test_code = "A"; 6'd17: test_code = "L"; 6'd18: test_code = "P";
             6'd19: test_code = "H"; 6'd20: test_code = "A"; 6'd22: test_code = "O";
             6'd23: test_code = "K";
-            default: test_code = 10'h020;
+            default: test_code = 10'h000;
         endcase
     end
     wire        inject   = (cell_row == 5'd0);
