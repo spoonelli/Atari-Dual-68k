@@ -38,7 +38,8 @@ entity escape_core is
         intensity_out : out std_logic_vector(3 downto 0);
         video_off_out : out std_logic;
 
-        -- debug/observation
+        -- debug/observation (dbg_force_extra: sim-only early release of the extra CPU)
+        dbg_force_extra : in  std_logic := '0';
         dbg_v_pc_fetch : out std_logic;
         dbg_e_running  : out std_logic;
         dbg_alpha_wr   : out std_logic
@@ -93,7 +94,7 @@ begin
                    AS=>v_as_n, UDS=>v_uds_n, LDS=>v_lds_n, RW=>v_rw_n,
                    DTACK=>v_dtack_n, E=>open, VPA=>v_vpa_n, VMA=>open );
 
-    e_resn <= reset_n and extra_release;
+    e_resn <= reset_n and (extra_release or dbg_force_extra);
     -- also a 68010 per schematic sheet 5 (20P "U68010")
     ecpu : entity work.TG68K generic map ( CPU => "01" )
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>e_ipl,
