@@ -85,8 +85,6 @@ module sdram_simple (
     localparam S_REFRESH   = 4'd7;
     localparam S_WR2       = 4'd8;
     localparam S_RD2       = 4'd9;
-    localparam S_DATA1     = 4'd11;
-    localparam S_RD2       = 4'd9;
     localparam S_DATA1     = 4'd10;
 
     always @(posedge clk) begin
