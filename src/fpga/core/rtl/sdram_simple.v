@@ -36,7 +36,7 @@ module sdram_simple (
     input  wire        rd_req,
     output reg         rd_ack,
     input  wire [24:0] rd_addr,
-    output reg  [15:0] rd_data,
+    output reg  [31:0] rd_data,   // burst of 2: [31:16]=addr word, [15:0]=addr+2
 
     output reg         init_done
 );
@@ -84,6 +84,8 @@ module sdram_simple (
     localparam S_PRECHG    = 4'd6;
     localparam S_REFRESH   = 4'd7;
     localparam S_WR2       = 4'd8;
+    localparam S_RD2       = 4'd9;
+    localparam S_DATA1     = 4'd10;
 
     always @(posedge clk) begin
         if (~reset_n) begin
@@ -167,8 +169,8 @@ module sdram_simple (
                     state <= S_WR2;
                 end else begin
                     cmd(CMD_READ);
-                    wait_ctr <= 4'd1;                        // CL2: data 2 cycles later
-                    state <= S_CL;
+                    dram_a <= {4'b0000, word[8:0]};          // first read: NO auto-precharge
+                    state <= S_RD2;
                 end
             end
 
