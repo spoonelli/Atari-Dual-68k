@@ -758,7 +758,7 @@ end
     wire        core_rom_req_s;
     reg         core_rom_ack_85;
     wire        core_rom_ack_s;
-    wire [15:0] sd_rd_data;
+    wire [31:0] sd_rd_data;
     reg  [15:0] core_rom_data;
     reg         sd_rd_req;
     wire        sd_rd_ack;
@@ -797,8 +797,8 @@ always @(posedge clk_sdram) begin
         chk_state <= 4'd1;
     end
     4'd1: if(sd_rd_ack) begin
-        probe0 <= sd_rd_data;
-        chk_ok <= (sd_rd_data == 16'h003F);
+        probe0 <= sd_rd_data[31:16];
+        chk_ok <= (sd_rd_data[31:16] == 16'h003F);
         sd_rd_req <= 0;
         chk_state <= 4'd2;
     end
@@ -807,7 +807,7 @@ always @(posedge clk_sdram) begin
         chk_state <= 4'd3;
     end
     4'd3: if(sd_rd_ack) begin
-        probe1 <= sd_rd_data;
+        probe1 <= sd_rd_data[31:16];
         sd_rd_req <= 0;
         chk_state <= 4'd4;
     end
@@ -816,8 +816,8 @@ always @(posedge clk_sdram) begin
         chk_state <= 4'd5;
     end
     4'd5: if(sd_rd_ack) begin
-        chk2_val <= sd_rd_data;
-        chk2_ok  <= (sd_rd_data == 16'h3388);
+        chk2_val <= sd_rd_data[31:16];
+        chk2_ok  <= (sd_rd_data[31:16] == 16'h3388);
         sd_rd_req <= 0;
         chk_state <= 4'd6;
     end
@@ -834,7 +834,7 @@ always @(posedge clk_sdram) begin
     end
     4'd8: if(sd_rd_ack) begin
         sd_rd_req <= 0;
-        chr_wdata <= sd_rd_data;
+        chr_wdata <= sd_rd_data[31:16];
         chr_we    <= 1;
         chk_state <= 4'd9;
     end
@@ -849,25 +849,16 @@ always @(posedge clk_sdram) begin
         end
     end
     4'd10: begin
-        // VIDEO gfx fetch: absolute priority over CPU (toggle req from pixel domain)
+        // VIDEO gfx fetch: one 32-bit burst, priority over CPU
         if(vg_req_s != vg_req_last && !sd_rd_req && !sd_rd_ack && vg_phase==2'd0) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
-            vg_data[31:16] <= sd_rd_data;
+            vg_data   <= sd_rd_data;
             sd_rd_req <= 0;
-            vg_phase  <= 2'd2;
-        end
-        if(vg_phase==2'd2 && !sd_rd_ack) begin
-            sd_rd_req <= 1;
-            vg_phase  <= 2'd3;
-        end
-        if(vg_phase==2'd3 && sd_rd_ack) begin
-            vg_data[15:0] <= sd_rd_data;
-            sd_rd_req <= 0;
-            vg_done_85 <= ~vg_done_85;      // toggle-ack to pixel domain
+            vg_done_85 <= ~vg_done_85;
             vg_phase  <= 2'd0;
         end
         // CPU fetch service
@@ -880,7 +871,7 @@ always @(posedge clk_sdram) begin
         if(cpu_owner && sd_rd_req && sd_rd_ack) begin
             sd_rd_req <= 0;
             cpu_owner <= 0;
-            core_rom_data <= sd_rd_data;
+            core_rom_data <= sd_rd_data[31:16];
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
@@ -1039,9 +1030,11 @@ end
                 pfcol_q1   <= pfcol_q0;
             end
             3'd3: begin
-                // request gfx for cell+2: chunky row = 4 bytes at code*32 + row*4
-                vg_addr_px <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
-                vg_req_px  <= ~vg_req_px;
+                // request gfx for cell+2 (idle during deep vblank to free CPU bandwidth)
+                if(y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE) begin
+                    vg_addr_px <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
+                    vg_req_px  <= ~vg_req_px;
+                end
                 pfcol_q0   <= {pf_vdata[15], pfx_vdata[11:8]};
             end
             default: ;
