@@ -976,7 +976,8 @@ end
         endcase
     end
     wire hex_slot_on = (slot!=4'd4 && slot!=4'd9 && slot<4'd14);
-    wire hex_px = hex_slot_on && hexfont(hex_digit, gy)[2'd3 - gx];
+    wire [3:0] hex_row = hexfont(hex_digit, gy);
+    wire hex_px = hex_slot_on && hex_row[2'd3 - gx];
     wire in_hexrow = (visible_y >= 'd100) && (visible_y < 'd124) && (visible_x >= 'd44) && (visible_x < 'd268);
 
     // ---------------- alpha scanout pipeline (pixel clock domain)
