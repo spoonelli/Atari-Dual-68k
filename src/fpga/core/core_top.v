@@ -1185,11 +1185,16 @@ escape_mob umob (
     // pen -> color RAM (alpha section: pens 0..255)
     wire [5:0] act_color  = (pxn == 3'd0) ? a_color : r_color;
     wire       act_opaque = (pxn == 3'd0) ? a_word[15] : r_opaque;
-    wire       alpha_vis  = (pix != 2'b00) || act_opaque;
+    wire       alpha_vis_raw = (pix != 2'b00) || act_opaque;
+    // layer-isolation debug (a bring-up tool): R (cont1_key[9]) hides MO,
+    // L2 (cont1_key[10]) hides the game's alpha layer. Combine to see PF alone.
+    // Tied through synch_3 to the pixel clock domain.
+    wire       alpha_vis  = alpha_vis_raw & ~iso_alpha_off;
+    wire       mo_show    = mo_valid      & ~iso_mo_off;
     // pens: alpha 0..255 = {3'b000,color6,pix2}; playfield 512..767 = {3'b010,color4,pix4}
     always @(posedge clk_sys_7159)
         color_vaddr <= alpha_vis ? {3'b000, act_color, pix}
-                     : mo_valid  ? {3'b001, mo_pen}
+                     : mo_show   ? {3'b001, mo_pen}
                                  : {3'b010, pfcol_show[3:0], pf_pix};
 
     // palette: IRGB4444 with intensity: i=(I+1)*(4-intensity), ch8 = ch4*i/4
@@ -1216,6 +1221,9 @@ escape_mob umob (
     wire [15:0] dbg_mbox_cmd, dbg_mbox_resp, dbg_mbox_ramr, dbg_mbox_sum;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
+    wire iso_mo_off, iso_alpha_off;
+synch_3 s_isomo(cont1_key[9],  iso_mo_off,    clk_sys_7159);   // R: hide motion objects
+synch_3 s_isoal(cont1_key[10], iso_alpha_off, clk_sys_7159);   // L2: hide alpha layer
 escape_core ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
