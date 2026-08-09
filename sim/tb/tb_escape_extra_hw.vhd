@@ -28,7 +28,8 @@ architecture tb of tb_escape_extra_hw is
 begin
     clk    <= not clk after 5 ns when not done else '0';
     resetn <= '0', '1' after 205 ns;
-    rom_addr2w <= std_logic_vector(unsigned(rom_addr(21 downto 1)) + 1);
+    -- real SDRAM burst behavior: second word is col|1, not col+1
+    rom_addr2w <= rom_addr(21 downto 2) & '1';
 
     uut : entity work.escape_core
         port map ( clk=>clk, reset_n=>resetn,

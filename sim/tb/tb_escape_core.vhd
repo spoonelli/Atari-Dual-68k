@@ -30,7 +30,9 @@ architecture tb of tb_escape_core is
 begin
     clk    <= not clk after 5 ns when not done else '0';
     resetn <= '0', '1' after 205 ns;
-    rom_addr2w <= std_logic_vector(unsigned(rom_addr(21 downto 1)) + 1);
+    -- model the REAL SDRAM burst: second word is col|1, NOT col+1 —
+    -- an odd word index returns the SAME word twice (caught the v14 prefetch bug)
+    rom_addr2w <= rom_addr(21 downto 2) & '1';
 
     uut : entity work.escape_core
         port map ( clk=>clk, reset_n=>resetn,

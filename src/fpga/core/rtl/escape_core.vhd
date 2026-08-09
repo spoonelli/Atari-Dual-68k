@@ -188,7 +188,9 @@ begin
                             v_pref_data  <= rom_data(15 downto 0);
                             v_pref_addr  <= std_logic_vector(
                                 unsigned(v_addr(19 downto 1) & '0') + 2);
-                            v_pref_valid <= '1';
+                            -- SDRAM bursts col then col|1: only an even word index
+                            -- actually returns addr+2 as the second word
+                            v_pref_valid <= not v_addr(1);
                             v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                         end if;
                     when OWN_E =>
@@ -199,7 +201,8 @@ begin
                             e_pref_data  <= rom_data(15 downto 0);
                             e_pref_addr  <= std_logic_vector(
                                 unsigned(e_addr(19 downto 1) & '0') + 2);
-                            e_pref_valid <= '1';
+                            -- same even-word-index constraint as the video CPU path
+                            e_pref_valid <= not e_addr(1);
                             e_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                         end if;
                 end case;
