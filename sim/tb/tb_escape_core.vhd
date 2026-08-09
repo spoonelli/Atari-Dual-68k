@@ -16,7 +16,7 @@ architecture tb of tb_escape_core is
     signal done   : boolean := false;
 
     signal rom_addr : std_logic_vector(23 downto 0);
-    signal rom_data : std_logic_vector(15 downto 0);
+    signal rom_data : std_logic_vector(31 downto 0);
     signal rom_req  : std_logic;
     signal rom_ack  : std_logic := '0';
 
@@ -25,10 +25,12 @@ architecture tb of tb_escape_core is
     signal alpha_vdata : std_logic_vector(15 downto 0);
     signal dbg_v, dbg_e : std_logic;
 
-    signal romsrv_data : std_logic_vector(15 downto 0);
+    signal romsrv_data, romsrv_data2 : std_logic_vector(15 downto 0);
+    signal rom_addr2w : std_logic_vector(20 downto 0);
 begin
     clk    <= not clk after 5 ns when not done else '0';
     resetn <= '0', '1' after 205 ns;
+    rom_addr2w <= std_logic_vector(unsigned(rom_addr(21 downto 1)) + 1);
 
     uut : entity work.escape_core
         port map ( clk=>clk, reset_n=>resetn,
@@ -42,6 +44,9 @@ begin
     romsrv : entity work.rom_words
         generic map ( hexfile => "sim/work/combined_words.hex", awidth => 21 )
         port map ( addr => rom_addr(21 downto 1), data => romsrv_data );
+    romsrv2 : entity work.rom_words
+        generic map ( hexfile => "sim/work/combined_words.hex", awidth => 21 )
+        port map ( addr => rom_addr2w, data => romsrv_data2 );
 
     -- strict 4-phase: ack rises once per request and stays high until req falls
     serve : process(clk)
@@ -52,7 +57,7 @@ begin
             if rom_req='1' then
                 if not served then
                     if lat = 2 then
-                        rom_data <= romsrv_data;
+                        rom_data <= romsrv_data & romsrv_data2;
                         rom_ack  <= '1';
                         served   := true;
                         lat := 0;

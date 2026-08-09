@@ -759,7 +759,7 @@ end
     reg         core_rom_ack_85;
     wire        core_rom_ack_s;
     wire [31:0] sd_rd_data;
-    reg  [15:0] core_rom_data;
+    reg  [31:0] core_rom_data;
     reg         sd_rd_req;
     wire        sd_rd_ack;
 synch_3 s_rr(core_rom_req, core_rom_req_s, clk_sdram);
@@ -776,6 +776,15 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg        vg_req_last, vg_done_85, cpu_owner;
     reg [1:0]  vg_phase;
     reg [31:0] vg_data;
+    reg        mg_req_last, mg_done_85;
+    reg [1:0]  mg_phase;
+    reg [31:0] mg_data;
+    wire       mg_req_s;
+    wire       mo_gfx_req;
+    wire [23:0] mo_gfx_addr;
+synch_3 s_mg(mo_gfx_req, mg_req_s, clk_sdram);
+    wire mg_done_s;
+synch_3 s_mgd(mg_done_85, mg_done_s, clk_sys_7159);
     wire       vg_req_s;
     reg        vg_req_px;                 // pixel-domain request toggle
     reg [23:0] vg_addr_px;                // stable while request in flight
@@ -861,8 +870,21 @@ always @(posedge clk_sdram) begin
             vg_done_85 <= ~vg_done_85;
             vg_phase  <= 2'd0;
         end
+        // MO gfx fetch: served when PF idle
+        if(mg_req_s != mg_req_last && vg_phase==2'd0 && vg_req_s==vg_req_last
+           && !sd_rd_req && !sd_rd_ack && mg_phase==2'd0) begin
+            mg_req_last <= mg_req_s;
+            sd_rd_req   <= 1;
+            mg_phase    <= 2'd1;
+        end
+        if(mg_phase==2'd1 && sd_rd_ack) begin
+            mg_data   <= sd_rd_data;
+            sd_rd_req <= 0;
+            mg_done_85 <= ~mg_done_85;
+            mg_phase  <= 2'd0;
+        end
         // CPU fetch service
-        if(vg_phase==2'd0 && vg_req_s == vg_req_last) begin
+        if(vg_phase==2'd0 && vg_req_s == vg_req_last && mg_phase==2'd0) begin
             if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
                 sd_rd_req <= 1;
                 cpu_owner <= 1;
@@ -871,7 +893,7 @@ always @(posedge clk_sdram) begin
         if(cpu_owner && sd_rd_req && sd_rd_ack) begin
             sd_rd_req <= 0;
             cpu_owner <= 0;
-            core_rom_data <= sd_rd_data[31:16];
+            core_rom_data <= sd_rd_data;
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
@@ -905,7 +927,8 @@ sdram_simple sdr (
     .wr_data    ( sd_wr_data ),
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
-    .rd_addr    ( (chk_state == 4'd10 && !cpu_owner) ? {1'b0, vg_addr_px} :
+    .rd_addr    ( (chk_state == 4'd10 && mg_phase != 2'd0) ? {1'b0, mo_gfx_addr} :
+                  (chk_state == 4'd10 && !cpu_owner) ? {1'b0, vg_addr_px} :
                   (chk_state == 4'd1) ? 25'd0 :
                   (chk_state == 4'd3) ? 25'h0110400 :
                   (chk_state == 4'd5) ? 25'h0110410 :
@@ -1056,6 +1079,37 @@ end
         endcase
     end
 
+    // ---------------- motion objects
+    wire [11:0] mo_vaddr;
+    wire [15:0] mo_vdata;
+    wire [6:0]  cfg_vaddr;
+    wire [15:0] cfg_vdata;
+    wire [7:0]  mo_pen;
+    wire        mo_valid;
+
+escape_mob umob (
+    .clk      ( clk_sys_7159 ),
+    .reset_n  ( core_reset_n ),
+    .x_count  ( x_count ),
+    .y_count  ( y_count ),
+    .vbporch  ( VID_V_BPORCH ),
+    .vactive  ( VID_V_ACTIVE ),
+    .hbporch  ( VID_H_BPORCH ),
+    .xscroll  ( xscroll ),
+    .yscroll  ( yscroll ),
+    .mo_vaddr ( mo_vaddr ),
+    .mo_vdata ( mo_vdata ),
+    .cfg_vaddr( cfg_vaddr ),
+    .cfg_vdata( cfg_vdata ),
+    .gfx_req  ( mo_gfx_req ),
+    .gfx_addr ( mo_gfx_addr ),
+    .gfx_done ( mg_done_s ),
+    .gfx_data ( mg_data ),
+    .disp_x   ( visible_x[8:0] ),
+    .disp_pen ( mo_pen ),
+    .disp_valid( mo_valid )
+);
+
     // ---------------- alpha scanout pipeline (pixel clock domain)
     // char cell: 8x8. During pixel phases 4..7 of each cell we prefetch the NEXT cell:
     //   phase 4: present alpha map address    phase 5: latch alpha word (BRAM reg'd)
@@ -1133,6 +1187,7 @@ end
     // pens: alpha 0..255 = {3'b000,color6,pix2}; playfield 512..767 = {3'b010,color4,pix4}
     always @(posedge clk_sys_7159)
         color_vaddr <= alpha_vis ? {3'b000, act_color, pix}
+                     : mo_valid  ? {3'b001, mo_pen}
                                  : {3'b010, pfcol_show[3:0], pf_pix};
 
     // palette: IRGB4444 with intensity: i=(I+1)*(4-intensity), ch8 = ch4*i/4
@@ -1177,6 +1232,10 @@ escape_core ecore (
     .pf_vdata   ( pf_vdata ),
     .pfx_vaddr  ( pf_vaddr ),
     .pfx_vdata  ( pfx_vdata ),
+    .mo_vaddr   ( mo_vaddr ),
+    .mo_vdata   ( mo_vdata ),
+    .cfg_vaddr  ( cfg_vaddr ),
+    .cfg_vdata  ( cfg_vdata ),
     .xscroll_out( xscroll ),
     .yscroll_out( yscroll ),
     .intensity_out( eintensity ),
