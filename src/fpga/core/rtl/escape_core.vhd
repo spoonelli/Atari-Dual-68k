@@ -50,9 +50,23 @@ entity escape_core is
 
         -- debug/observation (dbg_force_extra: sim-only early release of the extra CPU)
         dbg_force_extra : in  std_logic := '0';
+        -- sim-only backdoor: force a word into shared RAM port A (mailbox injection).
+        -- Defaults keep it inert; on real hardware these tie off and cost nothing.
+        dbg_shr_we   : in  std_logic := '0';
+        dbg_shr_addr : in  std_logic_vector(14 downto 0) := (others => '0');
+        dbg_shr_din  : in  std_logic_vector(15 downto 0) := (others => '0');
         dbg_v_pc_fetch : out std_logic;
         dbg_e_running  : out std_logic;
-        dbg_alpha_wr   : out std_logic
+        dbg_alpha_wr   : out std_logic;
+        -- live snoop of the two-CPU handshake mailbox (shared RAM 0x16FFEx):
+        --   cmd  = 0x16FFE0 (video->extra command, 1234/5A5A)
+        --   resp = 0x16FFE2 (extra->video answer, 4321 = self-test done)
+        --   ramr = 0x16FFE8 (extra RAM-test result, 0000 = pass)
+        --   sum  = 0x16FFEA (extra ROM checksum word)
+        dbg_mbox_cmd  : out std_logic_vector(15 downto 0);
+        dbg_mbox_resp : out std_logic_vector(15 downto 0);
+        dbg_mbox_ramr : out std_logic_vector(15 downto 0);
+        dbg_mbox_sum  : out std_logic_vector(15 downto 0)
     );
 end escape_core;
 
@@ -98,6 +112,10 @@ architecture rtl of escape_core is
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
     signal we_pf, we_mo, we_alpha, we_work, we_pfpal, we_color, we_cfg, we_ee : std_logic;
     signal v_wr, we_shr_a, we_shr_b : std_logic;
+    signal shr_a_addr : std_logic_vector(14 downto 0);
+    signal shr_a_din  : std_logic_vector(15 downto 0);
+    signal shr_a_uds, shr_a_lds : std_logic;
+    signal mbox_cmd, mbox_resp, mbox_ramr, mbox_sum : std_logic_vector(15 downto 0) := (others=>'0');
     signal alpha_wr_stretch : unsigned(19 downto 0);
 begin
     ---------------------------------------------------------------- CPUs
@@ -214,15 +232,43 @@ begin
 
     ---------------------------------------------------------------- memories
     v_wr     <= '1' when v_as_n='0' and v_rw_n='0' else '0';
-    we_shr_a <= v_wr and v_sel_ram;
+    we_shr_a <= '1' when dbg_shr_we='1' else (v_wr and v_sel_ram);
     we_shr_b <= '1' when e_as_n='0' and e_rw_n='0' and e_sel_ram='1' else '0';
+    -- sim backdoor mux on port A (dbg_shr_we tied '0' on hardware -> collapses away)
+    shr_a_addr <= dbg_shr_addr    when dbg_shr_we='1' else v_addr(15 downto 1);
+    shr_a_din  <= dbg_shr_din     when dbg_shr_we='1' else v_do;
+    shr_a_uds  <= '0'             when dbg_shr_we='1' else v_uds_n;
+    shr_a_lds  <= '0'             when dbg_shr_we='1' else v_lds_n;
 
     shared_ram : entity work.dpram_bytelane_syn generic map ( awidth => 15 )
         port map ( clk=>clk,
-                   addr_a=>v_addr(15 downto 1), din_a=>v_do,
-                   we_a=>we_shr_a, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>shr_qa,
+                   addr_a=>shr_a_addr, din_a=>shr_a_din,
+                   we_a=>we_shr_a, uds_a_n=>shr_a_uds, lds_a_n=>shr_a_lds, q_a=>shr_qa,
                    addr_b=>e_addr(15 downto 1), din_b=>e_do,
                    we_b=>we_shr_b, uds_b_n=>e_uds_n, lds_b_n=>e_lds_n, q_b=>shr_qb );
+
+    -- snoop handshake mailbox writes (0x16FFE0..EA) from either CPU port, for HUD
+    mbox_snoop : process(clk)
+    begin
+        if rising_edge(clk) then
+            -- port A (video CPU) writes the command word
+            if we_shr_a='1' and shr_a_addr = "111111111110000" then mbox_cmd  <= shr_a_din; end if; -- E0
+            -- port B (extra CPU) writes its answer + self-test results
+            if we_shr_b='1' then
+                case e_addr(15 downto 1) is
+                    when "111111111110000" => mbox_cmd  <= e_do;   -- E0
+                    when "111111111110001" => mbox_resp <= e_do;   -- E2
+                    when "111111111110100" => mbox_ramr <= e_do;   -- E8
+                    when "111111111110101" => mbox_sum  <= e_do;   -- EA
+                    when others => null;
+                end case;
+            end if;
+        end if;
+    end process;
+    dbg_mbox_cmd  <= mbox_cmd;
+    dbg_mbox_resp <= mbox_resp;
+    dbg_mbox_ramr <= mbox_ramr;
+    dbg_mbox_sum  <= mbox_sum;
 
     we_pf    <= v_wr and v_sel_pf;
     we_mo    <= v_wr and v_sel_mo;
