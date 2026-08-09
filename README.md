@@ -100,6 +100,22 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
   or distributed by this repo, and `support/package.sh` refuses to package ROM data.
 - **On device**: follow [`docs/POCKET_TEST.md`](docs/POCKET_TEST.md).
 
+## Credits & acknowledgements
+
+- **MAME** and **Aaron Giles**, author of the Atari Escape driver
+  ([`src/mame/atari/eprom.cpp`](https://github.com/mamedev/mame/blob/master/src/mame/atari/eprom.cpp),
+  `license:BSD-3-Clause`, `copyright-holders: Aaron Giles`) and the supporting device
+  models (`atarijsa`, `atarimo`, `slapstic`). This project used the MAME driver purely as a
+  **behavioral reference** for understanding the hardware (memory map, video/motion-object
+  format, the two-CPU mailbox handshake). **No MAME source code is copied into this
+  repository**; the RTL is an independent re-implementation from the driver's documented
+  behavior cross-checked against the original schematics, which take precedence where they
+  disagree (68010s vs. 68000s, autovectored IRQs, SLAPSTIC, serial SCOM). Thank you to the
+  MAME developers for decades of preservation work that made this core possible.
+- The **openFPGA** community and **Analogue** for the Pocket core framework
+  ([`open-fpga/core-template`](https://github.com/open-fpga/core-template)).
+- **MiSTer-devel** for the Atari System 1 RTL this core's base was derived from.
+
 ## License
 
 **GPL-3.0** — see [`LICENSE`](LICENSE). The RTL base is
