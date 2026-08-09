@@ -1,8 +1,7 @@
 # Atari Dual 68k — openFPGA core (Analogue Pocket)
 
 An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68010 board
-whose flagship title is *Escape from the Planet of the Robot Monsters* (MAME's initials
-gag: **E.P.R.O.M.**). The same board also ran the *Klax* prototype and *Guts n' Glory*
+whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**). The same board also ran the *Klax* prototype and *Guts n' Glory*
 prototype, so the core covers all three.
 
 > Built for the [Analogue Pocket](https://www.analogue.co/pocket) via the openFPGA framework.
