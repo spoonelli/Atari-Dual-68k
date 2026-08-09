@@ -49,6 +49,29 @@ present, serial SCOM sound link).
 | Palette      | 2048-color, per-layer color RAM + intensity | planned with video layers |
 | Output       | 336×240 visible, 456×262 @ ~59.9 Hz      | ✅ native timing via APF scaler |
 
+## Accuracy
+
+This is a **behaviorally accurate** core with authentic timing anchors — not a
+cycle-exact replica. Honest classification:
+
+**Authentic (schematic-verified):** clock frequencies (7.159 MHz 68010s, true pixel
+clock, all clocks derived from the board's 14.318 MHz colorburst family); raster
+geometry (456×262 total, 336×240 visible, ~59.92 Hz); complete memory map, register
+and latch semantics (sheet 16 + MAME cross-checked); genuinely concurrent dual CPUs
+(the real board's architecture — MAME time-slices); IRGB palette math with intensity;
+autovectored interrupt scheme.
+
+**Approximate:** per-instruction CPU cycle counts (TG68K is instruction-accurate, not
+cycle-exact to a 68010 — no cycle-exact open 68010 core exists); bus-cycle timing (the
+original used zero-wait parallel EPROM buses per subsystem; this core funnels memory
+through one SDRAM with wait states, mitigated by burst reads and sequential prefetch);
+video internals (same VRAM in, same pixels out on the same raster grid, but the
+scanout is a re-architected line engine, not a gate-level MOHLB/SLAGS clone).
+
+Escape's game logic is IRQ- and frame-driven rather than cycle-counted, so gameplay
+behavior should be indistinguishable from the arcade. This places the core in the same
+class as most MiSTer/openFPGA arcade cores.
+
 ## Repo layout
 
 ```
