@@ -19,7 +19,7 @@ entity escape_core is
 
         -- external program ROM bus (combined-image byte offsets; word reads)
         rom_addr   : out std_logic_vector(23 downto 0);
-        rom_data   : in  std_logic_vector(15 downto 0);
+        rom_data   : in  std_logic_vector(31 downto 0);  -- [31:16]=addr, [15:0]=addr+2
         rom_req    : out std_logic;
         rom_ack    : in  std_logic;
 
@@ -39,6 +39,10 @@ entity escape_core is
         pf_vdata    : out std_logic_vector(15 downto 0);
         pfx_vaddr   : in  std_logic_vector(11 downto 0) := (others => '0');
         pfx_vdata   : out std_logic_vector(15 downto 0);
+        mo_vaddr    : in  std_logic_vector(11 downto 0) := (others => '0');
+        mo_vdata    : out std_logic_vector(15 downto 0);
+        cfg_vaddr   : in  std_logic_vector(6 downto 0)  := (others => '0');
+        cfg_vdata   : out std_logic_vector(15 downto 0);
         xscroll_out : out std_logic_vector(8 downto 0);
         yscroll_out : out std_logic_vector(8 downto 0);
         intensity_out : out std_logic_vector(3 downto 0);
@@ -86,6 +90,9 @@ architecture rtl of escape_core is
     signal rom_req_i  : std_logic;
     signal v_rom_pend, e_rom_pend, v_rom_dtack, e_rom_dtack : std_logic;
     signal v_rom_hold, e_rom_hold : std_logic_vector(15 downto 0);
+    signal v_pref_data, e_pref_data : std_logic_vector(15 downto 0);
+    signal v_pref_addr, e_pref_addr : std_logic_vector(19 downto 0);
+    signal v_pref_valid, e_pref_valid : std_logic;
 
     signal shr_qa, shr_qb : std_logic_vector(15 downto 0);
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
@@ -141,6 +148,7 @@ begin
         if rising_edge(clk) then
             if reset_n='0' then
                 rom_owner <= OWN_IDLE; rom_req_i <= '0'; last_was_v <= '0';
+                v_pref_valid <= '0'; e_pref_valid <= '0';
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
             else
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
@@ -151,6 +159,17 @@ begin
                         -- extra CPU (observed on hardware as an ERESET retry loop)
                         if rom_ack='1' then
                             null;                        -- wait out previous ack (4-phase)
+                        -- sequential-fetch prefetch hits: served with no SDRAM transaction
+                        elsif v_rom_pend='1' and v_rom_dtack='0' and v_pref_valid='1'
+                              and (v_addr(19 downto 1) & '0') = v_pref_addr then
+                            v_rom_hold   <= v_pref_data;
+                            v_rom_dtack  <= '1';
+                            v_pref_valid <= '0';
+                        elsif e_rom_pend='1' and e_rom_dtack='0' and e_pref_valid='1'
+                              and (e_addr(19 downto 1) & '0') = e_pref_addr then
+                            e_rom_hold   <= e_pref_data;
+                            e_rom_dtack  <= '1';
+                            e_pref_valid <= '0';
                         elsif e_rom_pend='1' and (last_was_v='1' or v_rom_pend='0') then
                             rom_owner <= OWN_E; last_was_v <= '0';
                             rom_addr_i <= std_logic_vector(
@@ -165,14 +184,22 @@ begin
                         if v_as_n='1' then                       -- CPU ended cycle: abort
                             rom_req_i <= '0'; rom_owner <= OWN_IDLE;
                         elsif rom_ack='1' then
-                            rom_req_i <= '0'; v_rom_hold <= rom_data;
+                            rom_req_i <= '0'; v_rom_hold <= rom_data(31 downto 16);
+                            v_pref_data  <= rom_data(15 downto 0);
+                            v_pref_addr  <= std_logic_vector(
+                                unsigned(v_addr(19 downto 1) & '0') + 2);
+                            v_pref_valid <= '1';
                             v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                         end if;
                     when OWN_E =>
                         if e_as_n='1' then
                             rom_req_i <= '0'; rom_owner <= OWN_IDLE;
                         elsif rom_ack='1' then
-                            rom_req_i <= '0'; e_rom_hold <= rom_data;
+                            rom_req_i <= '0'; e_rom_hold <= rom_data(31 downto 16);
+                            e_pref_data  <= rom_data(15 downto 0);
+                            e_pref_addr  <= std_logic_vector(
+                                unsigned(e_addr(19 downto 1) & '0') + 2);
+                            e_pref_valid <= '1';
                             e_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                         end if;
                 end case;
@@ -209,9 +236,12 @@ begin
                    we_a=>we_pf, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>pf_q,
                    addr_b=>pf_vaddr, din_b=>(others=>'0'),
                    we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>pf_vdata );
-    mo_ram    : entity work.spram_bytelane generic map ( awidth=>12 )
-        port map ( clk=>clk, addr=>v_addr(12 downto 1), din=>v_do, we=>we_mo,
-                   uds_n=>v_uds_n, lds_n=>v_lds_n, q=>mo_q );
+    mo_ram    : entity work.dpram_bytelane_syn generic map ( awidth=>12 )
+        port map ( clk=>clk,
+                   addr_a=>v_addr(12 downto 1), din_a=>v_do,
+                   we_a=>we_mo, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>mo_q,
+                   addr_b=>mo_vaddr, din_b=>(others=>'0'),
+                   we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>mo_vdata );
     work_ram  : entity work.spram_bytelane generic map ( awidth=>13 )
         port map ( clk=>clk, addr=>v_addr(13 downto 1), din=>v_do, we=>we_work,
                    uds_n=>v_uds_n, lds_n=>v_lds_n, q=>work_q );
@@ -227,9 +257,12 @@ begin
                    we_a=>we_color, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>color_q,
                    addr_b=>color_vaddr, din_b=>(others=>'0'),
                    we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>color_vdata );
-    cfg_ram   : entity work.spram_bytelane generic map ( awidth=>7 )
-        port map ( clk=>clk, addr=>v_addr(7 downto 1), din=>v_do, we=>we_cfg,
-                   uds_n=>v_uds_n, lds_n=>v_lds_n, q=>cfg_q );
+    cfg_ram   : entity work.dpram_bytelane_syn generic map ( awidth=>7 )
+        port map ( clk=>clk,
+                   addr_a=>v_addr(7 downto 1), din_a=>v_do,
+                   we_a=>we_cfg, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>cfg_q,
+                   addr_b=>cfg_vaddr, din_b=>(others=>'0'),
+                   we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>cfg_vdata );
     ee_ram    : entity work.spram_bytelane generic map ( awidth=>13 )
         port map ( clk=>clk, addr=>v_addr(13 downto 1), din=>v_do, we=>we_ee,
                    uds_n=>v_uds_n, lds_n=>v_lds_n, q=>ee_q );
