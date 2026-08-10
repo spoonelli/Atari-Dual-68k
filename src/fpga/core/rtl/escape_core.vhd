@@ -20,6 +20,7 @@ entity escape_core is
         -- external program ROM bus (combined-image byte offsets; word reads)
         rom_addr   : out std_logic_vector(23 downto 0);
         rom_data   : in  std_logic_vector(31 downto 0);  -- [31:16]=addr, [15:0]=addr+2
+        rom_par    : in  std_logic := '0';   -- even parity over rom_data, from server
         rom_req    : out std_logic;
         rom_ack    : in  std_logic;
 
@@ -76,7 +77,8 @@ entity escape_core is
         -- boot-flow milestones: [15:8] last byte written to the 'tests done'
         -- flag $3F7F0C (01 = self-test passed), [7:0] soft-reboot count
         -- (extra-CPU re-reset via 360010 D0 clearing = boot pass transitions)
-        dbg_boot      : out std_logic_vector(15 downto 0)
+        dbg_boot      : out std_logic_vector(15 downto 0);
+        dbg_retry     : out std_logic_vector(15 downto 0)  -- CDC parity retries
     );
 end escape_core;
 
@@ -107,6 +109,14 @@ architecture rtl of escape_core is
     signal intensity : std_logic_vector(3 downto 0);
     signal virq, vblank_d, v_pc_seen : std_logic;
 
+    -- even parity over the 32-bit ROM delivery (checked against rom_par)
+    function parity32(v : std_logic_vector(31 downto 0)) return std_logic is
+        variable p : std_logic := '0';
+    begin
+        for i in 0 to 31 loop p := p xor v(i); end loop;
+        return p;
+    end function;
+
     type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E);
     signal rom_owner : rom_owner_t;
     signal last_was_v : std_logic;   -- fair round-robin: alternate priority
@@ -136,6 +146,8 @@ architecture rtl of escape_core is
     signal pf_wcnt, pf_last, col_wcnt : std_logic_vector(15 downto 0) := (others=>'0');
     signal boot_flag  : std_logic_vector(7 downto 0) := (others=>'0');
     signal reboot_cnt : unsigned(7 downto 0) := (others=>'0');
+    signal retry_cnt  : unsigned(15 downto 0) := (others=>'0');
+    signal rom_par_ok : std_logic;
     signal alpha_wr_stretch : unsigned(19 downto 0);
 begin
     ---------------------------------------------------------------- CPUs
@@ -189,6 +201,7 @@ begin
                 v_pref_valid <= '0'; e_pref_valid <= '0';
                 v_last_valid <= '0'; e_last_valid <= '0';
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
+                retry_cnt <= (others=>'0');
             else
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
                 case rom_owner is
@@ -237,6 +250,11 @@ begin
                     when OWN_V =>
                         if v_as_n='1' then                       -- CPU ended cycle: abort
                             rom_req_i <= '0'; rom_owner <= OWN_IDLE;
+                        elsif rom_req_i='0' then                 -- parity retry: re-issue
+                            if rom_ack='0' then rom_req_i <= '1'; end if;
+                        elsif rom_ack='1' and rom_par_ok='0' then -- bad CDC data: retry
+                            rom_req_i <= '0';
+                            retry_cnt <= retry_cnt + 1;
                         elsif rom_ack='1' then
                             rom_req_i <= '0'; v_rom_hold <= rom_data(31 downto 16);
                             v_pref_data  <= rom_data(15 downto 0);
@@ -253,6 +271,11 @@ begin
                     when OWN_E =>
                         if e_as_n='1' then
                             rom_req_i <= '0'; rom_owner <= OWN_IDLE;
+                        elsif rom_req_i='0' then                 -- parity retry: re-issue
+                            if rom_ack='0' then rom_req_i <= '1'; end if;
+                        elsif rom_ack='1' and rom_par_ok='0' then
+                            rom_req_i <= '0';
+                            retry_cnt <= retry_cnt + 1;
                         elsif rom_ack='1' then
                             rom_req_i <= '0'; e_rom_hold <= rom_data(31 downto 16);
                             e_pref_data  <= rom_data(15 downto 0);
@@ -338,6 +361,8 @@ begin
     dbg_pf_last  <= pf_last;
     dbg_col_wcnt <= col_wcnt;
     dbg_boot     <= boot_flag & std_logic_vector(reboot_cnt);
+    rom_par_ok   <= '1' when parity32(rom_data) = rom_par else '0';
+    dbg_retry    <= std_logic_vector(retry_cnt);
 
     we_pf    <= v_wr and v_sel_pf;
     we_mo    <= v_wr and v_sel_mo;

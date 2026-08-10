@@ -797,6 +797,7 @@ end
     wire        core_rom_ack_s;
     wire [31:0] sd_rd_data;
     reg  [31:0] core_rom_data;
+    reg         core_rom_par;
     reg         sd_rd_req;
     wire        sd_rd_ack;
 synch_3 s_rr(core_rom_req, core_rom_req_s, clk_sdram);
@@ -960,6 +961,7 @@ always @(posedge clk_sdram) begin
             sd_rd_req <= 0;
             cpu_owner <= 0;
             core_rom_data <= sd_rd_data;
+            core_rom_par  <= ^sd_rd_data;      // even parity rides with the data
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
@@ -1133,8 +1135,8 @@ end
         case(slot)
         4'd0:  hex_digit = scrub_bad_px[15:12];  4'd1:  hex_digit = scrub_bad_px[11:8];
         4'd2:  hex_digit = scrub_bad_px[7:4];    4'd3:  hex_digit = scrub_bad_px[3:0];
-        4'd5:  hex_digit = scrub_err_px[15:12];  4'd6:  hex_digit = scrub_err_px[11:8];
-        4'd7:  hex_digit = scrub_err_px[7:4];    4'd8:  hex_digit = scrub_err_px[3:0];
+        4'd5:  hex_digit = dbg_retry[15:12];     4'd6:  hex_digit = dbg_retry[11:8];
+        4'd7:  hex_digit = dbg_retry[7:4];       4'd8:  hex_digit = dbg_retry[3:0];
         4'd10: hex_digit = dbg_boot[15:12];      4'd11: hex_digit = dbg_boot[11:8];
         4'd12: hex_digit = dbg_boot[7:4];        4'd13: hex_digit = dbg_boot[3:0];
         default: hex_digit = 4'h0;
@@ -1147,7 +1149,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0028;   // v28
+    localparam [15:0] BUILD_ID = 16'h0029;   // v29
     wire [8:0] vx0      = visible_x - 9'd300;
     wire       ver_on   = (visible_x >= 'd300) && (visible_x < 'd364);
     wire [1:0] ver_slot = vx0[5:4];
@@ -1351,6 +1353,7 @@ escape_mob umob (
     wire [15:0] dbg_mbox_cmd, dbg_mbox_resp, dbg_mbox_ramr, dbg_mbox_sum;
     wire [15:0] dbg_pf_wcnt, dbg_pf_last, dbg_col_wcnt;
     wire [15:0] dbg_boot;
+    wire [15:0] dbg_retry;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
     wire iso_mo_off, iso_alpha_off;
@@ -1361,6 +1364,7 @@ escape_core ecore (
     .reset_n    ( core_reset_n ),
     .rom_addr   ( core_rom_addr ),
     .rom_data   ( core_rom_data ),
+    .rom_par    ( core_rom_par ),
     .rom_req    ( core_rom_req ),
     .rom_ack    ( core_rom_ack_s ),
     .vblank_in  ( vblank_w ),
@@ -1394,7 +1398,8 @@ escape_core ecore (
     .dbg_pf_wcnt    ( dbg_pf_wcnt ),
     .dbg_pf_last    ( dbg_pf_last ),
     .dbg_col_wcnt   ( dbg_col_wcnt ),
-    .dbg_boot       ( dbg_boot )
+    .dbg_boot       ( dbg_boot ),
+    .dbg_retry      ( dbg_retry )
 );
 
 endmodule
