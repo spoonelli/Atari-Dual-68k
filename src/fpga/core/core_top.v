@@ -883,8 +883,14 @@ always @(posedge clk_sdram) begin
             mg_done_85 <= ~mg_done_85;
             mg_phase  <= 2'd0;
         end
-        // CPU fetch service
-        if(vg_phase==2'd0 && vg_req_s == vg_req_last && mg_phase==2'd0) begin
+        // CPU fetch service. MUST also yield to a PENDING MO request
+        // (mg_req_s != mg_req_last), not just an in-flight one: without that
+        // check both gates fire on the same edge, one read goes out with the
+        // MO address, and the CPU is served sprite pixels as instructions.
+        // (Root cause of the v14-v19 per-boot corruption: phantom RAM-test
+        // failures, wrong palettes, duplicated chars in ROM-sourced text.)
+        if(vg_phase==2'd0 && vg_req_s == vg_req_last
+           && mg_phase==2'd0 && mg_req_s == mg_req_last) begin
             if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
                 sd_rd_req <= 1;
                 cpu_owner <= 1;
