@@ -114,8 +114,15 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
   MAME developers for decades of preservation work that made this core possible.
 - The **openFPGA** community and **Analogue** for the Pocket core framework
   ([`open-fpga/core-template`](https://github.com/open-fpga/core-template)).
-- **MiSTer-devel** for the Atari System 1 RTL this core's base was derived from
-  (including its T65-family 6502, reused for the JSA-I sound board).
+- **d18c7db (Alex)** and **MiSTer-devel** for
+  [`Arcade-Atari-system1_MiSTer`](https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer)
+  (GPL-3.0), the schematic-based Atari System 1 core this project's RTL base was
+  derived from.
+- **Tobias Gubener (TobiFlex)** for the **TG68K.C** 68000 soft-CPU core (LGPL-3.0,
+  with patches by MikeJ, Till Harbaum, Rok Krajnc and others) — both of this core's
+  68000s are TG68K instances, via the System 1 tree.
+- **Daniel Wallner** for the **T65** 6502 core (BSD-style license, via OpenCores /
+  the System 1 tree), reused for the JSA-I sound board's 6502.
 - **Jose Tejada (jotego)** for [`jt51`](https://github.com/jotego/jt51), the
   YM2151 FM synthesis core used by the JSA-I audio subsystem (GPL-3.0, included
   as a git submodule with license and history intact). Jotego's FPGA arcade
