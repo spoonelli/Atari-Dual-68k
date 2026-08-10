@@ -1129,14 +1129,16 @@ end
     end
     reg  [3:0] hex_digit;
     always @(*) begin
-        // HUD: BADBLK(0FFF=none) | ERRcnt | BOOT(flag.reboots)
-        // roving scrubber sweeps ALL 4KB blocks of the image forever; a nonzero
-        // ERR with BADBLK names the corrupt SDRAM region directly
+        // HUD: WR84 | RD84 | BOOT(flag.reboots)
+        // WR84 = last CPU write to alpha word 0x42 (the corrupted 'e' cell of
+        // "Testing Ram.", expected 0065); RD84 = last scanout readback of it.
+        // WR84 wrong -> corruption upstream of the RAM; WR84 right + RD84 wrong
+        // -> storage/readout; both right -> glyph/tile fetch path.
         case(slot)
-        4'd0:  hex_digit = scrub_bad_px[15:12];  4'd1:  hex_digit = scrub_bad_px[11:8];
-        4'd2:  hex_digit = scrub_bad_px[7:4];    4'd3:  hex_digit = scrub_bad_px[3:0];
-        4'd5:  hex_digit = dbg_retry[15:12];     4'd6:  hex_digit = dbg_retry[11:8];
-        4'd7:  hex_digit = dbg_retry[7:4];       4'd8:  hex_digit = dbg_retry[3:0];
+        4'd0:  hex_digit = dbg_a84_wr[15:12];    4'd1:  hex_digit = dbg_a84_wr[11:8];
+        4'd2:  hex_digit = dbg_a84_wr[7:4];      4'd3:  hex_digit = dbg_a84_wr[3:0];
+        4'd5:  hex_digit = dbg_a84_rd[15:12];    4'd6:  hex_digit = dbg_a84_rd[11:8];
+        4'd7:  hex_digit = dbg_a84_rd[7:4];      4'd8:  hex_digit = dbg_a84_rd[3:0];
         4'd10: hex_digit = dbg_boot[15:12];      4'd11: hex_digit = dbg_boot[11:8];
         4'd12: hex_digit = dbg_boot[7:4];        4'd13: hex_digit = dbg_boot[3:0];
         default: hex_digit = 4'h0;
@@ -1149,9 +1151,10 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0031;   // v31
-    wire [8:0] vx0      = visible_x - 9'd300;
-    wire       ver_on   = (visible_x >= 'd300) && (visible_x < 'd364);
+    localparam [15:0] BUILD_ID = 16'h0032;   // v32
+    // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
+    wire [8:0] vx0      = visible_x - 9'd264;
+    wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
     wire [1:0] ver_slot = vx0[5:4];
     reg  [3:0] ver_digit;
     always @(*) case(ver_slot)
@@ -1354,6 +1357,7 @@ escape_mob umob (
     wire [15:0] dbg_pf_wcnt, dbg_pf_last, dbg_col_wcnt;
     wire [15:0] dbg_boot;
     wire [15:0] dbg_retry;
+    wire [15:0] dbg_a84_wr, dbg_a84_rd;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
     wire iso_mo_off, iso_alpha_off;
@@ -1399,7 +1403,9 @@ escape_core ecore (
     .dbg_pf_last    ( dbg_pf_last ),
     .dbg_col_wcnt   ( dbg_col_wcnt ),
     .dbg_boot       ( dbg_boot ),
-    .dbg_retry      ( dbg_retry )
+    .dbg_retry      ( dbg_retry ),
+    .dbg_a84_wr     ( dbg_a84_wr ),
+    .dbg_a84_rd     ( dbg_a84_rd )
 );
 
 endmodule
