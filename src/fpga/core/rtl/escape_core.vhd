@@ -83,7 +83,13 @@ entity escape_core is
         -- (byte addr 0x3F4084, the 'e' of "Testing Ram." printed by ROM 0x342-0x356;
         -- expected word 0x0065). wr = last CPU-written value, rd = last scanout value.
         dbg_a84_wr    : out std_logic_vector(15 downto 0);
-        dbg_a84_rd    : out std_logic_vector(15 downto 0)
+        dbg_a84_rd    : out std_logic_vector(15 downto 0);
+        -- live wedge-locator: last video-CPU instruction-fetch address (low 16,
+        -- boot/march code all sits below 0x10000) + last data-write addr [23:8]
+        -- (names the RAM region the march is currently in: 16xx shared, 3F5x work,
+        --  3F0x pf, 3F2x mo, 3F4x alpha, 3E0x color)
+        dbg_pc        : out std_logic_vector(15 downto 0);
+        dbg_wrhi      : out std_logic_vector(15 downto 0)
     );
 end escape_core;
 
@@ -143,6 +149,7 @@ architecture rtl of escape_core is
 
     signal alpha_vq : std_logic_vector(15 downto 0);
     signal a84_wr_i, a84_rd_i : std_logic_vector(15 downto 0);
+    signal pc_i, wrhi_i : std_logic_vector(15 downto 0);
     signal alpha_vaddr_d : std_logic_vector(10 downto 0);
     signal shr_qa, shr_qb : std_logic_vector(15 downto 0);
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
@@ -449,6 +456,25 @@ begin
     end process;
     dbg_a84_wr <= a84_wr_i;
     dbg_a84_rd <= a84_rd_i;
+
+    -- wedge locator: FC(1:0)="10" marks program-space reads (user or supervisor)
+    pc_probe : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                pc_i <= (others=>'0'); wrhi_i <= (others=>'0');
+            else
+                if v_as_n='0' and v_rw_n='1' and v_fc(1)='1' and v_fc(0)='0' then
+                    pc_i <= v_addr(15 downto 0);
+                end if;
+                if v_as_n='0' and v_rw_n='0' then
+                    wrhi_i <= v_addr(23 downto 8);
+                end if;
+            end if;
+        end if;
+    end process;
+    dbg_pc   <= pc_i;
+    dbg_wrhi <= wrhi_i;
 
     ---------------------------------------------------------------- latches + IRQ
     latches : process(clk)
