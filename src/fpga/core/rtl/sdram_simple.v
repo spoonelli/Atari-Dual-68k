@@ -103,7 +103,7 @@ module sdram_simple (
         end else begin
             cmd(CMD_NOP);
             refresh_ctr <= refresh_ctr + 10'd1;
-            if (refresh_ctr == 10'd300) begin      // ~7us @ 43MHz
+            if (refresh_ctr == 10'd250) begin      // ~7us @ 35.8MHz (spec: <7.8us)
                 refresh_due <= 1'b1;
                 refresh_ctr <= 10'd0;
             end
