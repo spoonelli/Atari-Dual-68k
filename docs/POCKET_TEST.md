@@ -1,6 +1,6 @@
 # Testing on the Analogue Pocket — hello-world drop
 
-What this build does: boots both 68010s on real Escape code loaded from your ROM via
+What this build does: boots both 68000s on real Escape code loaded from your ROM via
 SDRAM, and shows a **status screen** (no game video yet):
 
 | Screen area   | Meaning |

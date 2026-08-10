@@ -152,7 +152,7 @@ architecture rtl of escape_core is
     signal alpha_wr_stretch : unsigned(19 downto 0);
 begin
     ---------------------------------------------------------------- CPUs
-    -- 68010 per schematic sheet 4 (45J "U68010"); autovectored IRQs via VPA
+    -- 68000 (schematic says U68010 but real boards carry 68000s); autovectored IRQs via VPA
     vcpu : entity work.TG68K generic map ( CPU => "00" )
         port map ( CLK=>clk, RESET=>reset_n, HALT=>reset_n, BERR=>'0', IPL=>v_ipl,
                    ADDR=>v_addr, FC=>v_fc, DATAI=>v_di, DATAO=>v_do,
@@ -160,7 +160,7 @@ begin
                    DTACK=>v_dtack_n, E=>open, VPA=>v_vpa_n, VMA=>open );
 
     e_resn <= reset_n and (extra_release or dbg_force_extra);
-    -- also a 68010 per schematic sheet 5 (20P "U68010")
+    -- also a 68000 (same schematic-vs-board story as the video CPU)
     ecpu : entity work.TG68K generic map ( CPU => "00" )
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>e_ipl,
                    ADDR=>e_addr, FC=>e_fc, DATAI=>e_di, DATAO=>e_do,

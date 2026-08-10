@@ -84,7 +84,7 @@ version; note the differences (EEPROM range, per-layer color RAM, SLIP pointers)
 | `360030`   | W   | D0–D7 | Write Sound Processor (SCOM) |
 
 **Findings from the full schematic re-scan (sheets 2–5), 2026-08-07:**
-- **Both CPUs are 68010s** (sheet 4: 45J `U68010`; sheet 5: 20P `U68010`) — MAME models
+- **Both CPUs are 68000s on real boards** — the schematic labels them `U68010` (sheet 4: 45J; sheet 5: 20P) but production hardware (verified from an actual ESC board) carries MC68000s, matching MAME. MAME models
   them as 68000. TG68K `CPU=>"01"` throughout. Exception frames differ; this matters.
 - **Interrupts are autovectored** via VPA asserted on FC=111 (sheet 4, 60L/55L). VBLANK
   /VINT hits both CPUs (IRQ4); /SINT is the sound IRQ (IRQ6, main CPU only).
