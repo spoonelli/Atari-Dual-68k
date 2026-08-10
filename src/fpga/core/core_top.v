@@ -717,6 +717,22 @@ always @(posedge clk_74a) begin
         dl_quiet_ctr <= dl_quiet_ctr + 22'd1;
     end
 end
+
+    // ---------------- Interact menu (interact.json): service switch + soft reset
+    // 0xA0000000: 'Service Mode' checkbox -> self-test lever (260010 D1, active low)
+    // 0xA0000010: 'Soft Reset Core' action -> ~56ms CPU reset pulse, like the
+    //             cabinet's watchdog restart (flip lever + reset = service menu)
+    reg        svc_mode_74 = 1'b0;
+    reg [22:0] soft_rst_ctr = 23'd0;
+always @(posedge clk_74a) begin
+    if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
+    else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
+end
+    wire soft_rst_74 = (soft_rst_ctr != 23'd0);   // ~113ms self-clearing pulse
+    wire svc_mode_s, soft_rst_s;
+synch_3 s_svc(svc_mode_74, svc_mode_s, clk_sys_7159);
+synch_3 s_srst(soft_rst_74, soft_rst_s, clk_sys_7159);
     // high ~56ms after the last download write (and only once a download was seen)
     wire dl_quiet_74 = dl_seen && (&dl_quiet_ctr);
     wire dl_quiet_sd;
@@ -816,6 +832,8 @@ synch_3 s_vgd(vg_done_85, vg_done_s, clk_sys_7159);
     reg [15:0] chr_wdata;
     wire       allcomplete_sd;
 synch_3 s_acsd(dataslot_allcomplete, allcomplete_sd, clk_sdram);
+    wire vidkill_sd;
+synch_3 s_vk(cont1_key[11], vidkill_sd, clk_sdram);   // R2: video-fetch kill (diag)
 
 always @(posedge clk_sdram) begin
     case(chk_state)
@@ -877,7 +895,7 @@ always @(posedge clk_sdram) begin
     end
     4'd10: begin
         // VIDEO gfx fetch: one 32-bit burst, priority over CPU
-        if(vg_req_s != vg_req_last && !sd_rd_req && !sd_rd_ack && vg_phase==2'd0) begin
+        if(!vidkill_sd && vg_req_s != vg_req_last && !sd_rd_req && !sd_rd_ack && vg_phase==2'd0) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
             vg_phase    <= 2'd1;
@@ -888,8 +906,18 @@ always @(posedge clk_sdram) begin
             vg_done_85 <= ~vg_done_85;
             vg_phase  <= 2'd0;
         end
+        // diagnostic (hold R2): consume video-fetch toggles WITHOUT touching
+        // SDRAM - isolates the vg/mg service from the CPU path on hardware
+        if(vidkill_sd) begin
+            if(vg_req_s != vg_req_last && vg_phase==2'd0) begin
+                vg_req_last <= vg_req_s; vg_data <= 32'd0; vg_done_85 <= ~vg_done_85;
+            end
+            if(mg_req_s != mg_req_last && mg_phase==2'd0) begin
+                mg_req_last <= mg_req_s; mg_data <= 32'd0; mg_done_85 <= ~mg_done_85;
+            end
+        end
         // MO gfx fetch: served when PF idle
-        if(mg_req_s != mg_req_last && vg_phase==2'd0 && vg_req_s==vg_req_last
+        if(!vidkill_sd && mg_req_s != mg_req_last && vg_phase==2'd0 && vg_req_s==vg_req_last
            && !sd_rd_req && !sd_rd_ack && mg_phase==2'd0) begin
             mg_req_last <= mg_req_s;
             sd_rd_req   <= 1;
@@ -1003,7 +1031,8 @@ synch_3 s_id(sdram_init_done, sdram_init_done_s, clk_sys_7159);
 synch_3 s_cd(chk_done, chk_done_s, clk_sys_7159);
 synch_3 s_co(chk_ok,   chk_ok_s,   clk_sys_7159);
 synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
-    wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s & chk_done_s;
+    wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s & chk_done_s
+                        & ~soft_rst_s;
 
     // sticky: CPU has issued at least one ROM fetch
     reg rom_req_seen;
@@ -1098,7 +1127,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0026;   // v26
+    localparam [15:0] BUILD_ID = 16'h0027;   // v27
     wire [8:0] vx0      = visible_x - 9'd300;
     wire       ver_on   = (visible_x >= 'd300) && (visible_x < 'd364);
     wire [1:0] ver_slot = vx0[5:4];
@@ -1317,6 +1346,7 @@ escape_core ecore (
     .vblank_in  ( vblank_w ),
     // {duck, spare, fire, jump} = Pocket {X, -, B, A}   (schematic sheet 3: CD11..CD8)
     .p1_buttons ( {cont1_key[6], 1'b0, cont1_key[5], cont1_key[4]} ),
+    .svc_n      ( ~svc_mode_s ),
     .p2_buttons ( 4'b0000 ),
     .alpha_vaddr( alpha_vaddr ),
     .alpha_vdata( alpha_vdata ),

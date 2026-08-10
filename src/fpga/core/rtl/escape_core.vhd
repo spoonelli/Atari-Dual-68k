@@ -29,6 +29,8 @@ entity escape_core is
         -- player inputs, active-high pressed (mapped to active-low bus bits)
         p1_buttons : in  std_logic_vector(3 downto 0);  -- D11 duck..D8 start
         p2_buttons : in  std_logic_vector(3 downto 0);
+        -- self-test lever (260010 D1, active low: 0 = service mode)
+        svc_n      : in  std_logic := '1';
 
         -- video-side read ports + latches for the video chain
         alpha_vaddr : in  std_logic_vector(10 downto 0) := (others => '0');
@@ -466,8 +468,8 @@ begin
             -- 260000: P1 inputs on D11-D8 (duck/spare/fire/jump, active low)
             (x"F" & not p1_buttons & x"FF")  when v_sel_io='1' and v_addr(5 downto 4)="00" else
             -- 260010: P2 inputs + status: D4 ADEOC=1(done), D3 /SCBSY=1(idle),
-            -- D2 /SINT=1(no snd irq), D1 S-TEST=1(normal play), D0 /VBLANK
-            (x"F" & not p2_buttons & "1111" & "111" & not vblank_in)
+            -- D2 /SINT=1(no snd irq), D1 self-test lever (0=service), D0 /VBLANK
+            (x"F" & not p2_buttons & "1111" & "11" & svc_n & not vblank_in)
                                              when v_sel_io='1' and v_addr(5 downto 4)="01" else
             x"0080" when v_sel_io='1' and v_addr(5 downto 4)="10" else
             x"0000" when v_sel_io='1' else
