@@ -66,7 +66,11 @@ entity escape_core is
         dbg_mbox_cmd  : out std_logic_vector(15 downto 0);
         dbg_mbox_resp : out std_logic_vector(15 downto 0);
         dbg_mbox_ramr : out std_logic_vector(15 downto 0);
-        dbg_mbox_sum  : out std_logic_vector(15 downto 0)
+        dbg_mbox_sum  : out std_logic_vector(15 downto 0);
+        -- playfield-write activity: is the game drawing a picture at all?
+        dbg_pf_wcnt   : out std_logic_vector(15 downto 0);  -- nonzero PF-RAM writes
+        dbg_pf_last   : out std_logic_vector(15 downto 0);  -- last nonzero PF word
+        dbg_col_wcnt  : out std_logic_vector(15 downto 0)   -- color-RAM writes (palette)
     );
 end escape_core;
 
@@ -123,6 +127,7 @@ architecture rtl of escape_core is
     signal shr_a_din  : std_logic_vector(15 downto 0);
     signal shr_a_uds, shr_a_lds : std_logic;
     signal mbox_cmd, mbox_resp, mbox_ramr, mbox_sum : std_logic_vector(15 downto 0) := (others=>'0');
+    signal pf_wcnt, pf_last, col_wcnt : std_logic_vector(15 downto 0) := (others=>'0');
     signal alpha_wr_stretch : unsigned(19 downto 0);
 begin
     ---------------------------------------------------------------- CPUs
@@ -298,6 +303,28 @@ begin
     dbg_mbox_resp <= mbox_resp;
     dbg_mbox_ramr <= mbox_ramr;
     dbg_mbox_sum  <= mbox_sum;
+
+    -- playfield / palette write activity probes (per bus write, not per cycle:
+    -- count on the DTACK'd first cycle only via write-edge detect)
+    pf_probe : process(clk)
+        variable v_wr_d : std_logic := '0';
+    begin
+        if rising_edge(clk) then
+            if v_wr='1' and v_wr_d='0' then          -- one count per CPU write cycle
+                if v_sel_pf='1' and v_do /= x"0000" then
+                    pf_wcnt <= std_logic_vector(unsigned(pf_wcnt) + 1);
+                    pf_last <= v_do;
+                end if;
+                if v_sel_color='1' then
+                    col_wcnt <= std_logic_vector(unsigned(col_wcnt) + 1);
+                end if;
+            end if;
+            v_wr_d := v_wr;
+        end if;
+    end process;
+    dbg_pf_wcnt  <= pf_wcnt;
+    dbg_pf_last  <= pf_last;
+    dbg_col_wcnt <= col_wcnt;
 
     we_pf    <= v_wr and v_sel_pf;
     we_mo    <= v_wr and v_sel_mo;
