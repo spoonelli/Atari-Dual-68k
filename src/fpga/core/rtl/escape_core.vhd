@@ -87,6 +87,7 @@ architecture rtl of escape_core is
     signal v_do, v_di : std_logic_vector(15 downto 0);
     signal v_as_n, v_uds_n, v_lds_n, v_rw_n : std_logic;
     signal v_dtack_n : std_logic;
+    signal v_ws, e_ws : std_logic;   -- +1 waitstate on non-ROM acks (v30)
     signal v_ipl : std_logic_vector(2 downto 0);
     signal v_fc, e_fc : std_logic_vector(2 downto 0);
     signal v_vpa_n, e_vpa_n : std_logic;
@@ -510,25 +511,32 @@ begin
         if rising_edge(clk) then
             if reset_n='0' then
                 v_dtack_n <= '1'; e_dtack_n <= '1';
+                v_ws <= '0'; e_ws <= '0';
             else
-                -- latch DTACK low until the CPU ends the bus cycle (AS high)
+                -- latch DTACK low until the CPU ends the bus cycle (AS high).
+                -- Non-ROM accesses take one extra waitstate so the BRAM output
+                -- has a full settled cycle in the read mux before capture.
                 if v_as_n='0' then
                     if v_sel_rom='1' then
                         if v_rom_dtack='1' then v_dtack_n <= '0'; end if;
-                    else
+                    elsif v_ws='1' then
                         v_dtack_n <= '0';
+                    else
+                        v_ws <= '1';
                     end if;
                 else
-                    v_dtack_n <= '1';
+                    v_dtack_n <= '1'; v_ws <= '0';
                 end if;
                 if e_as_n='0' then
                     if e_sel_rom='1' then
                         if e_rom_dtack='1' then e_dtack_n <= '0'; end if;
-                    else
+                    elsif e_ws='1' then
                         e_dtack_n <= '0';
+                    else
+                        e_ws <= '1';
                     end if;
                 else
-                    e_dtack_n <= '1';
+                    e_dtack_n <= '1'; e_ws <= '0';
                 end if;
             end if;
         end if;

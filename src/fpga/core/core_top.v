@@ -1149,7 +1149,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0029;   // v29
+    localparam [15:0] BUILD_ID = 16'h0030;   // v30
     wire [8:0] vx0      = visible_x - 9'd300;
     wire       ver_on   = (visible_x >= 'd300) && (visible_x < 'd364);
     wire [1:0] ver_slot = vx0[5:4];
