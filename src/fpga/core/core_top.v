@@ -590,6 +590,9 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                     if(visible_x >= 'd40 && visible_x < 'd296) begin
                         vidout_rgb <= chk2_val['d15 - ((visible_x - 'd40) >> 4)]
                                       ? 24'hFFFFFF : 24'h303030;
+                    end else if(ver_on) begin
+                        // BUILD_ID digits (cyan): on-device version check
+                        vidout_rgb <= ver_px ? 24'h00FFFF : 24'h101010;
                     end else begin
                         vidout_rgb <= 24'h101010;
                     end
@@ -1091,6 +1094,22 @@ end
     wire hex_slot_on = (slot!=4'd4 && slot!=4'd9 && slot<4'd14);
     wire [3:0] hex_row = hexfont(hex_digit, gy);
     wire hex_px = hex_slot_on && hex_row[2'd3 - gx];
+
+    // ---------------- on-device build version (diag strip, right of bit row)
+    // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
+    // guards against flashing/labeling control issues.
+    localparam [15:0] BUILD_ID = 16'h0026;   // v26
+    wire [8:0] vx0      = visible_x - 9'd300;
+    wire       ver_on   = (visible_x >= 'd300) && (visible_x < 'd364);
+    wire [1:0] ver_slot = vx0[5:4];
+    reg  [3:0] ver_digit;
+    always @(*) case(ver_slot)
+        2'd0: ver_digit = BUILD_ID[15:12]; 2'd1: ver_digit = BUILD_ID[11:8];
+        2'd2: ver_digit = BUILD_ID[7:4];   default: ver_digit = BUILD_ID[3:0];
+    endcase
+    wire [2:0] ver_gy  = visible_y[2:0] - 3'd4;      // y228..233 -> rows 0..5
+    wire [3:0] ver_row = hexfont(ver_digit, ver_gy);
+    wire       ver_px  = (vx0[3]==1'b0) && ver_row[2'd3 - vx0[2:1]];
     wire in_hexrow = (visible_y >= 'd100) && (visible_y < 'd124) && (visible_x >= 'd44) && (visible_x < 'd268);
 
     // ---------------- playfield pipeline (pixel domain)
