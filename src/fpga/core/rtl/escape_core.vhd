@@ -78,7 +78,12 @@ entity escape_core is
         -- flag $3F7F0C (01 = self-test passed), [7:0] soft-reboot count
         -- (extra-CPU re-reset via 360010 D0 clearing = boot pass transitions)
         dbg_boot      : out std_logic_vector(15 downto 0);
-        dbg_retry     : out std_logic_vector(15 downto 0)  -- CDC parity retries
+        dbg_retry     : out std_logic_vector(15 downto 0);  -- CDC parity retries
+        -- targeted probe for the deterministic glyph corruption: alpha word 0x42
+        -- (byte addr 0x3F4084, the 'e' of "Testing Ram." printed by ROM 0x342-0x356;
+        -- expected word 0x0065). wr = last CPU-written value, rd = last scanout value.
+        dbg_a84_wr    : out std_logic_vector(15 downto 0);
+        dbg_a84_rd    : out std_logic_vector(15 downto 0)
     );
 end escape_core;
 
@@ -136,6 +141,9 @@ architecture rtl of escape_core is
     signal v_last_addr, e_last_addr : std_logic_vector(19 downto 0);
     signal v_last_valid, e_last_valid : std_logic;
 
+    signal alpha_vq : std_logic_vector(15 downto 0);
+    signal a84_wr_i, a84_rd_i : std_logic_vector(15 downto 0);
+    signal alpha_vaddr_d : std_logic_vector(10 downto 0);
     signal shr_qa, shr_qb : std_logic_vector(15 downto 0);
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
     signal we_pf, we_mo, we_alpha, we_work, we_pfpal, we_color, we_cfg, we_ee : std_logic;
@@ -417,7 +425,30 @@ begin
                    addr_a=>v_addr(11 downto 1), din_a=>v_do,
                    we_a=>we_alpha, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>alpha_q,
                    addr_b=>alpha_vaddr, din_b=>(others=>'0'),
-                   we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>alpha_vdata );
+                   we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>alpha_vq );
+    alpha_vdata <= alpha_vq;
+
+    -- probe alpha word 0x42: what the CPU wrote vs what scanout reads back.
+    -- alpha_vq is valid one cycle after alpha_vaddr (registered BRAM address).
+    a84_probe : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                a84_wr_i <= (others=>'0'); a84_rd_i <= (others=>'0');
+                alpha_vaddr_d <= (others=>'0');
+            else
+                alpha_vaddr_d <= alpha_vaddr;
+                if we_alpha='1' and v_addr(11 downto 1) = "00001000010" then
+                    a84_wr_i <= v_do;
+                end if;
+                if alpha_vaddr_d = "00001000010" then
+                    a84_rd_i <= alpha_vq;
+                end if;
+            end if;
+        end if;
+    end process;
+    dbg_a84_wr <= a84_wr_i;
+    dbg_a84_rd <= a84_rd_i;
 
     ---------------------------------------------------------------- latches + IRQ
     latches : process(clk)
