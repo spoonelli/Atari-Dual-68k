@@ -728,6 +728,7 @@ synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
     reg [24:0] sd_wr_addr;
     reg [31:0] sd_wr_data;
     wire       sd_wr_ack;
+    reg [15:0] exp_sum;       // download-time checksum of image words 0..0xFFF
 always @(posedge clk_sdram) begin
     case(dl_phase)
     2'd0: begin
@@ -737,6 +738,12 @@ always @(posedge clk_sdram) begin
             sd_wr_data <= dl_data_74;      // both halves: one burst write
             sd_wr_req  <= 1;
             dl_phase   <= 2'd1;
+            // ground truth for the read scrubber: 16-bit sum of the first 4KB
+            // of the image, accumulated as it streams in
+            if(dl_addr_74 == 25'd0)
+                exp_sum <= dl_data_74[31:16] + dl_data_74[15:0];
+            else if(dl_addr_74 < 25'h1000)
+                exp_sum <= exp_sum + dl_data_74[31:16] + dl_data_74[15:0];
         end
     end
     2'd1: begin
@@ -774,6 +781,12 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
 
     reg [23:0] recheck_ctr;
     reg        vg_req_last, vg_done_85, cpu_owner;
+    reg        scrub_phase = 1'd0;         // read-integrity scrubber state
+    reg [10:0] scrub_addr  = 11'd0;        // word index into first 4KB (steps of 2)
+    reg [15:0] scrub_sum   = 16'd0;
+    reg [15:0] scrub_err   = 16'd0;        // passes that mismatched the download sum
+    reg [15:0] scrub_pass  = 16'd0;        // completed verify passes
+    reg [15:0] scrub_xor   = 16'd0;        // error signature of last bad pass
     reg [1:0]  vg_phase;
     reg [31:0] vg_data;
     reg        mg_req_last, mg_done_85;
@@ -903,6 +916,33 @@ always @(posedge clk_sdram) begin
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
+        // READ-INTEGRITY SCRUBBER (lowest priority): continuously re-read the
+        // first 4KB of the image and re-verify against the download checksum.
+        // Grant only when no vg/mg toggle is pending, no CPU fetch is waiting,
+        // and the bus is idle -- same-edge exclusive with every other gate.
+        if(scrub_phase==1'd0 && !sd_rd_req && !sd_rd_ack
+           && vg_phase==2'd0 && vg_req_s==vg_req_last
+           && mg_phase==2'd0 && mg_req_s==mg_req_last
+           && !cpu_owner && !(core_rom_req_s && !core_rom_ack_85)) begin
+            sd_rd_req   <= 1;
+            scrub_phase <= 1'd1;
+        end
+        if(scrub_phase==1'd1 && sd_rd_ack) begin
+            sd_rd_req   <= 0;
+            scrub_phase <= 1'd0;
+            if(scrub_addr == 11'd2046) begin
+                scrub_addr <= 11'd0;
+                scrub_pass <= scrub_pass + 16'd1;
+                if((scrub_sum + sd_rd_data[31:16] + sd_rd_data[15:0]) != exp_sum) begin
+                    scrub_err <= scrub_err + 16'd1;
+                    scrub_xor <= (scrub_sum + sd_rd_data[31:16] + sd_rd_data[15:0]) ^ exp_sum;
+                end
+                scrub_sum <= 16'd0;
+            end else begin
+                scrub_addr <= scrub_addr + 11'd2;
+                scrub_sum  <= scrub_sum + sd_rd_data[31:16] + sd_rd_data[15:0];
+            end
+        end
         // while failing, re-probe + re-DMA every ~0.6s
         recheck_ctr <= recheck_ctr + 24'd1;
         if(!chk2_ok && recheck_ctr == 24'hFFFFFF && !sd_rd_req && !sd_rd_ack
@@ -934,6 +974,7 @@ sdram_simple sdr (
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
     .rd_addr    ( (chk_state == 4'd10 && mg_phase != 2'd0) ? {1'b0, mo_gfx_addr} :
+                  (chk_state == 4'd10 && scrub_phase != 1'd0) ? {13'd0, scrub_addr, 1'b0} :
                   (chk_state == 4'd10 && !cpu_owner) ? {1'b0, vg_addr_px} :
                   (chk_state == 4'd1) ? 25'd0 :
                   (chk_state == 4'd3) ? 25'h0110400 :
@@ -1018,17 +1059,25 @@ end
     wire [3:0] slot = hx[8:4];                       // 16px per digit slot
     wire [1:0] gx   = hx[3:2];                       // glyph column (4px scale)
     wire [2:0] gy   = (visible_y - 'd100) >> 2;      // glyph row
+    // scrub counters cross clk_sdram -> pixel domain; quasi-static, 2-stage reg
+    reg [15:0] scrub_err_px, scrub_pass_px, scrub_xor_px;
+    reg [15:0] scrub_err_m,  scrub_pass_m,  scrub_xor_m;
+    always @(posedge clk_sys_7159) begin
+        scrub_err_m  <= scrub_err;   scrub_err_px  <= scrub_err_m;
+        scrub_pass_m <= scrub_pass;  scrub_pass_px <= scrub_pass_m;
+        scrub_xor_m  <= scrub_xor;   scrub_xor_px  <= scrub_xor_m;
+    end
     reg  [3:0] hex_digit;
     always @(*) begin
-        // playfield diagnosis: PFwrites(nonzero) | PFlastword | COLwrites
-        // game drawing a picture -> PFwrites large & changing, PFlast = tile code
+        // SDRAM read-integrity scrubber: ERRORS | PASSES | XOR-signature
+        // healthy = first group stays 0000 while second climbs forever
         case(slot)
-        4'd0:  hex_digit = dbg_pf_wcnt[15:12];  4'd1:  hex_digit = dbg_pf_wcnt[11:8];
-        4'd2:  hex_digit = dbg_pf_wcnt[7:4];    4'd3:  hex_digit = dbg_pf_wcnt[3:0];
-        4'd5:  hex_digit = dbg_pf_last[15:12];  4'd6:  hex_digit = dbg_pf_last[11:8];
-        4'd7:  hex_digit = dbg_pf_last[7:4];    4'd8:  hex_digit = dbg_pf_last[3:0];
-        4'd10: hex_digit = dbg_col_wcnt[15:12]; 4'd11: hex_digit = dbg_col_wcnt[11:8];
-        4'd12: hex_digit = dbg_col_wcnt[7:4];   4'd13: hex_digit = dbg_col_wcnt[3:0];
+        4'd0:  hex_digit = scrub_err_px[15:12];  4'd1:  hex_digit = scrub_err_px[11:8];
+        4'd2:  hex_digit = scrub_err_px[7:4];    4'd3:  hex_digit = scrub_err_px[3:0];
+        4'd5:  hex_digit = scrub_pass_px[15:12]; 4'd6:  hex_digit = scrub_pass_px[11:8];
+        4'd7:  hex_digit = scrub_pass_px[7:4];   4'd8:  hex_digit = scrub_pass_px[3:0];
+        4'd10: hex_digit = scrub_xor_px[15:12];  4'd11: hex_digit = scrub_xor_px[11:8];
+        4'd12: hex_digit = scrub_xor_px[7:4];    4'd13: hex_digit = scrub_xor_px[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
