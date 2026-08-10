@@ -782,6 +782,8 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg [23:0] recheck_ctr;
     reg        vg_req_last, vg_done_85, cpu_owner;
     reg        scrub_phase = 1'd0;         // read-integrity scrubber state
+    reg [11:0] scrub_tick  = 12'd0;        // ~114us periodic slot timer
+    reg        scrub_urgent= 1'd0;         // guaranteed-slot request
     reg [10:0] scrub_addr  = 11'd0;        // word index into first 4KB (steps of 2)
     reg [15:0] scrub_sum   = 16'd0;
     reg [15:0] scrub_err   = 16'd0;        // passes that mismatched the download sum
@@ -903,7 +905,8 @@ always @(posedge clk_sdram) begin
         // (Root cause of the v14-v19 per-boot corruption: phantom RAM-test
         // failures, wrong palettes, duplicated chars in ROM-sourced text.)
         if(vg_phase==2'd0 && vg_req_s == vg_req_last
-           && mg_phase==2'd0 && mg_req_s == mg_req_last) begin
+           && mg_phase==2'd0 && mg_req_s == mg_req_last
+           && !scrub_urgent && scrub_phase==1'd0) begin
             if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
                 sd_rd_req <= 1;
                 cpu_owner <= 1;
@@ -916,16 +919,20 @@ always @(posedge clk_sdram) begin
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
-        // READ-INTEGRITY SCRUBBER (lowest priority): continuously re-read the
-        // first 4KB of the image and re-verify against the download checksum.
-        // Grant only when no vg/mg toggle is pending, no CPU fetch is waiting,
-        // and the bus is idle -- same-edge exclusive with every other gate.
-        if(scrub_phase==1'd0 && !sd_rd_req && !sd_rd_ack
+        // READ-INTEGRITY SCRUBBER: continuously re-read the first 4KB of the
+        // image and re-verify against the download checksum. A purely idle-slot
+        // scrubber starves forever behind the CPUs' continuous fetch stream
+        // (v23: PASSES stayed 0), so it earns a guaranteed slot every ~114us:
+        // one read each tick, priority over the CPU, ~0.3% of bandwidth.
+        scrub_tick <= scrub_tick + 12'd1;
+        if(&scrub_tick) scrub_urgent <= 1;
+        if(scrub_urgent && scrub_phase==1'd0 && !sd_rd_req && !sd_rd_ack
            && vg_phase==2'd0 && vg_req_s==vg_req_last
            && mg_phase==2'd0 && mg_req_s==mg_req_last
-           && !cpu_owner && !(core_rom_req_s && !core_rom_ack_85)) begin
-            sd_rd_req   <= 1;
-            scrub_phase <= 1'd1;
+           && !cpu_owner) begin
+            sd_rd_req    <= 1;
+            scrub_phase  <= 1'd1;
+            scrub_urgent <= 0;
         end
         if(scrub_phase==1'd1 && sd_rd_ack) begin
             sd_rd_req   <= 0;
