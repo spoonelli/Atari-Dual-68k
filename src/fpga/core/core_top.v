@@ -1076,15 +1076,15 @@ end
     end
     reg  [3:0] hex_digit;
     always @(*) begin
-        // SDRAM read-integrity scrubber: ERRORS | PASSES | XOR-signature
-        // healthy = first group stays 0000 while second climbs forever
+        // HUD: scrubERR | BOOT(flaghi.rebootlo) | scrubPASS
+        // healthy run: 0000 | 01xx after tests pass (xx = soft-reboot count) | climbing
         case(slot)
         4'd0:  hex_digit = scrub_err_px[15:12];  4'd1:  hex_digit = scrub_err_px[11:8];
         4'd2:  hex_digit = scrub_err_px[7:4];    4'd3:  hex_digit = scrub_err_px[3:0];
-        4'd5:  hex_digit = scrub_pass_px[15:12]; 4'd6:  hex_digit = scrub_pass_px[11:8];
-        4'd7:  hex_digit = scrub_pass_px[7:4];   4'd8:  hex_digit = scrub_pass_px[3:0];
-        4'd10: hex_digit = scrub_xor_px[15:12];  4'd11: hex_digit = scrub_xor_px[11:8];
-        4'd12: hex_digit = scrub_xor_px[7:4];    4'd13: hex_digit = scrub_xor_px[3:0];
+        4'd5:  hex_digit = dbg_boot[15:12];      4'd6:  hex_digit = dbg_boot[11:8];
+        4'd7:  hex_digit = dbg_boot[7:4];        4'd8:  hex_digit = dbg_boot[3:0];
+        4'd10: hex_digit = scrub_pass_px[15:12]; 4'd11: hex_digit = scrub_pass_px[11:8];
+        4'd12: hex_digit = scrub_pass_px[7:4];   4'd13: hex_digit = scrub_pass_px[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1282,6 +1282,7 @@ escape_mob umob (
     wire dbg_v_pc_fetch, dbg_e_running, dbg_alpha_wr;
     wire [15:0] dbg_mbox_cmd, dbg_mbox_resp, dbg_mbox_ramr, dbg_mbox_sum;
     wire [15:0] dbg_pf_wcnt, dbg_pf_last, dbg_col_wcnt;
+    wire [15:0] dbg_boot;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
     wire iso_mo_off, iso_alpha_off;
@@ -1323,7 +1324,8 @@ escape_core ecore (
     .dbg_mbox_sum   ( dbg_mbox_sum ),
     .dbg_pf_wcnt    ( dbg_pf_wcnt ),
     .dbg_pf_last    ( dbg_pf_last ),
-    .dbg_col_wcnt   ( dbg_col_wcnt )
+    .dbg_col_wcnt   ( dbg_col_wcnt ),
+    .dbg_boot       ( dbg_boot )
 );
 
 endmodule

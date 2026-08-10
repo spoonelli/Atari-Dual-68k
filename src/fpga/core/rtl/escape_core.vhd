@@ -70,7 +70,11 @@ entity escape_core is
         -- playfield-write activity: is the game drawing a picture at all?
         dbg_pf_wcnt   : out std_logic_vector(15 downto 0);  -- nonzero PF-RAM writes
         dbg_pf_last   : out std_logic_vector(15 downto 0);  -- last nonzero PF word
-        dbg_col_wcnt  : out std_logic_vector(15 downto 0)   -- color-RAM writes (palette)
+        dbg_col_wcnt  : out std_logic_vector(15 downto 0);  -- color-RAM writes (palette)
+        -- boot-flow milestones: [15:8] last byte written to the 'tests done'
+        -- flag $3F7F0C (01 = self-test passed), [7:0] soft-reboot count
+        -- (extra-CPU re-reset via 360010 D0 clearing = boot pass transitions)
+        dbg_boot      : out std_logic_vector(15 downto 0)
     );
 end escape_core;
 
@@ -128,6 +132,8 @@ architecture rtl of escape_core is
     signal shr_a_uds, shr_a_lds : std_logic;
     signal mbox_cmd, mbox_resp, mbox_ramr, mbox_sum : std_logic_vector(15 downto 0) := (others=>'0');
     signal pf_wcnt, pf_last, col_wcnt : std_logic_vector(15 downto 0) := (others=>'0');
+    signal boot_flag  : std_logic_vector(7 downto 0) := (others=>'0');
+    signal reboot_cnt : unsigned(7 downto 0) := (others=>'0');
     signal alpha_wr_stretch : unsigned(19 downto 0);
 begin
     ---------------------------------------------------------------- CPUs
@@ -318,6 +324,10 @@ begin
                 if v_sel_color='1' then
                     col_wcnt <= std_logic_vector(unsigned(col_wcnt) + 1);
                 end if;
+                -- 'tests done' flag $3F7F0C: written 1 when the self-test passes
+                if v_sel_work='1' and v_addr(15 downto 1)&'0' = x"7F0C" then
+                    boot_flag <= v_do(7 downto 0);
+                end if;
             end if;
             v_wr_d := v_wr;
         end if;
@@ -325,6 +335,7 @@ begin
     dbg_pf_wcnt  <= pf_wcnt;
     dbg_pf_last  <= pf_last;
     dbg_col_wcnt <= col_wcnt;
+    dbg_boot     <= boot_flag & std_logic_vector(reboot_cnt);
 
     we_pf    <= v_wr and v_sel_pf;
     we_mo    <= v_wr and v_sel_mo;
@@ -396,6 +407,11 @@ begin
                     case v_addr(5 downto 4) is
                         when "00"   => virq <= '0';                    -- 360000 vblank ack
                         when "01"   => extra_release <= v_do(0);       -- 360010 latch
+                                       -- count soft reboots: release latch cleared
+                                       -- while set = boot code re-ran (0x6CC)
+                                       if extra_release='1' and v_do(0)='0' then
+                                           reboot_cnt <= reboot_cnt + 1;
+                                       end if;
                                        intensity     <= v_do(4 downto 1);
                                        video_off     <= v_do(5);
                         when others => null;                           -- 360020/30: sound (stub)
