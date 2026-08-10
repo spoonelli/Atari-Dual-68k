@@ -747,7 +747,11 @@ synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
     reg [24:0] sd_wr_addr;
     reg [31:0] sd_wr_data;
     wire       sd_wr_ack;
-    reg [15:0] exp_sum;       // download-time checksum of image words 0..0xFFF
+    reg [15:0] blktab [0:1023];        // per-4KB-block checksum table (whole image)
+    reg [15:0] dl_blk_sum = 16'd0;
+    reg [9:0]  dl_blk_cur = 10'd0;
+    reg [9:0]  blk_max    = 10'd0;
+    reg        dlq_d      = 1'b0;      // final-block flush on download-quiet edge
 always @(posedge clk_sdram) begin
     case(dl_phase)
     2'd0: begin
@@ -757,12 +761,16 @@ always @(posedge clk_sdram) begin
             sd_wr_data <= dl_data_74;      // both halves: one burst write
             sd_wr_req  <= 1;
             dl_phase   <= 2'd1;
-            // ground truth for the read scrubber: 16-bit sum of the first 4KB
-            // of the image, accumulated as it streams in
-            if(dl_addr_74 == 25'd0)
-                exp_sum <= dl_data_74[31:16] + dl_data_74[15:0];
-            else if(dl_addr_74 < 25'h1000)
-                exp_sum <= exp_sum + dl_data_74[31:16] + dl_data_74[15:0];
+            // ROVING scrubber ground truth: per-4KB-block checksum of the WHOLE
+            // image. Sequential download: accumulate; flush on block crossing.
+            if(dl_addr_74[21:12] != dl_blk_cur) begin
+                blktab[dl_blk_cur] <= dl_blk_sum;
+                dl_blk_cur <= dl_addr_74[21:12];
+                dl_blk_sum <= dl_data_74[31:16] + dl_data_74[15:0];
+                if(dl_addr_74[21:12] > blk_max) blk_max <= dl_addr_74[21:12];
+            end else begin
+                dl_blk_sum <= dl_blk_sum + dl_data_74[31:16] + dl_data_74[15:0];
+            end
         end
     end
     2'd1: begin
@@ -776,6 +784,9 @@ always @(posedge clk_sdram) begin
     end
     default: dl_phase <= 2'd0;
     endcase
+    // flush the final block's sum once the download goes quiet
+    dlq_d <= dl_quiet_sd;
+    if(dl_quiet_sd && !dlq_d) blktab[dl_blk_cur] <= dl_blk_sum;
 end
 
     // ---------------- escape_core ROM fetch (7.159 domain) -> SDRAM (85.9 domain)
@@ -805,9 +816,11 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg        scrub_urgent= 1'd0;         // guaranteed-slot request
     reg [10:0] scrub_addr  = 11'd0;        // word index into first 4KB (steps of 2)
     reg [15:0] scrub_sum   = 16'd0;
-    reg [15:0] scrub_err   = 16'd0;        // passes that mismatched the download sum
-    reg [15:0] scrub_pass  = 16'd0;        // completed verify passes
-    reg [15:0] scrub_xor   = 16'd0;        // error signature of last bad pass
+    reg [15:0] scrub_err   = 16'd0;        // blocks that mismatched their checksum
+    reg [15:0] scrub_pass  = 16'd0;        // completed full-image sweeps
+    reg [9:0]  scrub_blk   = 10'd0;        // roving 4KB block index
+    reg [15:0] scrub_bad   = 16'h0FFF;     // last failing block (0FFF = none yet)
+    reg [15:0] blk_exp     = 16'd0;
     reg [1:0]  vg_phase;
     reg [31:0] vg_data;
     reg        mg_req_last, mg_done_85;
@@ -965,17 +978,23 @@ always @(posedge clk_sdram) begin
             scrub_phase  <= 1'd1;
             scrub_urgent <= 0;
         end
+        blk_exp <= blktab[scrub_blk];              // registered table read
         if(scrub_phase==1'd1 && sd_rd_ack) begin
             sd_rd_req   <= 0;
             scrub_phase <= 1'd0;
-            if(scrub_addr == 11'd2046) begin
+            if(scrub_addr == 11'd2046) begin       // block done: verify + rove on
                 scrub_addr <= 11'd0;
-                scrub_pass <= scrub_pass + 16'd1;
-                if((scrub_sum + sd_rd_data[31:16] + sd_rd_data[15:0]) != exp_sum) begin
+                if((scrub_sum + sd_rd_data[31:16] + sd_rd_data[15:0]) != blk_exp) begin
                     scrub_err <= scrub_err + 16'd1;
-                    scrub_xor <= (scrub_sum + sd_rd_data[31:16] + sd_rd_data[15:0]) ^ exp_sum;
+                    scrub_bad <= {6'd0, scrub_blk};
                 end
                 scrub_sum <= 16'd0;
+                if(scrub_blk >= blk_max) begin
+                    scrub_blk  <= 10'd0;
+                    scrub_pass <= scrub_pass + 16'd1;   // full-image sweeps
+                end else begin
+                    scrub_blk <= scrub_blk + 10'd1;
+                end
             end else begin
                 scrub_addr <= scrub_addr + 11'd2;
                 scrub_sum  <= scrub_sum + sd_rd_data[31:16] + sd_rd_data[15:0];
@@ -1012,7 +1031,7 @@ sdram_simple sdr (
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
     .rd_addr    ( (chk_state == 4'd10 && mg_phase != 2'd0) ? {1'b0, mo_gfx_addr} :
-                  (chk_state == 4'd10 && scrub_phase != 1'd0) ? {13'd0, scrub_addr, 1'b0} :
+                  (chk_state == 4'd10 && scrub_phase != 1'd0) ? {3'd0, scrub_blk, scrub_addr, 1'b0} :
                   (chk_state == 4'd10 && !cpu_owner) ? {1'b0, vg_addr_px} :
                   (chk_state == 4'd1) ? 25'd0 :
                   (chk_state == 4'd3) ? 25'h0110400 :
@@ -1099,24 +1118,25 @@ end
     wire [1:0] gx   = hx[3:2];                       // glyph column (4px scale)
     wire [2:0] gy   = (visible_y - 'd100) >> 2;      // glyph row
     // scrub counters cross clk_sdram -> pixel domain; quasi-static, 2-stage reg
-    reg [15:0] scrub_err_px, scrub_pass_px, scrub_xor_px;
-    reg [15:0] scrub_err_m,  scrub_pass_m,  scrub_xor_m;
+    reg [15:0] scrub_err_px, scrub_pass_px, scrub_bad_px;
+    reg [15:0] scrub_err_m,  scrub_pass_m,  scrub_bad_m;
     always @(posedge clk_sys_7159) begin
         scrub_err_m  <= scrub_err;   scrub_err_px  <= scrub_err_m;
         scrub_pass_m <= scrub_pass;  scrub_pass_px <= scrub_pass_m;
-        scrub_xor_m  <= scrub_xor;   scrub_xor_px  <= scrub_xor_m;
+        scrub_bad_m  <= scrub_bad;   scrub_bad_px  <= scrub_bad_m;
     end
     reg  [3:0] hex_digit;
     always @(*) begin
-        // HUD: scrubERR | BOOT(flaghi.rebootlo) | scrubPASS
-        // healthy run: 0000 | 01xx after tests pass (xx = soft-reboot count) | climbing
+        // HUD: BADBLK(0FFF=none) | ERRcnt | BOOT(flag.reboots)
+        // roving scrubber sweeps ALL 4KB blocks of the image forever; a nonzero
+        // ERR with BADBLK names the corrupt SDRAM region directly
         case(slot)
-        4'd0:  hex_digit = scrub_err_px[15:12];  4'd1:  hex_digit = scrub_err_px[11:8];
-        4'd2:  hex_digit = scrub_err_px[7:4];    4'd3:  hex_digit = scrub_err_px[3:0];
-        4'd5:  hex_digit = dbg_boot[15:12];      4'd6:  hex_digit = dbg_boot[11:8];
-        4'd7:  hex_digit = dbg_boot[7:4];        4'd8:  hex_digit = dbg_boot[3:0];
-        4'd10: hex_digit = scrub_pass_px[15:12]; 4'd11: hex_digit = scrub_pass_px[11:8];
-        4'd12: hex_digit = scrub_pass_px[7:4];   4'd13: hex_digit = scrub_pass_px[3:0];
+        4'd0:  hex_digit = scrub_bad_px[15:12];  4'd1:  hex_digit = scrub_bad_px[11:8];
+        4'd2:  hex_digit = scrub_bad_px[7:4];    4'd3:  hex_digit = scrub_bad_px[3:0];
+        4'd5:  hex_digit = scrub_err_px[15:12];  4'd6:  hex_digit = scrub_err_px[11:8];
+        4'd7:  hex_digit = scrub_err_px[7:4];    4'd8:  hex_digit = scrub_err_px[3:0];
+        4'd10: hex_digit = dbg_boot[15:12];      4'd11: hex_digit = dbg_boot[11:8];
+        4'd12: hex_digit = dbg_boot[7:4];        4'd13: hex_digit = dbg_boot[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1127,7 +1147,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0027;   // v27
+    localparam [15:0] BUILD_ID = 16'h0028;   // v28
     wire [8:0] vx0      = visible_x - 9'd300;
     wire       ver_on   = (visible_x >= 'd300) && (visible_x < 'd364);
     wire [1:0] ver_slot = vx0[5:4];
