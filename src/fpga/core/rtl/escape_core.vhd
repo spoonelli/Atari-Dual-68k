@@ -111,13 +111,6 @@ architecture rtl of escape_core is
     signal v_pref_data, e_pref_data : std_logic_vector(15 downto 0);
     signal v_pref_addr, e_pref_addr : std_logic_vector(19 downto 0);
     signal v_pref_valid, e_pref_valid : std_logic;
-    -- last-word cache: ROM is read-only, so a repeat read of the same word
-    -- (68k byte reads fetch the same word twice for even/odd bytes) is served
-    -- from a register with no SDRAM transaction. With the +2 prefetch this cuts
-    -- the extra CPU's self-test checksum traffic ~3x.
-    signal v_last_data, e_last_data : std_logic_vector(15 downto 0);
-    signal v_last_addr, e_last_addr : std_logic_vector(19 downto 0);
-    signal v_last_valid, e_last_valid : std_logic;
 
     signal shr_qa, shr_qb : std_logic_vector(15 downto 0);
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
@@ -179,7 +172,6 @@ begin
             if reset_n='0' then
                 rom_owner <= OWN_IDLE; rom_req_i <= '0'; last_was_v <= '0';
                 v_pref_valid <= '0'; e_pref_valid <= '0';
-                v_last_valid <= '0'; e_last_valid <= '0';
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
             else
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
@@ -196,26 +188,14 @@ begin
                             v_rom_hold   <= v_pref_data;
                             v_rom_dtack  <= '1';
                             v_pref_valid <= '0';
-                            v_last_data  <= v_pref_data;   -- cache for the odd-byte repeat
-                            v_last_addr  <= v_pref_addr;
-                            v_last_valid <= '1';
                         elsif e_rom_pend='1' and e_rom_dtack='0' and e_pref_valid='1'
                               and (e_addr(19 downto 1) & '0') = e_pref_addr then
                             e_rom_hold   <= e_pref_data;
                             e_rom_dtack  <= '1';
                             e_pref_valid <= '0';
-                            e_last_data  <= e_pref_data;
-                            e_last_addr  <= e_pref_addr;
-                            e_last_valid <= '1';
-                        -- last-word cache hits (repeat read of same ROM word: no SDRAM txn)
-                        elsif v_rom_pend='1' and v_rom_dtack='0' and v_last_valid='1'
-                              and (v_addr(19 downto 1) & '0') = v_last_addr then
-                            v_rom_hold  <= v_last_data;
-                            v_rom_dtack <= '1';
-                        elsif e_rom_pend='1' and e_rom_dtack='0' and e_last_valid='1'
-                              and (e_addr(19 downto 1) & '0') = e_last_addr then
-                            e_rom_hold  <= e_last_data;
-                            e_rom_dtack <= '1';
+                        -- NOTE: a "last-word cache" lived here in v17-v19 and is DISABLED
+                        -- pending investigation: per-boot nondeterminism (wrong palettes,
+                        -- 'Color RAM BAD' self-test failures) appeared with it on hardware.
                         elsif e_rom_pend='1' and (last_was_v='1' or v_rom_pend='0') then
                             rom_owner <= OWN_E; last_was_v <= '0';
                             rom_addr_i <= std_logic_vector(
@@ -237,9 +217,6 @@ begin
                             -- SDRAM bursts col then col|1: only an even word index
                             -- actually returns addr+2 as the second word
                             v_pref_valid <= not v_addr(1);
-                            v_last_data  <= rom_data(31 downto 16);   -- cache this word
-                            v_last_addr  <= v_addr(19 downto 1) & '0';
-                            v_last_valid <= '1';
                             v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                         end if;
                     when OWN_E =>
@@ -252,9 +229,6 @@ begin
                                 unsigned(e_addr(19 downto 1) & '0') + 2);
                             -- same even-word-index constraint as the video CPU path
                             e_pref_valid <= not e_addr(1);
-                            e_last_data  <= rom_data(31 downto 16);
-                            e_last_addr  <= e_addr(19 downto 1) & '0';
-                            e_last_valid <= '1';
                             e_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                         end if;
                 end case;
