@@ -153,7 +153,7 @@ architecture rtl of escape_core is
 begin
     ---------------------------------------------------------------- CPUs
     -- 68010 per schematic sheet 4 (45J "U68010"); autovectored IRQs via VPA
-    vcpu : entity work.TG68K generic map ( CPU => "01" )
+    vcpu : entity work.TG68K generic map ( CPU => "00" )
         port map ( CLK=>clk, RESET=>reset_n, HALT=>reset_n, BERR=>'0', IPL=>v_ipl,
                    ADDR=>v_addr, FC=>v_fc, DATAI=>v_di, DATAO=>v_do,
                    AS=>v_as_n, UDS=>v_uds_n, LDS=>v_lds_n, RW=>v_rw_n,
@@ -161,7 +161,7 @@ begin
 
     e_resn <= reset_n and (extra_release or dbg_force_extra);
     -- also a 68010 per schematic sheet 5 (20P "U68010")
-    ecpu : entity work.TG68K generic map ( CPU => "01" )
+    ecpu : entity work.TG68K generic map ( CPU => "00" )
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>e_ipl,
                    ADDR=>e_addr, FC=>e_fc, DATAI=>e_di, DATAO=>e_do,
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,
