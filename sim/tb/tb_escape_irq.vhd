@@ -16,6 +16,7 @@ architecture tb of tb_escape_irq is
     signal rom_data : std_logic_vector(31 downto 0);
     signal rom_req  : std_logic;
     signal rom_ack  : std_logic := '0';
+    signal rom_par  : std_logic := '0';
     signal vblank   : std_logic := '0';
     signal alpha_vaddr : std_logic_vector(10 downto 0) := (others=>'0');
     signal alpha_vdata : std_logic_vector(15 downto 0);
@@ -29,7 +30,7 @@ begin
 
     uut : entity work.escape_core
         port map ( clk=>clk, reset_n=>resetn,
-                   rom_addr=>rom_addr, rom_data=>rom_data, rom_req=>rom_req, rom_ack=>rom_ack,
+                   rom_addr=>rom_addr, rom_data=>rom_data, rom_par=>rom_par, rom_req=>rom_req, rom_ack=>rom_ack,
                    vblank_in=>vblank,
                    p1_buttons=>"0000", p2_buttons=>"0000",
                    alpha_vaddr=>alpha_vaddr, alpha_vdata=>alpha_vdata,
@@ -50,6 +51,7 @@ begin
                 if not served then
                     if lat = 2 then
                         rom_data <= romsrv_data & romsrv_data2;
+                        rom_par  <= xor (romsrv_data & romsrv_data2);
                         rom_ack  <= '1'; served := true; lat := 0;
                     else lat := lat + 1; end if;
                 end if;
