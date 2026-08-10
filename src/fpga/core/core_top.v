@@ -1014,15 +1014,15 @@ end
     wire [2:0] gy   = (visible_y - 'd100) >> 2;      // glyph row
     reg  [3:0] hex_digit;
     always @(*) begin
-        // live two-CPU handshake mailbox: RESP(0x16FFE2) | RAMres(0x16FFE8) | SUM(0x16FFEA)
-        // healthy boot reads: 4321 | 0000 | <rom checksum>
+        // playfield diagnosis: PFwrites(nonzero) | PFlastword | COLwrites
+        // game drawing a picture -> PFwrites large & changing, PFlast = tile code
         case(slot)
-        4'd0:  hex_digit = dbg_mbox_resp[15:12]; 4'd1:  hex_digit = dbg_mbox_resp[11:8];
-        4'd2:  hex_digit = dbg_mbox_resp[7:4];   4'd3:  hex_digit = dbg_mbox_resp[3:0];
-        4'd5:  hex_digit = dbg_mbox_ramr[15:12]; 4'd6:  hex_digit = dbg_mbox_ramr[11:8];
-        4'd7:  hex_digit = dbg_mbox_ramr[7:4];   4'd8:  hex_digit = dbg_mbox_ramr[3:0];
-        4'd10: hex_digit = dbg_mbox_sum[15:12];  4'd11: hex_digit = dbg_mbox_sum[11:8];
-        4'd12: hex_digit = dbg_mbox_sum[7:4];    4'd13: hex_digit = dbg_mbox_sum[3:0];
+        4'd0:  hex_digit = dbg_pf_wcnt[15:12];  4'd1:  hex_digit = dbg_pf_wcnt[11:8];
+        4'd2:  hex_digit = dbg_pf_wcnt[7:4];    4'd3:  hex_digit = dbg_pf_wcnt[3:0];
+        4'd5:  hex_digit = dbg_pf_last[15:12];  4'd6:  hex_digit = dbg_pf_last[11:8];
+        4'd7:  hex_digit = dbg_pf_last[7:4];    4'd8:  hex_digit = dbg_pf_last[3:0];
+        4'd10: hex_digit = dbg_col_wcnt[15:12]; 4'd11: hex_digit = dbg_col_wcnt[11:8];
+        4'd12: hex_digit = dbg_col_wcnt[7:4];   4'd13: hex_digit = dbg_col_wcnt[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1219,6 +1219,7 @@ escape_mob umob (
 
     wire dbg_v_pc_fetch, dbg_e_running, dbg_alpha_wr;
     wire [15:0] dbg_mbox_cmd, dbg_mbox_resp, dbg_mbox_ramr, dbg_mbox_sum;
+    wire [15:0] dbg_pf_wcnt, dbg_pf_last, dbg_col_wcnt;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
     wire iso_mo_off, iso_alpha_off;
@@ -1257,7 +1258,10 @@ escape_core ecore (
     .dbg_mbox_cmd   ( dbg_mbox_cmd ),
     .dbg_mbox_resp  ( dbg_mbox_resp ),
     .dbg_mbox_ramr  ( dbg_mbox_ramr ),
-    .dbg_mbox_sum   ( dbg_mbox_sum )
+    .dbg_mbox_sum   ( dbg_mbox_sum ),
+    .dbg_pf_wcnt    ( dbg_pf_wcnt ),
+    .dbg_pf_last    ( dbg_pf_last ),
+    .dbg_col_wcnt   ( dbg_col_wcnt )
 );
 
 endmodule
