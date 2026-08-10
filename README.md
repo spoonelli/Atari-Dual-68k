@@ -1,6 +1,6 @@
 # Atari Dual 68k — openFPGA core (Analogue Pocket)
 
-An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68010 board
+An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68000 board
 whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**). The same board also ran the *Klax* prototype and *Guts n' Glory*
 prototype, so the core covers all three.
 
@@ -9,7 +9,7 @@ prototype, so the core covers all three.
 
 ## Status
 
-🟢 **Boots on real hardware.** Both 68010s execute the genuine Escape program on the
+🟢 **Boots on real hardware.** Both 68000s execute the genuine Escape program on the
 Pocket: the ROM (user-supplied) loads through an APF data slot into SDRAM, a hardware
 self-check verifies the download, and the CPU subsystem — memory decode, dual CPUs,
 autovectored VBLANK IRQs, control latches — runs the real boot code. Verified on-device
@@ -22,8 +22,8 @@ No game video or sound yet — the screen currently shows diagnostics, not the g
 | Build (CI, Quartus in Docker) | ✅ ~2 min per push, `bitstream.rbf_r` artifact |
 | Native simulation (GHDL, no Quartus) | ✅ full boot verified pre-hardware |
 | ROM loading (data slot → SDRAM) | ✅ verified on hardware (self-check green) |
-| Video CPU (68010) | ✅ executes real code on hardware |
-| Extra CPU (68010) + shared RAM | ✅ both CPUs run concurrently on hardware; handshake verified |
+| Video CPU (68000) | ✅ executes real code on hardware |
+| Extra CPU (68000) + shared RAM | ✅ both CPUs run concurrently on hardware; handshake verified |
 | Video: raster/sync (456×262 native) | ✅ on hardware · game layers (alpha → playfield → motion objects) not started |
 | Sound (JSA-I: 6502 + YM2151 + TMS5220) | ⬜ stubbed (SCOM returns buffers-empty) |
 | Inputs | ✅ buttons mapped · ADC (Hall stick) stubbed centered |
@@ -36,12 +36,12 @@ Full hardware map, roadmap, and schematic findings: [`docs/ARCHITECTURE.md`](doc
 Primary reference is the original Atari SP-332 schematic package (see
 `reference/schematics/README.md` — the PDF itself is not redistributed); MAME's
 `eprom.cpp` driver family is the behavioral cross-check. Notably, the schematics
-corrected MAME on several points (68010s not 68000s, autovectored IRQs, SLAPSTIC
+corrected MAME on several points (autovectored IRQs, SLAPSTIC
 present, serial SCOM sound link).
 
 | Block        | Real chip                               | Implementation |
 |--------------|-----------------------------------------|----------------|
-| CPUs ×2      | **68010** @ 7.16 MHz, shared RAM        | TG68K (`CPU="01"`), our decode/arbitration |
+| CPUs ×2      | **68000** @ 7.16 MHz, shared RAM        | TG68K (`CPU="00"`), our decode/arbitration |
 | Sound        | Atari **JSA-I** (6502 + YM2151 + TMS5220) via serial SCOM | T65 + [jt51](https://github.com/jotego/jt51) — planned |
 | Video        | Atari motion objects + playfield + alpha | adapt from Atari System 1 core — in progress |
 | Protection   | **SLAPSTIC** (present on board)          | watch-item; MAME boots without it |
@@ -53,7 +53,7 @@ present, serial SCOM sound link).
 This is a **behaviorally accurate** core with authentic timing anchors — not a
 cycle-exact replica. Honest classification:
 
-**Authentic (schematic-verified):** clock frequencies (7.159 MHz 68010s, true pixel
+**Authentic (schematic-verified):** clock frequencies (7.159 MHz 68000s, true pixel
 clock, all clocks derived from the board's 14.318 MHz colorburst family); raster
 geometry (456×262 total, 336×240 visible, ~59.92 Hz); complete memory map, register
 and latch semantics (sheet 16 + MAME cross-checked); genuinely concurrent dual CPUs
@@ -61,7 +61,7 @@ and latch semantics (sheet 16 + MAME cross-checked); genuinely concurrent dual C
 autovectored interrupt scheme.
 
 **Approximate:** per-instruction CPU cycle counts (TG68K is instruction-accurate, not
-cycle-exact to a 68010 — no cycle-exact open 68010 core exists); bus-cycle timing (the
+cycle-exact to a 68000); bus-cycle timing (the
 original used zero-wait parallel EPROM buses per subsystem; this core funnels memory
 through one SDRAM with wait states, mitigated by burst reads and sequential prefetch);
 video internals (same VRAM in, same pixels out on the same raster grid, but the
@@ -110,7 +110,7 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
   format, the two-CPU mailbox handshake). **No MAME source code is copied into this
   repository**; the RTL is an independent re-implementation from the driver's documented
   behavior cross-checked against the original schematics, which take precedence where they
-  disagree (68010s vs. 68000s, autovectored IRQs, SLAPSTIC, serial SCOM). Thank you to the
+  disagree (autovectored IRQs, SLAPSTIC, serial SCOM — though on CPU type MAME was right: the schematic labels U68010 but production boards carry 68000s). Thank you to the
   MAME developers for decades of preservation work that made this core possible.
 - The **openFPGA** community and **Analogue** for the Pocket core framework
   ([`open-fpga/core-template`](https://github.com/open-fpga/core-template)).
