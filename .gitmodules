@@ -1,3 +1,6 @@
 [submodule "third_party/Arcade-Atari-system1_MiSTer"]
 	path = third_party/Arcade-Atari-system1_MiSTer
 	url = https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer.git
+[submodule "third_party/jt51"]
+	path = third_party/jt51
+	url = https://github.com/jotego/jt51
