@@ -1079,6 +1079,13 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
     end
     wire wdog_rst = (wdog_rst_ctr != 23'd0);
 
+    // crash site: PC of the last FAULTing instruction, surviving watchdog resets
+    reg [15:0] crash_pc = 16'd0;
+    always @(posedge clk_sys_7159) begin
+        if(!reset_n)        crash_pc <= 16'd0;
+        else if(dbg_fault)  crash_pc <= dbg_pc;
+    end
+
     wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s & chk_done_s
                         & ~soft_rst_s & ~wdog_rst;
 
@@ -1162,8 +1169,10 @@ end
         // WRHI = last data-write address [23:8] -> names the march region:
         // 16xx shared, 3F5x work, 3F0x pf, 3F2x mo, 3F4x alpha, 3E0x color.
         case(slot)
-        4'd0:  hex_digit = dbg_pc[15:12];        4'd1:  hex_digit = dbg_pc[11:8];
-        4'd2:  hex_digit = dbg_pc[7:4];          4'd3:  hex_digit = dbg_pc[3:0];
+        // field 1 = CRASH SITE: PC of the instruction that raised the last
+        // fault (survives watchdog reboots; 0000 = no fault this session)
+        4'd0:  hex_digit = crash_pc[15:12];      4'd1:  hex_digit = crash_pc[11:8];
+        4'd2:  hex_digit = crash_pc[7:4];        4'd3:  hex_digit = crash_pc[3:0];
         // middle field: [15:8] watchdog-reset count, [7:0] last exception
         // vector offset (08 bus err, 0C addr err, 10 illegal, 60 spurious,
         // 64..7C autovectors; 00 = none seen)
@@ -1181,7 +1190,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0035;   // v35
+    localparam [15:0] BUILD_ID = 16'h0036;   // v36
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1390,6 +1399,7 @@ escape_mob umob (
     wire [15:0] dbg_a84_wr, dbg_a84_rd;
     wire [15:0] dbg_pc, dbg_wrhi;
     wire [15:0] dbg_vec;
+    wire        dbg_fault;
     wire        wdog_expired;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
@@ -1449,6 +1459,7 @@ escape_core ecore (
     .dbg_pc         ( dbg_pc ),
     .dbg_wrhi       ( dbg_wrhi ),
     .dbg_vec        ( dbg_vec ),
+    .dbg_fault      ( dbg_fault ),
     .wdog_expired   ( wdog_expired )
 );
 
