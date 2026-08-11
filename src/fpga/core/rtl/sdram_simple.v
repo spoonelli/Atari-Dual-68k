@@ -36,6 +36,7 @@ module sdram_simple (
     input  wire        rd_req,
     output reg         rd_ack,
     input  wire [24:0] rd_addr,
+    input  wire        rd_pre,    // v42: precharge-all armor for this read
     output reg  [31:0] rd_data,   // burst of 2: [31:16]=addr word, [15:0]=addr+2
 
     output reg         init_done
@@ -151,10 +152,20 @@ module sdram_simple (
                     state <= S_ACTIVE;
                 end else if (rd_req && ~rd_ack) begin
                     word <= rd_word; is_write <= 1'b0;
-                    cmd(CMD_PRECHG);
-                    dram_a[10] <= 1'b1;
-                    wait_ctr <= 4'd2;
-                    state <= S_PREALL;
+                    if (rd_pre) begin
+                        // CPU reads: close any open row first (wrong-row serve)
+                        cmd(CMD_PRECHG);
+                        dram_a[10] <= 1'b1;
+                        wait_ctr <= 4'd2;
+                        state <= S_PREALL;
+                    end else begin
+                        // video/scrub reads: fast path (scanline deadlines)
+                        cmd(CMD_ACTIVE);
+                        dram_ba <= rd_word[23:22];
+                        dram_a  <= rd_word[21:9];
+                        wait_ctr <= 4'd2;
+                        state <= S_ACTIVE;
+                    end
                 end
             end
 
