@@ -208,7 +208,10 @@ module sdram_simple (
 
             S_RD2: begin
                 cmd(CMD_READ);
-                dram_a <= {4'b0010, word[8:1], 1'b1};        // col+1, auto-precharge
+                // v51: NO auto-precharge - AP begins closing the row as the
+                // final word drives, clipping its window at our phase (the
+                // word-1 marginality). Explicit precharge after capture.
+                dram_a <= {4'b0000, word[8:1], 1'b1};        // col+1, no AP
                 rd_data[31:16] <= dram_dq;                   // data0 (READ1 + CL2 = now)
                 state <= S_DATA;
             end
@@ -227,9 +230,11 @@ module sdram_simple (
             end
 
             S_DATA1: begin
-                rd_data[15:0] <= dram_dq;                    // data1
+                rd_data[15:0] <= dram_dq;                    // data1, full drive window
                 rd_ack  <= 1'b1;
-                wait_ctr <= 4'd2;                            // tRP after auto-precharge
+                cmd(CMD_PRECHG);                             // v51: explicit, post-capture
+                dram_a[10] <= 1'b1;                          // all banks
+                wait_ctr <= 4'd2;                            // tRP
                 state <= S_PRECHG;
             end
 
