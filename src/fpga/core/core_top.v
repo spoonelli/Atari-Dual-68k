@@ -1196,6 +1196,9 @@ end
         scrub_pass_m <= scrub_pass;  scrub_pass_px <= scrub_pass_m;
         scrub_bad_m  <= scrub_bad;   scrub_bad_px  <= scrub_bad_m;
     end
+    // v54 live button probe: the exact nibble the game scanner reads
+    wire [3:0] btn_probe = {cont1_key[4]|cont1_key[6], 1'b0,
+                            cont1_key[5]|cont1_key[6], cont1_key[7]|cont1_key[6]};
     // per-frame display latches for fast-changing HUD values
     reg [15:0] epc_fr, mbox_fr;
     reg        vb_hud_d;
@@ -1214,10 +1217,13 @@ end
         // WRHI = last data-write address [23:8] -> names the march region:
         // 16xx shared, 3F5x work, 3F0x pf, 3F2x mo, 3F4x alpha, 3E0x color.
         case(slot)
-        // field 1 = CRASH SITE: PC of the instruction that raised the last
-        // fault (survives watchdog reboots; 0000 = no fault this session)
-        4'd0:  hex_digit = crash_pc[15:12];      4'd1:  hex_digit = crash_pc[11:8];
-        4'd2:  hex_digit = crash_pc[7:4];        4'd3:  hex_digit = crash_pc[3:0];
+        // field 1 = LIVE BUTTON PROBE (v54): [15:12] raw Pocket face bits
+        // Y,X,B,A; [11:8] mapped duck,spare,fire,jump nibble (what the game's
+        // scanner at ROM 0xF7E reads); [7:4] raw start bit; [3:0] raw select
+        4'd0:  hex_digit = {cont1_key[7],cont1_key[6],cont1_key[5],cont1_key[4]};
+        4'd1:  hex_digit = btn_probe;
+        4'd2:  hex_digit = {3'b000, cont1_key[15]};
+        4'd3:  hex_digit = {3'b000, cont1_key[14]};
         // middle field: EXTRA-CPU program counter, latched once per frame
         // (live wire smears the glyphs - every pixel row sampled a different
         // value; 60Hz samples read as live to the eye and render coherently)
@@ -1236,7 +1242,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0053;   // v53
+    localparam [15:0] BUILD_ID = 16'h0054;   // v54
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
