@@ -106,6 +106,10 @@ entity escape_core is
         -- 0064..7C autovectors. All fault vectors point to 0x100 = STOP #$2700
         -- (Atari's die-and-let-the-watchdog-reboot handler).
         dbg_vec       : out std_logic_vector(15 downto 0);
+        -- 1-cycle strobe when a FAULT vector (offset < 0x60: bus/addr/illegal/
+        -- div0/chk/trapv/priv/trace/lineA/lineF) is fetched; dbg_pc still holds
+        -- the faulting instruction's address at that moment
+        dbg_fault     : out std_logic;
         -- watchdog: game strobes 380000 during self-test; if no strobe for 64
         -- vblanks (~1.07s, authentic recover-by-reboot) this pulses high once
         wdog_expired  : out std_logic
@@ -178,6 +182,7 @@ architecture rtl of escape_core is
     signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
     signal wdog_ctr : unsigned(5 downto 0);
     signal wdog_expired_i : std_logic;
+    signal fault_p, vec_seen : std_logic;
     signal alpha_vaddr_d : std_logic_vector(10 downto 0);
     signal shr_qa, shr_qb : std_logic_vector(15 downto 0);
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
@@ -526,12 +531,18 @@ begin
         if rising_edge(clk) then
             if reset_n='0' then
                 vec_i <= (others=>'0'); wdog_ctr <= (others=>'0');
-                wdog_expired_i <= '0';
+                wdog_expired_i <= '0'; fault_p <= '0'; vec_seen <= '0';
             else
                 -- vector fetch = supervisor-data read (FC=101) below 0x400
+                fault_p <= '0';
                 if v_as_n='0' and v_rw_n='1' and v_fc="101"
                    and v_addr(23 downto 10)="00000000000000" then
                     vec_i <= "000000" & v_addr(9 downto 0);
+                    if unsigned(v_addr(9 downto 0)) < 96 and vec_seen='0' then
+                        fault_p <= '1'; vec_seen <= '1';  -- once per bus cycle pair
+                    end if;
+                elsif v_as_n='1' then
+                    vec_seen <= '0';
                 end if;
                 if v_sel_wdog='1' and v_as_n='0' and v_rw_n='0' then
                     wdog_ctr <= (others=>'0');
@@ -546,6 +557,7 @@ begin
         end if;
     end process;
     dbg_vec      <= vec_i;
+    dbg_fault    <= fault_p;
     wdog_expired <= wdog_expired_i;
 
     ---------------------------------------------------------------- latches + IRQ
