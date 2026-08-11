@@ -1052,8 +1052,27 @@ synch_3 s_id(sdram_init_done, sdram_init_done_s, clk_sys_7159);
 synch_3 s_cd(chk_done, chk_done_s, clk_sys_7159);
 synch_3 s_co(chk_ok,   chk_ok_s,   clk_sys_7159);
 synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
+    // watchdog timeout from the game core: pulse a core reset (~113ms) and
+    // count occurrences (counter survives the core reset; cleared by APF reset)
+    reg [22:0] wdog_rst_ctr = 23'd0;
+    reg [7:0]  wdog_rst_cnt = 8'd0;
+    reg        wdog_exp_d   = 1'b0;
+    always @(posedge clk_sys_7159) begin
+        wdog_exp_d <= wdog_expired;
+        if(!reset_n) begin
+            wdog_rst_ctr <= 23'd0; wdog_rst_cnt <= 8'd0;
+        end else begin
+            if(wdog_expired && !wdog_exp_d) begin
+                wdog_rst_ctr <= 23'd1;
+                wdog_rst_cnt <= wdog_rst_cnt + 8'd1;
+            end else if(wdog_rst_ctr != 23'd0)
+                wdog_rst_ctr <= wdog_rst_ctr + 23'd1;
+        end
+    end
+    wire wdog_rst = (wdog_rst_ctr != 23'd0);
+
     wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s & chk_done_s
-                        & ~soft_rst_s;
+                        & ~soft_rst_s & ~wdog_rst;
 
     // sticky: CPU has issued at least one ROM fetch
     reg rom_req_seen;
@@ -1137,8 +1156,11 @@ end
         case(slot)
         4'd0:  hex_digit = dbg_pc[15:12];        4'd1:  hex_digit = dbg_pc[11:8];
         4'd2:  hex_digit = dbg_pc[7:4];          4'd3:  hex_digit = dbg_pc[3:0];
-        4'd5:  hex_digit = dbg_wrhi[15:12];      4'd6:  hex_digit = dbg_wrhi[11:8];
-        4'd7:  hex_digit = dbg_wrhi[7:4];        4'd8:  hex_digit = dbg_wrhi[3:0];
+        // middle field: [15:8] watchdog-reset count, [7:0] last exception
+        // vector offset (08 bus err, 0C addr err, 10 illegal, 60 spurious,
+        // 64..7C autovectors; 00 = none seen)
+        4'd5:  hex_digit = wdog_rst_cnt[7:4];    4'd6:  hex_digit = wdog_rst_cnt[3:0];
+        4'd7:  hex_digit = dbg_vec[7:4];         4'd8:  hex_digit = dbg_vec[3:0];
         4'd10: hex_digit = dbg_boot[15:12];      4'd11: hex_digit = dbg_boot[11:8];
         4'd12: hex_digit = dbg_boot[7:4];        4'd13: hex_digit = dbg_boot[3:0];
         default: hex_digit = 4'h0;
@@ -1151,7 +1173,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0033;   // v33
+    localparam [15:0] BUILD_ID = 16'h0034;   // v34
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1359,6 +1381,8 @@ escape_mob umob (
     wire [15:0] dbg_retry;
     wire [15:0] dbg_a84_wr, dbg_a84_rd;
     wire [15:0] dbg_pc, dbg_wrhi;
+    wire [15:0] dbg_vec;
+    wire        wdog_expired;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
     wire iso_mo_off, iso_alpha_off;
@@ -1408,7 +1432,9 @@ escape_core ecore (
     .dbg_a84_wr     ( dbg_a84_wr ),
     .dbg_a84_rd     ( dbg_a84_rd ),
     .dbg_pc         ( dbg_pc ),
-    .dbg_wrhi       ( dbg_wrhi )
+    .dbg_wrhi       ( dbg_wrhi ),
+    .dbg_vec        ( dbg_vec ),
+    .wdog_expired   ( wdog_expired )
 );
 
 endmodule

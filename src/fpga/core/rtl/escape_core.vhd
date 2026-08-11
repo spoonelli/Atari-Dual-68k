@@ -89,7 +89,15 @@ entity escape_core is
         -- (names the RAM region the march is currently in: 16xx shared, 3F5x work,
         --  3F0x pf, 3F2x mo, 3F4x alpha, 3E0x color)
         dbg_pc        : out std_logic_vector(15 downto 0);
-        dbg_wrhi      : out std_logic_vector(15 downto 0)
+        dbg_wrhi      : out std_logic_vector(15 downto 0);
+        -- last exception vector fetched by the video CPU (supervisor-data read
+        -- below 0x400): 0008 bus err, 000C addr err, 0010 illegal, 0060 spurious,
+        -- 0064..7C autovectors. All fault vectors point to 0x100 = STOP #$2700
+        -- (Atari's die-and-let-the-watchdog-reboot handler).
+        dbg_vec       : out std_logic_vector(15 downto 0);
+        -- watchdog: game strobes 380000 during self-test; if no strobe for 64
+        -- vblanks (~1.07s, authentic recover-by-reboot) this pulses high once
+        wdog_expired  : out std_logic
     );
 end escape_core;
 
@@ -150,6 +158,9 @@ architecture rtl of escape_core is
     signal alpha_vq : std_logic_vector(15 downto 0);
     signal a84_wr_i, a84_rd_i : std_logic_vector(15 downto 0);
     signal pc_i, wrhi_i : std_logic_vector(15 downto 0);
+    signal vec_i : std_logic_vector(15 downto 0);
+    signal wdog_ctr : unsigned(5 downto 0);
+    signal wdog_expired_i : std_logic;
     signal alpha_vaddr_d : std_logic_vector(10 downto 0);
     signal shr_qa, shr_qb : std_logic_vector(15 downto 0);
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
@@ -475,6 +486,34 @@ begin
     end process;
     dbg_pc   <= pc_i;
     dbg_wrhi <= wrhi_i;
+
+    -- exception-vector probe + authentic watchdog timeout
+    vec_wdog : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                vec_i <= (others=>'0'); wdog_ctr <= (others=>'0');
+                wdog_expired_i <= '0';
+            else
+                -- vector fetch = supervisor-data read (FC=101) below 0x400
+                if v_as_n='0' and v_rw_n='1' and v_fc="101"
+                   and v_addr(23 downto 10)="00000000000000" then
+                    vec_i <= "000000" & v_addr(9 downto 0);
+                end if;
+                if v_sel_wdog='1' and v_as_n='0' and v_rw_n='0' then
+                    wdog_ctr <= (others=>'0');
+                elsif vblank_in='1' and vblank_d='0' then
+                    if wdog_ctr = "111111" then
+                        wdog_expired_i <= '1';   -- latched until the reset it causes
+                    else
+                        wdog_ctr <= wdog_ctr + 1;
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process;
+    dbg_vec      <= vec_i;
+    wdog_expired <= wdog_expired_i;
 
     ---------------------------------------------------------------- latches + IRQ
     latches : process(clk)
