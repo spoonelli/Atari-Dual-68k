@@ -82,6 +82,7 @@ module sdram_simple (
     localparam S_CL        = 4'd4;
     localparam S_DATA      = 4'd5;
     localparam S_PRECHG    = 4'd6;
+    localparam S_PREALL    = 4'd8;   // v40: precharge-all before every ACT
     localparam S_REFRESH   = 4'd7;
     localparam S_WR2       = 4'd8;
     localparam S_RD2       = 4'd9;
@@ -139,17 +140,28 @@ module sdram_simple (
                     state <= S_REFRESH;
                 end else if (wr_req && ~wr_ack) begin
                     word <= wr_word; wdata_l <= wr_data; is_write <= 1'b1;
-                    cmd(CMD_ACTIVE);
-                    dram_ba <= wr_word[23:22];
-                    dram_a  <= wr_word[21:9];
-                    wait_ctr <= 4'd2;                        // tRCD
-                    state <= S_ACTIVE;
+                    // v40: close ANY open row first - the wrong-row serve
+                    // (v38/v39 forensics) cannot survive a precharge-all
+                    cmd(CMD_PRECHG);
+                    dram_a[10] <= 1'b1;                      // all banks
+                    wait_ctr <= 4'd2;                        // tRP
+                    state <= S_PREALL;
                 end else if (rd_req && ~rd_ack) begin
                     word <= rd_word; is_write <= 1'b0;
-                    cmd(CMD_ACTIVE);
-                    dram_ba <= rd_word[23:22];
-                    dram_a  <= rd_word[21:9];
+                    cmd(CMD_PRECHG);
+                    dram_a[10] <= 1'b1;
                     wait_ctr <= 4'd2;
+                    state <= S_PREALL;
+                end
+            end
+
+            S_PREALL: begin
+                wait_ctr <= wait_ctr - 4'd1;
+                if (wait_ctr == 0) begin
+                    cmd(CMD_ACTIVE);
+                    dram_ba <= word[23:22];
+                    dram_a  <= word[21:9];
+                    wait_ctr <= 4'd3;                        // tRCD +1 margin (v40)
                     state <= S_ACTIVE;
                 end
             end
