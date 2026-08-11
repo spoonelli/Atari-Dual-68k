@@ -1204,14 +1204,15 @@ end
         // fault (survives watchdog reboots; 0000 = no fault this session)
         4'd0:  hex_digit = crash_pc[15:12];      4'd1:  hex_digit = crash_pc[11:8];
         4'd2:  hex_digit = crash_pc[7:4];        4'd3:  hex_digit = crash_pc[3:0];
-        // middle field: the OPCODE WORD the CPU received at the fault (ROM
-        // truth at the crash site says whether the serve path lied)
-        4'd5:  hex_digit = crash_data[15:12];    4'd6:  hex_digit = crash_data[11:8];
-        4'd7:  hex_digit = crash_data[7:4];      4'd8:  hex_digit = crash_data[3:0];
-        // field 3: [15:12] serve source (0 BRAM, 1 prefetch, 2 cache, 3 SDRAM),
-        // [11:8] watchdog resets (mod 16), [7:0] fault vector offset
-        4'd10: hex_digit = {2'b00, crash_src};   4'd11: hex_digit = wdog_rst_cnt[3:0];
-        4'd12: hex_digit = dbg_vec[7:4];         4'd13: hex_digit = dbg_vec[3:0];
+        // middle field: EXTRA-CPU live program counter (reset 0x342; its
+        // self-test loops; frozen 0102-ish = crashed into the STOP handler;
+        // if it answers, mbox_resp in field 3 reads 4321)
+        4'd5:  hex_digit = dbg_epc[15:12];       4'd6:  hex_digit = dbg_epc[11:8];
+        4'd7:  hex_digit = dbg_epc[7:4];         4'd8:  hex_digit = dbg_epc[3:0];
+        // field 3: the handshake mailbox response word (0x16FFE2) - reads
+        // 4321 the moment the extra CPU finishes its self-test and answers
+        4'd10: hex_digit = dbg_mbox_resp[15:12]; 4'd11: hex_digit = dbg_mbox_resp[11:8];
+        4'd12: hex_digit = dbg_mbox_resp[7:4];   4'd13: hex_digit = dbg_mbox_resp[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1222,7 +1223,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0046;   // v46
+    localparam [15:0] BUILD_ID = 16'h0047;   // v47
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1434,6 +1435,7 @@ escape_mob umob (
     wire        dbg_fault;
     wire [15:0] dbg_fdata;
     wire [1:0]  dbg_fsrc;
+    wire [15:0] dbg_epc;
     wire        wdog_expired;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
@@ -1500,6 +1502,7 @@ escape_core ecore (
     .dbg_fault      ( dbg_fault ),
     .dbg_fdata      ( dbg_fdata ),
     .dbg_fsrc       ( dbg_fsrc ),
+    .dbg_epc        ( dbg_epc ),
     .wdog_expired   ( wdog_expired )
 );
 
