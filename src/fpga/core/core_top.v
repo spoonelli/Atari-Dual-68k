@@ -810,6 +810,7 @@ end
     reg  [31:0] core_rom_data;
     reg         core_rom_par;
     reg         sd_rd_req;
+    reg  [24:0] rd_addr_q;   // per-grant latched read address (v39)
     wire        sd_rd_ack;
 synch_3 s_rr(core_rom_req, core_rom_req_s, clk_sdram);
 synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
@@ -923,6 +924,7 @@ always @(posedge clk_sdram) begin
         if(!vidkill_sd && vg_req_s != vg_req_last && !sd_rd_req && !sd_rd_ack && vg_phase==2'd0) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
+            rd_addr_q   <= {1'b0, vg_addr_px};
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
@@ -946,6 +948,7 @@ always @(posedge clk_sdram) begin
            && !sd_rd_req && !sd_rd_ack && mg_phase==2'd0) begin
             mg_req_last <= mg_req_s;
             sd_rd_req   <= 1;
+            rd_addr_q   <= {1'b0, mo_gfx_addr};
             mg_phase    <= 2'd1;
         end
         if(mg_phase==2'd1 && sd_rd_ack) begin
@@ -965,6 +968,7 @@ always @(posedge clk_sdram) begin
            && !scrub_urgent && scrub_phase==1'd0) begin
             if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
                 sd_rd_req <= 1;
+                rd_addr_q <= {1'b0, core_rom_addr};
                 cpu_owner <= 1;
             end
         end
@@ -988,6 +992,7 @@ always @(posedge clk_sdram) begin
            && mg_phase==2'd0 && mg_req_s==mg_req_last
            && !cpu_owner) begin
             sd_rd_req    <= 1;
+            rd_addr_q    <= {3'd0, scrub_blk, scrub_addr, 1'b0};
             scrub_phase  <= 1'd1;
             scrub_urgent <= 0;
         end
@@ -1043,9 +1048,12 @@ sdram_simple sdr (
     .wr_data    ( sd_wr_data ),
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
-    .rd_addr    ( (chk_state == 4'd10 && mg_phase != 2'd0) ? {1'b0, mo_gfx_addr} :
-                  (chk_state == 4'd10 && scrub_phase != 1'd0) ? {3'd0, scrub_blk, scrub_addr, 1'b0} :
-                  (chk_state == 4'd10 && !cpu_owner) ? {1'b0, vg_addr_px} :
+    // v39 ROOT-CAUSE FIX: in service (state 10) the address is LATCHED at the
+    // grant edge (rd_addr_q), one register per transaction - never a live mux
+    // over cross-domain wires. v38 forensics proved the CPU was served the
+    // word from a wrong ROW (same column, row bits from a hot prior address):
+    // valid data, valid parity, wrong location - invisible to every checker.
+    .rd_addr    ( (chk_state == 4'd10) ? rd_addr_q :
                   (chk_state == 4'd1) ? 25'd0 :
                   (chk_state == 4'd3) ? 25'h0110400 :
                   (chk_state == 4'd5) ? 25'h0110410 :
@@ -1202,7 +1210,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0038;   // v38
+    localparam [15:0] BUILD_ID = 16'h0039;   // v39
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
