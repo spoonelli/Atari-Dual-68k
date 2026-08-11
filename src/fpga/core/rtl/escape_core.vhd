@@ -353,12 +353,11 @@ begin
                             v_pref_data  <= rom_data(15 downto 0);
                             v_pref_addr  <= std_logic_vector(
                                 unsigned(v_addr(19 downto 1) & '0') + 2);
-                            -- v46: prefetch DISABLED - at the 90-degree chip
-                            -- phase the burst's SECOND data word is the last
-                            -- marginal capture (v45 forensics: FFF8 served by
-                            -- prefetch). Word 0 paths are clean; don't consume
-                            -- word 1 until its capture timing is reworked.
-                            v_pref_valid <= '0';
+                            -- v50: prefetch RE-ENABLED - sdram_simple now
+                            -- spreads the burst (gap between reads) so word 1's
+                            -- capture timing matches word 0's proven-clean
+                            -- positioning. Even-word-index guard as before.
+                            v_pref_valid <= not v_addr(1);
                             v_last_data  <= rom_data(31 downto 16);   -- cache this word
                             v_last_addr  <= v_addr(19 downto 1) & '0';
                             v_last_valid <= '1';
@@ -388,8 +387,8 @@ begin
                             e_pref_data  <= rom_data(15 downto 0);
                             e_pref_addr  <= std_logic_vector(
                                 unsigned(e_addr(19 downto 1) & '0') + 2);
-                            -- v46: disabled, same reason as the video CPU path
-                            e_pref_valid <= '0';
+                            -- v50: re-enabled with the spread burst
+                            e_pref_valid <= not e_addr(1);
                             e_last_data  <= rom_data(31 downto 16);
                             e_last_addr  <= e_addr(19 downto 1) & '0';
                             e_last_valid <= '1';

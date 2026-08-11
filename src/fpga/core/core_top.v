@@ -660,8 +660,8 @@ end
     reg     [15:0]  aud_l_m, aud_l_s, aud_r_m, aud_r_s;
     reg     [15:0]  audgen_shift;
 always @(negedge audgen_sclk) begin
-    aud_l_m <= core_audio_l;  aud_l_s <= aud_l_m;
-    aud_r_m <= core_audio_r;  aud_r_s <= aud_r_m;
+    aud_l_m <= aud_l_feed;  aud_l_s <= aud_l_m;
+    aud_r_m <= aud_r_feed;  aud_r_s <= aud_r_m;
     // I2S: MSB-first 16 active bits, then zeros for the rest of the 32-bit slot
     audgen_dac   <= audgen_shift[15];
     audgen_shift <= {audgen_shift[14:0], 1'b0};
@@ -734,16 +734,20 @@ end
     reg        skip_test_74 = 1'b0;   // 0xA0000020: 'Skip Self-Test' checkbox
     reg        wdis_74      = 1'b0;   // 0xA0000030: 'Watchdog Disable' (authentic
                                       // WDIS line, schematic sheet 4 test hook)
+    reg        tone_74      = 1'b0;   // 0xA0000040: 'Audio Test Tone' - splits
+                                      // i2s-path faults from JSA-side silence
     reg [22:0] soft_rst_ctr = 23'd0;
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000040) tone_74      <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
     else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
 end
     wire soft_rst_74 = (soft_rst_ctr != 23'd0);   // ~113ms self-clearing pulse
-    wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s;
+    wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s, tone_s;
+synch_3 s_tone(tone_74, tone_s, clk_sys_7159);
 synch_3 s_skip(skip_test_74, skip_test_s, clk_sys_7159);
 synch_3 s_wdis(wdis_74, wdis_s, clk_sys_7159);
 synch_3 s_svc(svc_mode_74, svc_mode_s, clk_sys_7159);
@@ -1192,6 +1196,16 @@ end
         scrub_pass_m <= scrub_pass;  scrub_pass_px <= scrub_pass_m;
         scrub_bad_m  <= scrub_bad;   scrub_bad_px  <= scrub_bad_m;
     end
+    // per-frame display latches for fast-changing HUD values
+    reg [15:0] epc_fr, mbox_fr;
+    reg        vb_hud_d;
+    always @(posedge clk_sys_7159) begin
+        vb_hud_d <= vblank_w;
+        if(vblank_w && !vb_hud_d) begin
+            epc_fr  <= dbg_epc;
+            mbox_fr <= dbg_mbox_resp;
+        end
+    end
     reg  [3:0] hex_digit;
     always @(*) begin
         // HUD: PC | WRHI | BOOT(flag.reboots)
@@ -1204,15 +1218,14 @@ end
         // fault (survives watchdog reboots; 0000 = no fault this session)
         4'd0:  hex_digit = crash_pc[15:12];      4'd1:  hex_digit = crash_pc[11:8];
         4'd2:  hex_digit = crash_pc[7:4];        4'd3:  hex_digit = crash_pc[3:0];
-        // middle field: EXTRA-CPU live program counter (reset 0x342; its
-        // self-test loops; frozen 0102-ish = crashed into the STOP handler;
-        // if it answers, mbox_resp in field 3 reads 4321)
-        4'd5:  hex_digit = dbg_epc[15:12];       4'd6:  hex_digit = dbg_epc[11:8];
-        4'd7:  hex_digit = dbg_epc[7:4];         4'd8:  hex_digit = dbg_epc[3:0];
-        // field 3: the handshake mailbox response word (0x16FFE2) - reads
-        // 4321 the moment the extra CPU finishes its self-test and answers
-        4'd10: hex_digit = dbg_mbox_resp[15:12]; 4'd11: hex_digit = dbg_mbox_resp[11:8];
-        4'd12: hex_digit = dbg_mbox_resp[7:4];   4'd13: hex_digit = dbg_mbox_resp[3:0];
+        // middle field: EXTRA-CPU program counter, latched once per frame
+        // (live wire smears the glyphs - every pixel row sampled a different
+        // value; 60Hz samples read as live to the eye and render coherently)
+        4'd5:  hex_digit = epc_fr[15:12];        4'd6:  hex_digit = epc_fr[11:8];
+        4'd7:  hex_digit = epc_fr[7:4];          4'd8:  hex_digit = epc_fr[3:0];
+        // field 3: handshake mailbox response (4321 = extra CPU answered)
+        4'd10: hex_digit = mbox_fr[15:12];       4'd11: hex_digit = mbox_fr[11:8];
+        4'd12: hex_digit = mbox_fr[7:4];         4'd13: hex_digit = mbox_fr[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1223,7 +1236,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0049;   // v49
+    localparam [15:0] BUILD_ID = 16'h0050;   // v50
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1439,11 +1452,21 @@ escape_mob umob (
     wire        wdog_expired;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
-    wire coin1_s;
+    wire coin1_s, coin2_s;
 synch_3 s_coin(cont1_key[14], coin1_s, clk_sys_7159);   // Select = coin 1 (JSA)
+synch_3 s_coin2(cont2_key[14], coin2_s, clk_sys_7159);  // P2 Select = coin 2
     wire step_s;
 synch_3 s_step(cont1_key[15], step_s, clk_sys_7159);    // Start = self-test step/continue
     wire [15:0] core_audio_l, core_audio_r;
+    // ~440Hz square test tone (7159091 / 8134 / 2), modest amplitude
+    reg  [12:0] tone_div = 13'd0;
+    reg         tone_sq  = 1'b0;
+    always @(posedge clk_sys_7159) begin
+        if(tone_div == 13'd8134) begin tone_div <= 13'd0; tone_sq <= ~tone_sq; end
+        else tone_div <= tone_div + 13'd1;
+    end
+    wire [15:0] aud_l_feed = tone_s ? (tone_sq ? 16'h1800 : 16'hE800) : core_audio_l;
+    wire [15:0] aud_r_feed = tone_s ? (tone_sq ? 16'h1800 : 16'hE800) : core_audio_r;
     wire iso_mo_off, iso_alpha_off;
 synch_3 s_isomo(cont1_key[9],  iso_mo_off,    clk_sys_7159);   // R: hide motion objects
 synch_3 s_isoal(cont1_key[10], iso_alpha_off, clk_sys_7159);   // L2: hide alpha layer
@@ -1480,7 +1503,7 @@ escape_core ecore (
     .p1_buttons ( {cont1_key[4]|cont1_key[6], 1'b0, cont1_key[5]|cont1_key[6], cont1_key[7]|cont1_key[6]} ),
     .svc_n      ( ~svc_mode_s ),
     .coin1      ( coin1_s ),
-    .coin2      ( 1'b0 ),
+    .coin2      ( coin2_s ),
     .step_btn   ( step_s ),
     .skip_test  ( skip_test_s ),
     .audio_l    ( core_audio_l ),
