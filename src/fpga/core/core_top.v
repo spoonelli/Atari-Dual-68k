@@ -1438,7 +1438,7 @@ escape_core ecore (
     // {duck, spare, fire, jump} = Pocket {A, -, B, Y}   (schematic sheet 3: CD11..CD8;
     // MAME eprom: D9 = button 1 fire, D8 = button 2 jump, D11 = button 3 duck)
     // QoL layout: Jump on the left (Y), Fire in the middle (B), Duck on the right (A);
-    // X (top, otherwise unused) = all three at once
+    // X (top, otherwise unused) = all three at once = the in-game BOMB
     .p1_buttons ( {cont1_key[4]|cont1_key[6], 1'b0, cont1_key[5]|cont1_key[6], cont1_key[7]|cont1_key[6]} ),
     .svc_n      ( ~svc_mode_s ),
     .coin1      ( coin1_s ),
