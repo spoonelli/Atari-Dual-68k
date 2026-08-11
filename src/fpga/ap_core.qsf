@@ -741,6 +741,7 @@ set_global_assignment -name QIP_FILE apf/apf.qip
 set_global_assignment -name VERILOG_FILE core/core_top.v
 set_global_assignment -name VERILOG_FILE core/rtl/sdram_simple.v
 set_global_assignment -name VERILOG_FILE core/rtl/escape_mob.v
+set_global_assignment -name VERILOG_FILE core/rtl/hall_stick.v
 set_global_assignment -name VHDL_FILE core/rtl/escape_core.vhd
 set_global_assignment -name VHDL_FILE core/rtl/escape_jsa.vhd
 set_global_assignment -name QIP_FILE ../../third_party/jt51/hdl/jt51.qip
