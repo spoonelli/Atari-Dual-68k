@@ -732,16 +732,20 @@ end
     //             cabinet's watchdog restart (flip lever + reset = service menu)
     reg        svc_mode_74 = 1'b0;
     reg        skip_test_74 = 1'b0;   // 0xA0000020: 'Skip Self-Test' checkbox
+    reg        wdis_74      = 1'b0;   // 0xA0000030: 'Watchdog Disable' (authentic
+                                      // WDIS line, schematic sheet 4 test hook)
     reg [22:0] soft_rst_ctr = 23'd0;
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
     else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
 end
     wire soft_rst_74 = (soft_rst_ctr != 23'd0);   // ~113ms self-clearing pulse
-    wire svc_mode_s, soft_rst_s, skip_test_s;
+    wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s;
 synch_3 s_skip(skip_test_74, skip_test_s, clk_sys_7159);
+synch_3 s_wdis(wdis_74, wdis_s, clk_sys_7159);
 synch_3 s_svc(svc_mode_74, svc_mode_s, clk_sys_7159);
 synch_3 s_srst(soft_rst_74, soft_rst_s, clk_sys_7159);
     // high ~56ms after the last download write (and only once a download was seen)
@@ -1087,7 +1091,9 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
         if(!reset_n) begin
             wdog_rst_ctr <= 23'd0; wdog_rst_cnt <= 8'd0;
         end else begin
-            if(wdog_expired && !wdog_exp_d) begin
+            // WDIS: authentic watchdog-disable (debug). If expiry latches
+            // while disabled, re-enable takes effect after the next core reset.
+            if(wdog_expired && !wdog_exp_d && !wdis_s) begin
                 wdog_rst_ctr <= 23'd1;
                 wdog_rst_cnt <= wdog_rst_cnt + 8'd1;
             end else if(wdog_rst_ctr != 23'd0)
@@ -1216,7 +1222,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0042;   // v42
+    localparam [15:0] BUILD_ID = 16'h0043;   // v43
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
