@@ -196,24 +196,14 @@ module sdram_simple (
                 end else begin
                     cmd(CMD_READ);
                     dram_a <= {4'b0000, word[8:0]};          // first read: NO auto-precharge
-                    // v50: gap so each word's capture sits 2 cycles after its
-                    // OWN read command, far from bus turnaround
-                    state <= S_CL;
+                    state <= S_RD2;
                 end
-            end
-
-            S_CL: begin                                   // NOP gap after READ1
-                state <= S_RD2;
             end
 
             S_RD2: begin
                 cmd(CMD_READ);
-                // v51: NO auto-precharge - AP begins closing the row as the
-                // final word drives, clipping its window at our phase (the
-                // word-1 marginality). Explicit precharge after capture.
-                dram_a <= {4'b0000, word[8:1], 1'b1};        // col+1, no AP
-                rd_data[31:16] <= dram_dq;                   // data0 (READ1 + CL2 = now)
-                state <= S_DATA;
+                dram_a <= {4'b0010, word[8:1], 1'b1};        // col+1, auto-precharge
+                state <= S_DATA;                              // CL2: data0 next cycle
             end
 
             S_WR2: begin
@@ -225,16 +215,15 @@ module sdram_simple (
                 state <= S_PRECHG;
             end
 
-            S_DATA: begin                                 // NOP gap after READ2
+            S_DATA: begin
+                rd_data[31:16] <= dram_dq;                   // data0
                 state <= S_DATA1;
             end
 
             S_DATA1: begin
-                rd_data[15:0] <= dram_dq;                    // data1, full drive window
+                rd_data[15:0] <= dram_dq;                    // data1
                 rd_ack  <= 1'b1;
-                cmd(CMD_PRECHG);                             // v51: explicit, post-capture
-                dram_a[10] <= 1'b1;                          // all banks
-                wait_ctr <= 4'd2;                            // tRP
+                wait_ctr <= 4'd2;                            // tRP after auto-precharge
                 state <= S_PRECHG;
             end
 
