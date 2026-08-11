@@ -123,6 +123,9 @@ entity escape_core is
         -- 11 = ROM SDRAM transaction
         dbg_fdata     : out std_logic_vector(15 downto 0);
         dbg_fsrc      : out std_logic_vector(1 downto 0);
+        -- extra-CPU visibility (the last uninstrumented corner): live low-16
+        -- program-fetch address in its own space (reset 0x342, self-test loops)
+        dbg_epc       : out std_logic_vector(15 downto 0);
         -- watchdog: game strobes 380000 during self-test; if no strobe for 64
         -- vblanks (~1.07s, authentic recover-by-reboot) this pulses high once
         wdog_expired  : out std_logic
@@ -185,7 +188,7 @@ architecture rtl of escape_core is
 
     signal alpha_vq : std_logic_vector(15 downto 0);
     signal a84_wr_i, a84_rd_i : std_logic_vector(15 downto 0);
-    signal pc_i, wrhi_i : std_logic_vector(15 downto 0);
+    signal pc_i, wrhi_i, epc_i : std_logic_vector(15 downto 0);
     signal vec_i : std_logic_vector(15 downto 0);
     -- JSA sound board link
     signal jsa_rom_addr : std_logic_vector(23 downto 0);
@@ -538,6 +541,9 @@ begin
             if reset_n='0' then
                 pc_i <= (others=>'0'); wrhi_i <= (others=>'0');
             else
+                if e_as_n='0' and e_rw_n='1' and e_fc(1)='1' and e_fc(0)='0' then
+                    epc_i <= e_addr(15 downto 0);
+                end if;
                 if v_as_n='0' and v_rw_n='1' and v_fc(1)='1' and v_fc(0)='0' then
                     pc_i <= v_addr(15 downto 0);
                     if v_dtack_n='0' then                  -- completing: capture data
@@ -553,6 +559,7 @@ begin
         end if;
     end process;
     dbg_pc   <= pc_i;
+    dbg_epc  <= epc_i;
     dbg_wrhi <= wrhi_i;
 
     -- exception-vector probe + authentic watchdog timeout
