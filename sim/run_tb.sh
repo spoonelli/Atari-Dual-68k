@@ -6,6 +6,11 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="ghdl/ghdl:ubuntu20-mcode"
 TB="${1:-tb_syngen}"
+# tb_escape_adc boots from a generated stub image (hand-assembled words, no
+# game ROM); rebuild it here on the host, since hex files are never committed
+if [ "$TB" = "tb_escape_adc" ]; then
+  python3 "$REPO_ROOT/sim/tools/make_adc_hex.py" >/dev/null
+fi
 exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work -w /work "$IMAGE" bash -c "
   set -e
   STD='--std=08 -fsynopsys -frelaxed'; W=sim/build

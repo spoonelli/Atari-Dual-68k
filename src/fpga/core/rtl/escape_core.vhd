@@ -34,6 +34,14 @@ entity escape_core is
         -- player inputs, active-high pressed (mapped to active-low bus bits)
         p1_buttons : in  std_logic_vector(3 downto 0);  -- D11 duck..D8 start
         p2_buttons : in  std_logic_vector(3 downto 0);
+        -- hall-effect joystick axes into the ADC0809 (0x80 = centered).
+        -- Channel order per MAME eprom: IN0 = P1 Y, IN1 = P1 X, IN2 = P2 Y,
+        -- IN3 = P2 X. X axes arrive pre-reversed (0x00 = full right), Y normal
+        -- (0x00 = full up) — the harness wiring, not something we invert here.
+        adc_p1x    : in  std_logic_vector(7 downto 0) := x"80";
+        adc_p1y    : in  std_logic_vector(7 downto 0) := x"80";
+        adc_p2x    : in  std_logic_vector(7 downto 0) := x"80";
+        adc_p2y    : in  std_logic_vector(7 downto 0) := x"80";
         -- self-test lever (260010 D1, active low: 0 = service mode)
         svc_n      : in  std_logic := '1';
         -- JSA coin inputs (active high; coin1 = Pocket Select at core_top)
@@ -217,6 +225,11 @@ architecture rtl of escape_core is
     signal retry_cnt  : unsigned(15 downto 0) := (others=>'0');
     signal rom_par_ok : std_logic;
     signal alpha_wr_stretch : unsigned(19 downto 0);
+    -- ADC0809 behavioral model (260020-2E)
+    signal adc_data : std_logic_vector(7 downto 0) := x"80";
+    signal adc_chan : std_logic_vector(1 downto 0) := "00";
+    signal adc_busy : unsigned(9 downto 0) := (others=>'0');
+    signal adc_rd, adc_rd_d, adc_eoc : std_logic;
 begin
     ---------------------------------------------------------------- CPUs
     -- 68000 (schematic says U68010 but real boards carry 68000s); autovectored IRQs via VPA
@@ -234,12 +247,13 @@ begin
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,
                    DTACK=>e_dtack_n, E=>open, VPA=>e_vpa_n, VMA=>open );
 
-    -- IPL active low: vblank = IRQ4. v37 DIAGNOSTIC: IRQ6 (sound /SINT,
-    -- vector 0x78 -> $134C) masked off pending validation of TG68K's
-    -- behavior under multi-level IPL transitions — crash sites scattered
-    -- across dispatcher/RTE code the moment IRQ6 went live in v35.
-    -- The game also polls 260010 D2, so sound comm still works by polling.
-    v_ipl <= "011" when virq='1' else "111";
+    -- IPL active low: sound /SINT = IRQ6 (vector 0x78 -> $134C), vblank =
+    -- IRQ4. Re-enabled in v49: the v37 mask was diagnostic; the scattered
+    -- crashes were the SDRAM wrong-row serve (fixed v45/v48), not IPL
+    -- transitions. Coin-in routes through the JSA (6502 reads the switches,
+    -- reports over the sound link) so coins need this live.
+    v_ipl <= "001" when jsa_snd_irq='1' else
+             "011" when virq='1' else "111";
     e_ipl <= "011" when virq='1' else "111";     -- VBLANK also interrupts the extra CPU
     -- autovector: assert VPA during interrupt acknowledge (FC=111), per schematic 60L/55L
     v_vpa_n <= '0' when v_fc="111" and v_as_n='0' else '1';
@@ -640,6 +654,44 @@ begin
             end if;
         end if;
     end process;
+    ---------------------------------------------------------------- ADC0809
+    -- Hall-effect joystick digitizer. A read of 260020+2n returns the last
+    -- completed conversion in the low byte, then latches channel n (A2..A1)
+    -- and starts a new one (the read strobe doubles as ALE/START; behavioral
+    -- reference: MAME eprom adc_r = data_r + address_offset_start_w). 260027
+    -- upward mirrors at +8. Conversion runs 64 ADC clocks at 14.318MHz/16 =
+    -- 512 core clocks (~71.5 us); 260010 D4 (ADEOC) drops while busy. A start
+    -- during a conversion restarts it on the new channel, data reg untouched.
+    adc_rd <= '1' when v_as_n='0' and v_rw_n='1' and v_sel_io='1'
+                       and v_addr(5 downto 4)="10" else '0';
+
+    adc_model : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                adc_data <= x"80"; adc_chan <= "00";
+                adc_busy <= (others=>'0'); adc_rd_d <= '0';
+            else
+                adc_rd_d <= adc_rd;
+                if adc_rd='1' and adc_rd_d='0' then          -- once per bus cycle
+                    adc_chan <= v_addr(2 downto 1);
+                    adc_busy <= to_unsigned(512, adc_busy'length);
+                elsif adc_busy /= 0 then
+                    if adc_busy = 1 then                     -- conversion complete
+                        case adc_chan is
+                            when "00"   => adc_data <= adc_p1y;
+                            when "01"   => adc_data <= adc_p1x;
+                            when "10"   => adc_data <= adc_p2y;
+                            when others => adc_data <= adc_p2x;
+                        end case;
+                    end if;
+                    adc_busy <= adc_busy - 1;
+                end if;
+            end if;
+        end if;
+    end process;
+    adc_eoc <= '1' when adc_busy = 0 else '0';
+
     ---------------------------------------------------------------- JSA-I sound board
     -- link strobes: level-per-bus-cycle is safe (data stable across the cycle;
     -- escape_jsa's full/NMI logic is edge-derived internally)
@@ -688,7 +740,7 @@ begin
     dbg_alpha_wr <= '1' when alpha_wr_stretch /= 0 else '0';
 
     ---------------------------------------------------------------- read muxes
-    -- I/O: 260000 P1 (D11-D8), 260010 status+P2, 260020-26 ADC (centered), 260030 SCOM
+    -- I/O: 260000 P1 (D11-D8), 260010 status+P2, 260020-2E ADC0809, 260030 SCOM
     v_di <= v_rom_hold when v_sel_rom='1' else
             shr_qa   when v_sel_ram='1' else
             pf_q     when v_sel_pf='1' else
@@ -705,12 +757,13 @@ begin
             -- D0 = step/continue switch (active low)
             (x"F" & not p1_buttons & "1111111" & not step_btn)
                                              when v_sel_io='1' and v_addr(5 downto 4)="00" else
-            -- 260010: P2 inputs + status: D4 ADEOC=1(done), D3 /SCBSY=1(idle),
-            -- D2 /SINT=1(no snd irq), D1 self-test lever (0=service), D0 /VBLANK
-            (x"F" & not p2_buttons & "1111" & (not jsa_cmd_full) & (not jsa_resp_full)
+            -- 260010: P2 inputs + status: D4 ADEOC (conversion done, from the
+            -- ADC model), D3 /SCBSY, D2 /SINT, D1 self-test lever, D0 /VBLANK
+            (x"F" & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
              & svc_n & not vblank_in)
                                              when v_sel_io='1' and v_addr(5 downto 4)="01" else
-            x"0080" when v_sel_io='1' and v_addr(5 downto 4)="10" else
+            -- 260020-2E: ADC0809 result, low byte (read also selects/starts)
+            (x"00" & adc_data) when v_sel_io='1' and v_addr(5 downto 4)="10" else
             (x"00" & jsa_resp) when v_sel_io='1' and v_addr(5 downto 4)="11" else
             x"0000" when v_sel_io='1' else
             (others => '0');
