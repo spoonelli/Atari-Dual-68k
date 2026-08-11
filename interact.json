@@ -31,6 +31,17 @@
         "writeonly": true,
         "defaultval": 0,
         "value": 1
+      },
+      {
+        "name": "Watchdog Disable",
+        "id": 13,
+        "type": "check",
+        "enabled": true,
+        "address": "0xA0000030",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
       }
     ],
     "messages": []
