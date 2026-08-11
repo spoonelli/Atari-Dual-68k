@@ -83,7 +83,7 @@ module sdram_simple (
     localparam S_CL        = 4'd4;
     localparam S_DATA      = 4'd5;
     localparam S_PRECHG    = 4'd6;
-    localparam S_PREALL    = 4'd8;   // v40: precharge-all before every ACT
+    localparam S_PREALL    = 4'd11;  // v40: precharge-all before ACT (v44: was 4'd8, COLLIDED with S_WR2 - every write burst derailed into the precharge arm, corrupting all downloads since v40)
     localparam S_REFRESH   = 4'd7;
     localparam S_WR2       = 4'd8;
     localparam S_RD2       = 4'd9;

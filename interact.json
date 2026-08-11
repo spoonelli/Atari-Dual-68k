@@ -8,7 +8,7 @@
         "type": "check",
         "enabled": true,
         "address": "0xA0000000",
-        "persist": true,
+        "persist": false,
         "writeonly": true,
         "defaultval": 0
       },
