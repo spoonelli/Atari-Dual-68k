@@ -731,14 +731,17 @@ end
     // 0xA0000010: 'Soft Reset Core' action -> ~56ms CPU reset pulse, like the
     //             cabinet's watchdog restart (flip lever + reset = service menu)
     reg        svc_mode_74 = 1'b0;
+    reg        skip_test_74 = 1'b0;   // 0xA0000020: 'Skip Self-Test' checkbox
     reg [22:0] soft_rst_ctr = 23'd0;
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
     else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
 end
     wire soft_rst_74 = (soft_rst_ctr != 23'd0);   // ~113ms self-clearing pulse
-    wire svc_mode_s, soft_rst_s;
+    wire svc_mode_s, soft_rst_s, skip_test_s;
+synch_3 s_skip(skip_test_74, skip_test_s, clk_sys_7159);
 synch_3 s_svc(svc_mode_74, svc_mode_s, clk_sys_7159);
 synch_3 s_srst(soft_rst_74, soft_rst_s, clk_sys_7159);
     // high ~56ms after the last download write (and only once a download was seen)
@@ -1083,7 +1086,8 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
     reg [15:0] crash_pc = 16'd0;
     always @(posedge clk_sys_7159) begin
         if(!reset_n)        crash_pc <= 16'd0;
-        else if(dbg_fault)  crash_pc <= dbg_pc;
+        // FIRST fault of the session only: the root cause, not the cascade
+        else if(dbg_fault && crash_pc == 16'd0) crash_pc <= dbg_pc;
     end
 
     wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s & chk_done_s
@@ -1190,7 +1194,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0036;   // v36
+    localparam [15:0] BUILD_ID = 16'h0037;   // v37
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1405,6 +1409,8 @@ escape_mob umob (
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
     wire coin1_s;
 synch_3 s_coin(cont1_key[14], coin1_s, clk_sys_7159);   // Select = coin 1 (JSA)
+    wire step_s;
+synch_3 s_step(cont1_key[15], step_s, clk_sys_7159);    // Start = self-test step/continue
     wire [15:0] core_audio_l, core_audio_r;
     wire iso_mo_off, iso_alpha_off;
 synch_3 s_isomo(cont1_key[9],  iso_mo_off,    clk_sys_7159);   // R: hide motion objects
@@ -1423,6 +1429,8 @@ escape_core ecore (
     .svc_n      ( ~svc_mode_s ),
     .coin1      ( coin1_s ),
     .coin2      ( 1'b0 ),
+    .step_btn   ( step_s ),
+    .skip_test  ( skip_test_s ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
     .p2_buttons ( 4'b0000 ),
