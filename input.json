@@ -1,24 +1,52 @@
 {
-    "input": {
-        "magic": "APF_VER_1",
-        "controllers": [
-            {
-                "type": "default",
-                "mappings": [
-                    { "id": 0, "name": "Fire", "key": "pad_btn_a" },
-                    { "id": 1, "name": "Jump", "key": "pad_btn_b" },
-                    { "id": 2, "name": "Duck", "key": "pad_btn_y" },
-                    { "id": 3, "name": "Coin", "key": "pad_btn_select" }
-                ]
-            },
-            {
-                "type": "default",
-                "mappings": [
-                    { "id": 0, "name": "Fire", "key": "pad_btn_a" },
-                    { "id": 1, "name": "Jump", "key": "pad_btn_b" },
-                    { "id": 2, "name": "Duck", "key": "pad_btn_y" }
-                ]
-            }
+  "input": {
+    "magic": "APF_VER_1",
+    "controllers": [
+      {
+        "type": "default",
+        "mappings": [
+          {
+            "id": 0,
+            "name": "Duck",
+            "key": "pad_btn_a"
+          },
+          {
+            "id": 1,
+            "name": "Fire",
+            "key": "pad_btn_b"
+          },
+          {
+            "id": 2,
+            "name": "Jump",
+            "key": "pad_btn_y"
+          },
+          {
+            "id": 3,
+            "name": "Coin",
+            "key": "pad_btn_select"
+          }
         ]
-    }
+      },
+      {
+        "type": "default",
+        "mappings": [
+          {
+            "id": 0,
+            "name": "Fire",
+            "key": "pad_btn_a"
+          },
+          {
+            "id": 1,
+            "name": "Jump",
+            "key": "pad_btn_b"
+          },
+          {
+            "id": 2,
+            "name": "Duck",
+            "key": "pad_btn_y"
+          }
+        ]
+      }
+    ]
+  }
 }
