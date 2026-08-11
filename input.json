@@ -6,13 +6,9 @@
         "type": "default",
         "mappings": [
           {
-            "key": "pad_btn_x",
-            "name": "Bomb (all 3)"
-          },
-          {
             "id": 0,
-            "name": "Duck",
-            "key": "pad_btn_a"
+            "name": "Jump / Start",
+            "key": "pad_btn_y"
           },
           {
             "id": 1,
@@ -21,11 +17,16 @@
           },
           {
             "id": 2,
-            "name": "Jump",
-            "key": "pad_btn_y"
+            "name": "Duck",
+            "key": "pad_btn_a"
           },
           {
             "id": 3,
+            "name": "Bomb (all 3)",
+            "key": "pad_btn_x"
+          },
+          {
+            "id": 4,
             "name": "Coin",
             "key": "pad_btn_select"
           }
@@ -36,18 +37,28 @@
         "mappings": [
           {
             "id": 0,
-            "name": "Fire",
-            "key": "pad_btn_a"
+            "name": "Jump / Start",
+            "key": "pad_btn_y"
           },
           {
             "id": 1,
-            "name": "Jump",
+            "name": "Fire",
             "key": "pad_btn_b"
           },
           {
             "id": 2,
             "name": "Duck",
-            "key": "pad_btn_y"
+            "key": "pad_btn_a"
+          },
+          {
+            "id": 3,
+            "name": "Bomb (all 3)",
+            "key": "pad_btn_x"
+          },
+          {
+            "id": 4,
+            "name": "Coin",
+            "key": "pad_btn_select"
           }
         ]
       }
