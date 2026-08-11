@@ -1084,10 +1084,17 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
 
     // crash site: PC of the last FAULTing instruction, surviving watchdog resets
     reg [15:0] crash_pc = 16'd0;
+    reg [15:0] crash_data = 16'd0;   // the opcode word the CPU actually received
+    reg [1:0]  crash_src  = 2'd0;    // 00 BRAM, 01 prefetch, 10 cache, 11 SDRAM
     always @(posedge clk_sys_7159) begin
-        if(!reset_n)        crash_pc <= 16'd0;
+        if(!reset_n) begin
+            crash_pc <= 16'd0; crash_data <= 16'd0; crash_src <= 2'd0;
         // FIRST fault of the session only: the root cause, not the cascade
-        else if(dbg_fault && crash_pc == 16'd0) crash_pc <= dbg_pc;
+        end else if(dbg_fault && crash_pc == 16'd0) begin
+            crash_pc   <= dbg_pc;
+            crash_data <= dbg_fdata;
+            crash_src  <= dbg_fsrc;
+        end
     end
 
     wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s & chk_done_s
@@ -1177,13 +1184,14 @@ end
         // fault (survives watchdog reboots; 0000 = no fault this session)
         4'd0:  hex_digit = crash_pc[15:12];      4'd1:  hex_digit = crash_pc[11:8];
         4'd2:  hex_digit = crash_pc[7:4];        4'd3:  hex_digit = crash_pc[3:0];
-        // middle field: [15:8] watchdog-reset count, [7:0] last exception
-        // vector offset (08 bus err, 0C addr err, 10 illegal, 60 spurious,
-        // 64..7C autovectors; 00 = none seen)
-        4'd5:  hex_digit = wdog_rst_cnt[7:4];    4'd6:  hex_digit = wdog_rst_cnt[3:0];
-        4'd7:  hex_digit = dbg_vec[7:4];         4'd8:  hex_digit = dbg_vec[3:0];
-        4'd10: hex_digit = dbg_boot[15:12];      4'd11: hex_digit = dbg_boot[11:8];
-        4'd12: hex_digit = dbg_boot[7:4];        4'd13: hex_digit = dbg_boot[3:0];
+        // middle field: the OPCODE WORD the CPU received at the fault (ROM
+        // truth at the crash site says whether the serve path lied)
+        4'd5:  hex_digit = crash_data[15:12];    4'd6:  hex_digit = crash_data[11:8];
+        4'd7:  hex_digit = crash_data[7:4];      4'd8:  hex_digit = crash_data[3:0];
+        // field 3: [15:12] serve source (0 BRAM, 1 prefetch, 2 cache, 3 SDRAM),
+        // [11:8] watchdog resets (mod 16), [7:0] fault vector offset
+        4'd10: hex_digit = {2'b00, crash_src};   4'd11: hex_digit = wdog_rst_cnt[3:0];
+        4'd12: hex_digit = dbg_vec[7:4];         4'd13: hex_digit = dbg_vec[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1194,7 +1202,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0037;   // v37
+    localparam [15:0] BUILD_ID = 16'h0038;   // v38
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1404,6 +1412,8 @@ escape_mob umob (
     wire [15:0] dbg_pc, dbg_wrhi;
     wire [15:0] dbg_vec;
     wire        dbg_fault;
+    wire [15:0] dbg_fdata;
+    wire [1:0]  dbg_fsrc;
     wire        wdog_expired;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
@@ -1468,6 +1478,8 @@ escape_core ecore (
     .dbg_wrhi       ( dbg_wrhi ),
     .dbg_vec        ( dbg_vec ),
     .dbg_fault      ( dbg_fault ),
+    .dbg_fdata      ( dbg_fdata ),
+    .dbg_fsrc       ( dbg_fsrc ),
     .wdog_expired   ( wdog_expired )
 );
 

@@ -117,6 +117,12 @@ entity escape_core is
         -- div0/chk/trapv/priv/trace/lineA/lineF) is fetched; dbg_pc still holds
         -- the faulting instruction's address at that moment
         dbg_fault     : out std_logic;
+        -- data word of the last completed program-space fetch before the fault
+        -- (the opcode the CPU actually received) + which unit served it:
+        -- 00 = BRAM/other, 01 = ROM prefetch hit, 10 = ROM last-word cache,
+        -- 11 = ROM SDRAM transaction
+        dbg_fdata     : out std_logic_vector(15 downto 0);
+        dbg_fsrc      : out std_logic_vector(1 downto 0);
         -- watchdog: game strobes 380000 during self-test; if no strobe for 64
         -- vblanks (~1.07s, authentic recover-by-reboot) this pulses high once
         wdog_expired  : out std_logic
@@ -190,6 +196,9 @@ architecture rtl of escape_core is
     signal wdog_ctr : unsigned(5 downto 0);
     signal wdog_expired_i : std_logic;
     signal fault_p, vec_seen : std_logic;
+    signal v_rom_src : std_logic_vector(1 downto 0);
+    signal fdata_i : std_logic_vector(15 downto 0);
+    signal fsrc_i  : std_logic_vector(1 downto 0);
     signal alpha_vaddr_d : std_logic_vector(10 downto 0);
     signal shr_qa, shr_qb : std_logic_vector(15 downto 0);
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
@@ -277,6 +286,7 @@ begin
                               and (v_addr(19 downto 1) & '0') = v_pref_addr then
                             v_rom_hold   <= v_pref_data;
                             v_rom_dtack  <= '1';
+                            v_rom_src    <= "01";          -- prefetch hit
                             v_pref_valid <= '0';
                             v_last_data  <= v_pref_data;   -- cache for the odd-byte repeat
                             v_last_addr  <= v_pref_addr;
@@ -294,6 +304,7 @@ begin
                               and (v_addr(19 downto 1) & '0') = v_last_addr then
                             v_rom_hold  <= v_last_data;
                             v_rom_dtack <= '1';
+                            v_rom_src   <= "10";           -- last-word cache hit
                         elsif e_rom_pend='1' and e_rom_dtack='0' and e_last_valid='1'
                               and (e_addr(19 downto 1) & '0') = e_last_addr then
                             e_rom_hold  <= e_last_data;
@@ -332,6 +343,7 @@ begin
                             v_last_addr  <= v_addr(19 downto 1) & '0';
                             v_last_valid <= '1';
                             v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
+                            v_rom_src   <= "11";           -- fresh SDRAM transaction
                         end if;
                         when OWN_J =>
                         if jsa_rom_req='0' then          -- client captured and released
@@ -525,6 +537,11 @@ begin
             else
                 if v_as_n='0' and v_rw_n='1' and v_fc(1)='1' and v_fc(0)='0' then
                     pc_i <= v_addr(15 downto 0);
+                    if v_dtack_n='0' then                  -- completing: capture data
+                        fdata_i <= v_di;
+                        if v_sel_rom='1' then fsrc_i <= v_rom_src;
+                        else fsrc_i <= "00"; end if;
+                    end if;
                 end if;
                 if v_as_n='0' and v_rw_n='0' then
                     wrhi_i <= v_addr(23 downto 8);
@@ -568,6 +585,8 @@ begin
     end process;
     dbg_vec      <= vec_i;
     dbg_fault    <= fault_p;
+    dbg_fdata    <= fdata_i;
+    dbg_fsrc     <= fsrc_i;
     wdog_expired <= wdog_expired_i;
 
     ---------------------------------------------------------------- latches + IRQ
