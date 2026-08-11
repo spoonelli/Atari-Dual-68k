@@ -39,6 +39,13 @@ entity escape_core is
         -- JSA coin inputs (active high; coin1 = Pocket Select at core_top)
         coin1      : in  std_logic := '0';
         coin2      : in  std_logic := '0';
+        -- 260000 D0: factory step/continue switch (unpopulated on production
+        -- cabs, MAME marks it unused, but the self-test error loop reads it:
+        -- 0x776 btst #0,$260000 — held low = step past a failed region)
+        step_btn   : in  std_logic := '0';   -- active-high pressed
+        -- diagnostic: force reads of the tests-passed flag ($3F7F0C) to 0x0100
+        -- so the boot takes its already-passed branch (Interact "Skip Self-Test")
+        skip_test  : in  std_logic := '0';
 
         -- JSA-I audio out (signed 16-bit)
         audio_l    : out std_logic_vector(15 downto 0);
@@ -215,9 +222,12 @@ begin
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,
                    DTACK=>e_dtack_n, E=>open, VPA=>e_vpa_n, VMA=>open );
 
-    -- IPL active low: sound /SINT = IRQ6 (vector 0x78 -> $134C), vblank = IRQ4
-    v_ipl <= "001" when jsa_snd_irq='1' else
-             "011" when virq='1' else "111";
+    -- IPL active low: vblank = IRQ4. v37 DIAGNOSTIC: IRQ6 (sound /SINT,
+    -- vector 0x78 -> $134C) masked off pending validation of TG68K's
+    -- behavior under multi-level IPL transitions — crash sites scattered
+    -- across dispatcher/RTE code the moment IRQ6 went live in v35.
+    -- The game also polls 260010 D2, so sound comm still works by polling.
+    v_ipl <= "011" when virq='1' else "111";
     e_ipl <= "011" when virq='1' else "111";     -- VBLANK also interrupts the extra CPU
     -- autovector: assert VPA during interrupt acknowledge (FC=111), per schematic 60L/55L
     v_vpa_n <= '0' when v_fc="111" and v_as_n='0' else '1';
@@ -655,13 +665,17 @@ begin
             pf_q     when v_sel_pf='1' else
             mo_q     when v_sel_mo='1' else
             alpha_q  when v_sel_alpha='1' else
+            x"0100"  when v_sel_work='1' and skip_test='1'
+                          and v_addr(15 downto 1) = "111111110000110" else
             work_q   when v_sel_work='1' else
             pfpal_q  when v_sel_pfpal='1' else
             color_q  when v_sel_color='1' else
             cfg_q    when (v_sel_mobc='1' or v_sel_slip='1') else
             ee_q     when v_sel_eeprom='1' else
-            -- 260000: P1 inputs on D11-D8 (duck/spare/fire/jump, active low)
-            (x"F" & not p1_buttons & x"FF")  when v_sel_io='1' and v_addr(5 downto 4)="00" else
+            -- 260000: P1 inputs on D11-D8 (duck/spare/fire/jump, active low);
+            -- D0 = step/continue switch (active low)
+            (x"F" & not p1_buttons & "1111111" & not step_btn)
+                                             when v_sel_io='1' and v_addr(5 downto 4)="00" else
             -- 260010: P2 inputs + status: D4 ADEOC=1(done), D3 /SCBSY=1(idle),
             -- D2 /SINT=1(no snd irq), D1 self-test lever (0=service), D0 /VBLANK
             (x"F" & not p2_buttons & "1111" & (not jsa_cmd_full) & (not jsa_resp_full)
