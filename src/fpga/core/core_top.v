@@ -1437,14 +1437,15 @@ escape_core ecore (
     .vblank_in  ( vblank_w ),
     // {duck, spare, fire, jump} = Pocket {A, -, B, Y}   (schematic sheet 3: CD11..CD8;
     // MAME eprom: D9 = button 1 fire, D8 = button 2 jump, D11 = button 3 duck)
-    // QoL layout: Jump on the left (Y), Fire in the middle (B), Duck on the right (A)
-    .p1_buttons ( {cont1_key[4], 1'b0, cont1_key[5], cont1_key[7]} ),
+    // QoL layout: Jump on the left (Y), Fire in the middle (B), Duck on the right (A);
+    // X (top, otherwise unused) = all three at once
+    .p1_buttons ( {cont1_key[4]|cont1_key[6], 1'b0, cont1_key[5]|cont1_key[6], cont1_key[7]|cont1_key[6]} ),
     .svc_n      ( ~svc_mode_s ),
     .coin1      ( coin1_s ),
     .coin2      ( 1'b0 ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
-    .p2_buttons ( {cont2_key[4], 1'b0, cont2_key[5], cont2_key[7]} ),
+    .p2_buttons ( {cont2_key[4]|cont2_key[6], 1'b0, cont2_key[5]|cont2_key[6], cont2_key[7]|cont2_key[6]} ),
     .adc_p1x    ( adc_p1x ),
     .adc_p1y    ( adc_p1y ),
     .adc_p2x    ( adc_p2x ),

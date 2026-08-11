@@ -6,6 +6,10 @@
         "type": "default",
         "mappings": [
           {
+            "key": "pad_btn_x",
+            "name": "All 3 (Jump+Fire+Duck)"
+          },
+          {
             "id": 0,
             "name": "Duck",
             "key": "pad_btn_a"
