@@ -134,6 +134,10 @@ entity escape_core is
         -- extra-CPU visibility (the last uninstrumented corner): live low-16
         -- program-fetch address in its own space (reset 0x342, self-test loops)
         dbg_epc       : out std_logic_vector(15 downto 0);
+        -- JSA link state: [15] cmd_full [14] resp_full [13] snd_irq [12] 0,
+        -- [11:8] 0, [7:0] last command byte the 68k wrote to 360031
+        dbg_jsa_link  : out std_logic_vector(15 downto 0);
+        dbg_jsa_pc    : out std_logic_vector(15 downto 0);
         -- watchdog: game strobes 380000 during self-test; if no strobe for 64
         -- vblanks (~1.07s, authentic recover-by-reboot) this pulses high once
         wdog_expired  : out std_logic
@@ -202,6 +206,8 @@ architecture rtl of escape_core is
     signal jsa_rom_addr : std_logic_vector(23 downto 0);
     signal jsa_rom_req, jsa_rom_ack : std_logic;
     signal jsa_resp : std_logic_vector(7 downto 0);
+    signal jsa_cpu_addr : std_logic_vector(15 downto 0);
+    signal jsa_last_cmd : std_logic_vector(7 downto 0);
     signal jsa_cmd_full, jsa_resp_full, jsa_snd_irq : std_logic;
     signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
     signal wdog_ctr : unsigned(5 downto 0);
@@ -715,7 +721,22 @@ begin
                    snd_irq=>jsa_snd_irq,
                    coin1=>coin1, coin2=>coin2, test_mode=>not svc_n,
                    audio_l=>audio_l, audio_r=>audio_r,
-                   dbg_cpu_addr=>open, dbg_cpu_sync=>open );
+                   dbg_cpu_addr=>jsa_cpu_addr, dbg_cpu_sync=>open );
+
+    -- JSA link observation: capture the last command byte at the write strobe
+    jsa_obs : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                jsa_last_cmd <= (others=>'0');
+            elsif snd_cmd_we='1' then
+                jsa_last_cmd <= v_do(7 downto 0);
+            end if;
+        end if;
+    end process;
+    dbg_jsa_link <= jsa_cmd_full & jsa_resp_full & jsa_snd_irq & '0'
+                    & x"0" & jsa_last_cmd;
+    dbg_jsa_pc   <= jsa_cpu_addr;
 
     -- forward good acks to the JSA client while it owns the external ROM bus
     jsa_rom_ack <= '1' when rom_owner=OWN_J and rom_ack='1' and rom_par_ok='1'

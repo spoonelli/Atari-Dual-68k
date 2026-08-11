@@ -1202,11 +1202,14 @@ end
     // per-frame display latches for fast-changing HUD values
     reg [15:0] epc_fr, mbox_fr;
     reg        vb_hud_d;
+    reg [15:0] jsapc_fr, jsalink_fr;
     always @(posedge clk_sys_7159) begin
         vb_hud_d <= vblank_w;
         if(vblank_w && !vb_hud_d) begin
-            epc_fr  <= dbg_epc;
-            mbox_fr <= dbg_mbox_resp;
+            epc_fr    <= dbg_epc;
+            mbox_fr   <= dbg_mbox_resp;
+            jsapc_fr  <= dbg_jsa_pc;
+            jsalink_fr<= dbg_jsa_link;
         end
     end
     reg  [3:0] hex_digit;
@@ -1224,14 +1227,15 @@ end
         4'd1:  hex_digit = btn_probe;
         4'd2:  hex_digit = {3'b000, cont1_key[15]};
         4'd3:  hex_digit = {3'b000, cont1_key[14]};
-        // middle field: EXTRA-CPU program counter, latched once per frame
-        // (live wire smears the glyphs - every pixel row sampled a different
-        // value; 60Hz samples read as live to the eye and render coherently)
-        4'd5:  hex_digit = epc_fr[15:12];        4'd6:  hex_digit = epc_fr[11:8];
-        4'd7:  hex_digit = epc_fr[7:4];          4'd8:  hex_digit = epc_fr[3:0];
-        // field 3: handshake mailbox response (4321 = extra CPU answered)
-        4'd10: hex_digit = mbox_fr[15:12];       4'd11: hex_digit = mbox_fr[11:8];
-        4'd12: hex_digit = mbox_fr[7:4];         4'd13: hex_digit = mbox_fr[3:0];
+        // middle field (v55): JSA 6502 program counter, frame-latched -
+        // frozen = sound CPU wedged; churning = alive
+        4'd5:  hex_digit = jsapc_fr[15:12];      4'd6:  hex_digit = jsapc_fr[11:8];
+        4'd7:  hex_digit = jsapc_fr[7:4];        4'd8:  hex_digit = jsapc_fr[3:0];
+        // field 3 (v55): JSA link - [F]=cmd_full,resp_full,snd_irq,0 then 00
+        // then the last command byte the 68k sent. cmd_full stuck 1 = the
+        // 68k->6502 direction jammed (unified no-sound/no-start suspect)
+        4'd10: hex_digit = jsalink_fr[15:12];    4'd11: hex_digit = jsalink_fr[11:8];
+        4'd12: hex_digit = jsalink_fr[7:4];      4'd13: hex_digit = jsalink_fr[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1242,7 +1246,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0054;   // v54
+    localparam [15:0] BUILD_ID = 16'h0055;   // v55
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1455,6 +1459,7 @@ escape_mob umob (
     wire [15:0] dbg_fdata;
     wire [1:0]  dbg_fsrc;
     wire [15:0] dbg_epc;
+    wire [15:0] dbg_jsa_link, dbg_jsa_pc;
     wire        wdog_expired;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
@@ -1556,6 +1561,8 @@ escape_core ecore (
     .dbg_fdata      ( dbg_fdata ),
     .dbg_fsrc       ( dbg_fsrc ),
     .dbg_epc        ( dbg_epc ),
+    .dbg_jsa_link   ( dbg_jsa_link ),
+    .dbg_jsa_pc     ( dbg_jsa_pc ),
     .wdog_expired   ( wdog_expired )
 );
 
