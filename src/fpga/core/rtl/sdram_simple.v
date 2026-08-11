@@ -139,13 +139,16 @@ module sdram_simple (
                     wait_ctr <= 4'd9;                        // tRFC
                     state <= S_REFRESH;
                 end else if (wr_req && ~wr_ack) begin
+                    // writes stay on the fast path: the wrong-row serve is a
+                    // READ phenomenon, and the ROM download (bridge writes,
+                    // no backpressure) can't afford +3 cycles per word -
+                    // v40's precharge-all on writes starved it -> black screen
                     word <= wr_word; wdata_l <= wr_data; is_write <= 1'b1;
-                    // v40: close ANY open row first - the wrong-row serve
-                    // (v38/v39 forensics) cannot survive a precharge-all
-                    cmd(CMD_PRECHG);
-                    dram_a[10] <= 1'b1;                      // all banks
-                    wait_ctr <= 4'd2;                        // tRP
-                    state <= S_PREALL;
+                    cmd(CMD_ACTIVE);
+                    dram_ba <= wr_word[23:22];
+                    dram_a  <= wr_word[21:9];
+                    wait_ctr <= 4'd2;                        // tRCD
+                    state <= S_ACTIVE;
                 end else if (rd_req && ~rd_ack) begin
                     word <= rd_word; is_write <= 1'b0;
                     cmd(CMD_PRECHG);
