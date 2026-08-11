@@ -1409,6 +1409,23 @@ synch_3 s_coin(cont1_key[14], coin1_s, clk_sys_7159);   // Select = coin 1 (JSA)
     wire iso_mo_off, iso_alpha_off;
 synch_3 s_isomo(cont1_key[9],  iso_mo_off,    clk_sys_7159);   // R: hide motion objects
 synch_3 s_isoal(cont1_key[10], iso_alpha_off, clk_sys_7159);   // L2: hide alpha layer
+    // hall-effect stick emulation: d-pad -> absolute ADC axis targets, analog
+    // stick (dock) takes priority when deflected — see rtl/hall_stick.v
+    wire [7:0] adc_p1x, adc_p1y, adc_p2x, adc_p2y;
+hall_stick hall_p1 (
+    .clk   ( clk_sys_7159 ),
+    .up    ( cont1_key[0] ),   .down  ( cont1_key[1] ),
+    .left  ( cont1_key[2] ),   .right ( cont1_key[3] ),
+    .joy_x ( cont1_joy[7:0] ), .joy_y ( cont1_joy[15:8] ),
+    .adc_x ( adc_p1x ),        .adc_y ( adc_p1y )
+);
+hall_stick hall_p2 (
+    .clk   ( clk_sys_7159 ),
+    .up    ( cont2_key[0] ),   .down  ( cont2_key[1] ),
+    .left  ( cont2_key[2] ),   .right ( cont2_key[3] ),
+    .joy_x ( cont2_joy[7:0] ), .joy_y ( cont2_joy[15:8] ),
+    .adc_x ( adc_p2x ),        .adc_y ( adc_p2y )
+);
 escape_core ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
@@ -1418,14 +1435,19 @@ escape_core ecore (
     .rom_req    ( core_rom_req ),
     .rom_ack    ( core_rom_ack_s ),
     .vblank_in  ( vblank_w ),
-    // {duck, spare, fire, jump} = Pocket {X, -, B, A}   (schematic sheet 3: CD11..CD8)
-    .p1_buttons ( {cont1_key[6], 1'b0, cont1_key[5], cont1_key[4]} ),
+    // {duck, spare, fire, jump} = Pocket {Y, -, A, B}   (schematic sheet 3: CD11..CD8;
+    // MAME eprom: D9 = button 1 fire, D8 = button 2 jump, D11 = button 3 duck)
+    .p1_buttons ( {cont1_key[7], 1'b0, cont1_key[4], cont1_key[5]} ),
     .svc_n      ( ~svc_mode_s ),
     .coin1      ( coin1_s ),
     .coin2      ( 1'b0 ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
-    .p2_buttons ( 4'b0000 ),
+    .p2_buttons ( {cont2_key[7], 1'b0, cont2_key[4], cont2_key[5]} ),
+    .adc_p1x    ( adc_p1x ),
+    .adc_p1y    ( adc_p1y ),
+    .adc_p2x    ( adc_p2x ),
+    .adc_p2y    ( adc_p2y ),
     .alpha_vaddr( alpha_vaddr ),
     .alpha_vdata( alpha_vdata ),
     .color_vaddr( color_vaddr ),
