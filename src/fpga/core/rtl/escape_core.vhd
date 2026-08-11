@@ -13,6 +13,10 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 entity escape_core is
+    generic (
+        -- 1 = bind jt51 (Quartus mixed-language); 0 = GHDL sim stub (docs/JSA.md)
+        YM_ENABLE : integer := 1
+    );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
         reset_n    : in  std_logic;   -- hold low until ROM image is in SDRAM
@@ -32,6 +36,13 @@ entity escape_core is
         p2_buttons : in  std_logic_vector(3 downto 0);
         -- self-test lever (260010 D1, active low: 0 = service mode)
         svc_n      : in  std_logic := '1';
+        -- JSA coin inputs (active high; coin1 = Pocket Select at core_top)
+        coin1      : in  std_logic := '0';
+        coin2      : in  std_logic := '0';
+
+        -- JSA-I audio out (signed 16-bit)
+        audio_l    : out std_logic_vector(15 downto 0);
+        audio_r    : out std_logic_vector(15 downto 0);
 
         -- video-side read ports + latches for the video chain
         alpha_vaddr : in  std_logic_vector(10 downto 0) := (others => '0');
@@ -137,7 +148,7 @@ architecture rtl of escape_core is
         return p;
     end function;
 
-    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E);
+    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E, OWN_J);
     signal rom_owner : rom_owner_t;
     signal last_was_v : std_logic;   -- fair round-robin: alternate priority
     signal rom_addr_i : std_logic_vector(23 downto 0);
@@ -159,6 +170,12 @@ architecture rtl of escape_core is
     signal a84_wr_i, a84_rd_i : std_logic_vector(15 downto 0);
     signal pc_i, wrhi_i : std_logic_vector(15 downto 0);
     signal vec_i : std_logic_vector(15 downto 0);
+    -- JSA sound board link
+    signal jsa_rom_addr : std_logic_vector(23 downto 0);
+    signal jsa_rom_req, jsa_rom_ack : std_logic;
+    signal jsa_resp : std_logic_vector(7 downto 0);
+    signal jsa_cmd_full, jsa_resp_full, jsa_snd_irq : std_logic;
+    signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
     signal wdog_ctr : unsigned(5 downto 0);
     signal wdog_expired_i : std_logic;
     signal alpha_vaddr_d : std_logic_vector(10 downto 0);
@@ -193,7 +210,9 @@ begin
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,
                    DTACK=>e_dtack_n, E=>open, VPA=>e_vpa_n, VMA=>open );
 
-    v_ipl <= "011" when virq='1' else "111";     -- IRQ4 (IPL active low)
+    -- IPL active low: sound /SINT = IRQ6 (vector 0x78 -> $134C), vblank = IRQ4
+    v_ipl <= "001" when jsa_snd_irq='1' else
+             "011" when virq='1' else "111";
     e_ipl <= "011" when virq='1' else "111";     -- VBLANK also interrupts the extra CPU
     -- autovector: assert VPA during interrupt acknowledge (FC=111), per schematic 60L/55L
     v_vpa_n <= '0' when v_fc="111" and v_as_n='0' else '1';
@@ -273,6 +292,10 @@ begin
                             rom_owner <= OWN_V; last_was_v <= '1';
                             rom_addr_i <= x"0" & v_addr(19 downto 1) & '0';
                             rom_req_i <= '1';
+                        elsif jsa_rom_req='1' then
+                            rom_owner <= OWN_J;
+                            rom_addr_i <= jsa_rom_addr;   -- already a full image address
+                            rom_req_i <= '1';
                         end if;
                     when OWN_V =>
                         if v_as_n='1' then                       -- CPU ended cycle: abort
@@ -295,6 +318,16 @@ begin
                             v_last_valid <= '1';
                             v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                         end if;
+                        when OWN_J =>
+                        if jsa_rom_req='0' then          -- client captured and released
+                            rom_req_i <= '0'; rom_owner <= OWN_IDLE;
+                        elsif rom_req_i='0' then         -- parity retry: re-issue
+                            if rom_ack='0' then rom_req_i <= '1'; end if;
+                        elsif rom_ack='1' and rom_par_ok='0' then
+                            rom_req_i <= '0';
+                            retry_cnt <= retry_cnt + 1;
+                        end if;
+                        -- good ack is forwarded combinationally via jsa_rom_ack
                     when OWN_E =>
                         if e_as_n='1' then
                             rom_req_i <= '0'; rom_owner <= OWN_IDLE;
@@ -538,7 +571,8 @@ begin
                                        end if;
                                        intensity     <= v_do(4 downto 1);
                                        video_off     <= v_do(5);
-                        when others => null;                           -- 360020/30: sound (stub)
+                        when "10"   => null;                           -- 360020: sound reset (pulse below)
+                        when others => null;                           -- 360030: sound cmd (latched below)
                     end case;
                 end if;
 
@@ -555,6 +589,33 @@ begin
             end if;
         end if;
     end process;
+    ---------------------------------------------------------------- JSA-I sound board
+    -- link strobes: level-per-bus-cycle is safe (data stable across the cycle;
+    -- escape_jsa's full/NMI logic is edge-derived internally)
+    snd_cmd_we  <= '1' when v_as_n='0' and v_rw_n='0' and v_sel_vctl='1'
+                            and v_addr(5 downto 4)="11" else '0';
+    snd_res_p   <= '1' when v_as_n='0' and v_rw_n='0' and v_sel_vctl='1'
+                            and v_addr(5 downto 4)="10" else '0';
+    snd_resp_rd <= '1' when v_as_n='0' and v_rw_n='1' and v_sel_io='1'
+                            and v_addr(5 downto 4)="11" else '0';
+
+    jsa : entity work.escape_jsa
+        generic map ( YM_ENABLE => (YM_ENABLE = 1) )
+        port map ( clk=>clk, reset_n=>reset_n, snd_res=>snd_res_p,
+                   rom_addr=>jsa_rom_addr, rom_data=>rom_data,
+                   rom_req=>jsa_rom_req, rom_ack=>jsa_rom_ack,
+                   cmd_data=>v_do(7 downto 0), cmd_we=>snd_cmd_we,
+                   resp_data=>jsa_resp, resp_rd=>snd_resp_rd,
+                   cmd_full=>jsa_cmd_full, resp_full=>jsa_resp_full,
+                   snd_irq=>jsa_snd_irq,
+                   coin1=>coin1, coin2=>coin2, test_mode=>not svc_n,
+                   audio_l=>audio_l, audio_r=>audio_r,
+                   dbg_cpu_addr=>open, dbg_cpu_sync=>open );
+
+    -- forward good acks to the JSA client while it owns the external ROM bus
+    jsa_rom_ack <= '1' when rom_owner=OWN_J and rom_ack='1' and rom_par_ok='1'
+                            and rom_req_i='1' else '0';
+
     dbg_v_pc_fetch <= v_pc_seen;
     dbg_e_running  <= extra_release;
     intensity_out  <= intensity;
@@ -591,9 +652,11 @@ begin
             (x"F" & not p1_buttons & x"FF")  when v_sel_io='1' and v_addr(5 downto 4)="00" else
             -- 260010: P2 inputs + status: D4 ADEOC=1(done), D3 /SCBSY=1(idle),
             -- D2 /SINT=1(no snd irq), D1 self-test lever (0=service), D0 /VBLANK
-            (x"F" & not p2_buttons & "1111" & "11" & svc_n & not vblank_in)
+            (x"F" & not p2_buttons & "1111" & (not jsa_cmd_full) & (not jsa_resp_full)
+             & svc_n & not vblank_in)
                                              when v_sel_io='1' and v_addr(5 downto 4)="01" else
             x"0080" when v_sel_io='1' and v_addr(5 downto 4)="10" else
+            (x"00" & jsa_resp) when v_sel_io='1' and v_addr(5 downto 4)="11" else
             x"0000" when v_sel_io='1' else
             (others => '0');
 

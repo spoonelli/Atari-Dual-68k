@@ -742,6 +742,12 @@ set_global_assignment -name VERILOG_FILE core/core_top.v
 set_global_assignment -name VERILOG_FILE core/rtl/sdram_simple.v
 set_global_assignment -name VERILOG_FILE core/rtl/escape_mob.v
 set_global_assignment -name VHDL_FILE core/rtl/escape_core.vhd
+set_global_assignment -name VHDL_FILE core/rtl/escape_jsa.vhd
+set_global_assignment -name QIP_FILE ../../third_party/jt51/hdl/jt51.qip
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65_Pack.vhd
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65_MCode.vhd
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65_ALU.vhd
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65.vhd
 set_global_assignment -name VHDL_FILE core/rtl/escape_decode.vhd
 set_global_assignment -name VHDL_FILE core/rtl/spram_bytelane.vhd
 set_global_assignment -name VHDL_FILE core/rtl/dpram_bytelane_syn.vhd

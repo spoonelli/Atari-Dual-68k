@@ -655,14 +655,22 @@ end
     reg     [4:0]   audgen_lrck_cnt;    
     reg             audgen_lrck;
     reg             audgen_dac;
+    // JSA audio: samples from the 7.159 domain; quasi-static double-register
+    // (tearing at 48 kHz boundaries is inaudible)
+    reg     [15:0]  aud_l_m, aud_l_s, aud_r_m, aud_r_s;
+    reg     [15:0]  audgen_shift;
 always @(negedge audgen_sclk) begin
-    audgen_dac <= 1'b0;
+    aud_l_m <= core_audio_l;  aud_l_s <= aud_l_m;
+    aud_r_m <= core_audio_r;  aud_r_s <= aud_r_m;
+    // I2S: MSB-first 16 active bits, then zeros for the rest of the 32-bit slot
+    audgen_dac   <= audgen_shift[15];
+    audgen_shift <= {audgen_shift[14:0], 1'b0};
     // 48khz * 64
     audgen_lrck_cnt <= audgen_lrck_cnt + 1'b1;
     if(audgen_lrck_cnt == 31) begin
-        // switch channels
-        audgen_lrck <= ~audgen_lrck;
-        
+        // switch channels; load the next channel's sample
+        audgen_lrck  <= ~audgen_lrck;
+        audgen_shift <= audgen_lrck ? aud_l_s : aud_r_s;
     end 
 end
 
@@ -1173,7 +1181,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0034;   // v34
+    localparam [15:0] BUILD_ID = 16'h0035;   // v35
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1385,6 +1393,9 @@ escape_mob umob (
     wire        wdog_expired;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
+    wire coin1_s;
+synch_3 s_coin(cont1_key[14], coin1_s, clk_sys_7159);   // Select = coin 1 (JSA)
+    wire [15:0] core_audio_l, core_audio_r;
     wire iso_mo_off, iso_alpha_off;
 synch_3 s_isomo(cont1_key[9],  iso_mo_off,    clk_sys_7159);   // R: hide motion objects
 synch_3 s_isoal(cont1_key[10], iso_alpha_off, clk_sys_7159);   // L2: hide alpha layer
@@ -1400,6 +1411,10 @@ escape_core ecore (
     // {duck, spare, fire, jump} = Pocket {X, -, B, A}   (schematic sheet 3: CD11..CD8)
     .p1_buttons ( {cont1_key[6], 1'b0, cont1_key[5], cont1_key[4]} ),
     .svc_n      ( ~svc_mode_s ),
+    .coin1      ( coin1_s ),
+    .coin2      ( 1'b0 ),
+    .audio_l    ( core_audio_l ),
+    .audio_r    ( core_audio_r ),
     .p2_buttons ( 4'b0000 ),
     .alpha_vaddr( alpha_vaddr ),
     .alpha_vdata( alpha_vdata ),
