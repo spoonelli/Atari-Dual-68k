@@ -196,14 +196,21 @@ module sdram_simple (
                 end else begin
                     cmd(CMD_READ);
                     dram_a <= {4'b0000, word[8:0]};          // first read: NO auto-precharge
-                    state <= S_RD2;
+                    // v50: gap so each word's capture sits 2 cycles after its
+                    // OWN read command, far from bus turnaround
+                    state <= S_CL;
                 end
+            end
+
+            S_CL: begin                                   // NOP gap after READ1
+                state <= S_RD2;
             end
 
             S_RD2: begin
                 cmd(CMD_READ);
                 dram_a <= {4'b0010, word[8:1], 1'b1};        // col+1, auto-precharge
-                state <= S_DATA;                              // CL2: data0 next cycle
+                rd_data[31:16] <= dram_dq;                   // data0 (READ1 + CL2 = now)
+                state <= S_DATA;
             end
 
             S_WR2: begin
@@ -215,8 +222,7 @@ module sdram_simple (
                 state <= S_PRECHG;
             end
 
-            S_DATA: begin
-                rd_data[31:16] <= dram_dq;                   // data0
+            S_DATA: begin                                 // NOP gap after READ2
                 state <= S_DATA1;
             end
 

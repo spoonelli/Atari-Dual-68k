@@ -42,6 +42,17 @@
         "writeonly": true,
         "defaultval": 0,
         "value": 1
+      },
+      {
+        "name": "Audio Test Tone",
+        "id": 14,
+        "type": "check",
+        "enabled": true,
+        "address": "0xA0000040",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
       }
     ],
     "messages": []
