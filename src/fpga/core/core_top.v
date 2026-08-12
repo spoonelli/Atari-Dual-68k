@@ -777,6 +777,11 @@ synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
     reg        shad_we    = 1'b0;
     reg [15:0] shad_pend  = 16'd0;
     reg        shad_second= 1'b0;
+    // v59: fill-stream checksums. Expected (from the verified image):
+    // vshad = 16'h11E9, eshad = 16'h8318. HUD shows both; a mismatch on
+    // device = the fill writer corrupted the hot-code shadow.
+    reg [15:0] shad_sum_v = 16'd0;
+    reg [15:0] shad_sum_e = 16'd0;
 always @(posedge clk_sdram) begin
     // second beat of the shadow fill; default release
     if(shad_second) begin
@@ -786,6 +791,10 @@ always @(posedge clk_sdram) begin
         shad_second <= 0;
     end else begin
         shad_we <= 0;
+    end
+    if(shad_we) begin
+        if(shad_waddr[23:16] == 8'h00) shad_sum_v <= shad_sum_v + shad_wdata;
+        if(shad_waddr[23:16] == 8'h08) shad_sum_e <= shad_sum_e + shad_wdata;
     end
     case(dl_phase)
     2'd0: begin
@@ -1241,22 +1250,17 @@ end
         // WRHI = last data-write address [23:8] -> names the march region:
         // 16xx shared, 3F5x work, 3F0x pf, 3F2x mo, 3F4x alpha, 3E0x color.
         case(slot)
-        // field 1 = LIVE BUTTON PROBE (v54): [15:12] raw Pocket face bits
-        // Y,X,B,A; [11:8] mapped duck,spare,fire,jump nibble (what the game's
-        // scanner at ROM 0xF7E reads); [7:4] raw start bit; [3:0] raw select
-        4'd0:  hex_digit = {cont1_key[7],cont1_key[6],cont1_key[5],cont1_key[4]};
-        4'd1:  hex_digit = btn_probe;
-        4'd2:  hex_digit = {3'b000, cont1_key[15]};
-        4'd3:  hex_digit = {3'b000, cont1_key[14]};
+        // field 1 (v59): VIDEO-CPU SHADOW FILL CHECKSUM - expect 11E9.
+        // Anything else = the hot-code shadow is corrupt = fill-writer bug.
+        4'd0:  hex_digit = shad_sum_v[15:12];    4'd1:  hex_digit = shad_sum_v[11:8];
+        4'd2:  hex_digit = shad_sum_v[7:4];      4'd3:  hex_digit = shad_sum_v[3:0];
         // middle field (v55): JSA 6502 program counter, frame-latched -
         // frozen = sound CPU wedged; churning = alive
         4'd5:  hex_digit = jsapc_fr[15:12];      4'd6:  hex_digit = jsapc_fr[11:8];
         4'd7:  hex_digit = jsapc_fr[7:4];        4'd8:  hex_digit = jsapc_fr[3:0];
-        // field 3 (v55): JSA link - [F]=cmd_full,resp_full,snd_irq,0 then 00
-        // then the last command byte the 68k sent. cmd_full stuck 1 = the
-        // 68k->6502 direction jammed (unified no-sound/no-start suspect)
-        4'd10: hex_digit = jsalink_fr[15:12];    4'd11: hex_digit = jsalink_fr[11:8];
-        4'd12: hex_digit = jsalink_fr[7:4];      4'd13: hex_digit = jsalink_fr[3:0];
+        // field 3 (v59): EXTRA-CPU SHADOW FILL CHECKSUM - expect 8318.
+        4'd10: hex_digit = shad_sum_e[15:12];    4'd11: hex_digit = shad_sum_e[11:8];
+        4'd12: hex_digit = shad_sum_e[7:4];      4'd13: hex_digit = shad_sum_e[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1267,7 +1271,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0058;   // v58
+    localparam [15:0] BUILD_ID = 16'h0059;   // v59
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
