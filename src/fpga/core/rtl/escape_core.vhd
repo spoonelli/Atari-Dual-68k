@@ -541,7 +541,8 @@ begin
                    we_a=>we_cfg, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>cfg_q,
                    addr_b=>cfg_vaddr, din_b=>(others=>'0'),
                    we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>cfg_vdata );
-    ee_ram    : entity work.spram_bytelane generic map ( awidth=>13 )
+    ee_ram    : entity work.spram_bytelane
+        generic map ( awidth=>13, initbyte=>x"FF" )   -- virgin-EEPROM erased state
         port map ( clk=>clk, addr=>v_addr(13 downto 1), din=>v_do, we=>we_ee,
                    uds_n=>v_uds_n, lds_n=>v_lds_n, q=>ee_q );
 
