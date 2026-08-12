@@ -361,9 +361,17 @@ begin
     rdio <= test_mode                -- D7 self-test (MAME nets 0 in normal play)
             & (not cmd_full_i)       -- D6 /input-buffer-full (0 = command pending)
             & resp_full_i            -- D5 output-buffer-full (active high)
-            & '1'                    -- D4 TMS5220 ready (stub: always ready)
-            & "11"                   -- D3:2 +5V
-            & coin2 & coin1;         -- D1:0 coins, 1 = pressed
+            & '0'                    -- D4 TMS5220 /ready (active LOW: 0 = ready)
+            -- D3:2 idle LOW. The schematic doc calls these "+5V", but the
+            -- JSA harness wires 0x04 as a third coin input (MAME JSAI port:
+            -- Coin 3, IP_ACTIVE_HIGH; measured idle 2804 = 0x50/0x40, D3:2
+            -- = 00). Holding them '1' meant Coin 3 permanently pressed:
+            -- credits raced on their own, the response queue flooded, and
+            -- stuck-coin protection suppressed start acceptance.
+            & "00"
+            -- D1:0 coins ACTIVE HIGH (MAME JSAI: IP_ACTIVE_HIGH; measured:
+            -- idle 0, held coin reads 1)
+            & coin2 & coin1;
 
     ---------------------------------------------------------------- YM2151 (jt51)
     ym_cs_n <= not sel_ym;

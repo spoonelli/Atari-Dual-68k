@@ -1,0 +1,18 @@
+{
+    "data": {
+        "magic": "APF_VER_1",
+        "data_slots": [
+            {
+                "name": "ROM",
+                "id": 1,
+                "required": true,
+                "parameters": "0x00000000",
+                "filename": "atari_escape.rom",
+                "extensions": [
+                    "rom"
+                ],
+                "address": "0x10000000"
+            }
+        ]
+    }
+}

@@ -154,6 +154,16 @@ entity escape_core is
         -- [11:8] 0, [7:0] last command byte the 68k wrote to 360031
         dbg_jsa_link  : out std_logic_vector(15 downto 0);
         dbg_jsa_pc    : out std_logic_vector(15 downto 0);
+        -- v61 coin-chain probes (HUD): every link from switch to credit.
+        -- resp_stat = {68k-response-read count, last response byte} - reads
+        -- frozen at 00 while jsa_link shows resp_full = the 68k gave up on
+        -- the sound link (IRQ6 masked / init handshake failed); byte churn
+        -- with no coins = latch garbage feeding the credit differ.
+        dbg_resp_stat : out std_logic_vector(15 downto 0);
+        -- coin_cred = {coin-line edge count, game's credit count ($3F7F55)}
+        -- - edges ticking with no Select presses = the input line itself
+        -- glitches; credits climbing while edges hold = downstream bug.
+        dbg_coin_cred : out std_logic_vector(15 downto 0);
         -- watchdog: game strobes 380000 during self-test; if no strobe for 64
         -- vblanks (~1.07s, authentic recover-by-reboot) this pulses high once
         wdog_expired  : out std_logic
@@ -230,6 +240,13 @@ architecture rtl of escape_core is
     signal vshad_we, eshad_we : std_logic;
     signal jsa_cmd_full, jsa_resp_full, jsa_snd_irq : std_logic;
     signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
+    -- v61 coin-chain probe state
+    signal resp_rd_d  : std_logic := '0';
+    signal resp_reads : unsigned(7 downto 0) := (others => '0');
+    signal resp_last  : std_logic_vector(7 downto 0) := (others => '0');
+    signal coin1_d, coin2_d : std_logic := '0';
+    signal coin_edges : unsigned(7 downto 0) := (others => '0');
+    signal credits_sn : std_logic_vector(7 downto 0) := (others => '0');
     signal wdog_ctr : unsigned(5 downto 0);
     signal wdog_expired_i : std_logic;
     signal fault_p, vec_seen : std_logic;
@@ -778,6 +795,32 @@ begin
                     & x"0" & jsa_last_cmd;
     dbg_jsa_pc   <= jsa_cpu_addr;
 
+    -- v61 coin-chain probes: count 68k response reads (frozen while
+    -- resp_full is up = the game stopped listening to the JSA), latch the
+    -- last response byte, count raw coin-line edges, and snoop the game's
+    -- own credit counter (work-RAM byte $3F7F55, found via MAME watchpoint)
+    coin_probe : process(clk)
+    begin
+        if rising_edge(clk) then
+            resp_rd_d <= snd_resp_rd;
+            if snd_resp_rd='1' and resp_rd_d='0' then
+                resp_reads <= resp_reads + 1;
+                resp_last  <= jsa_resp;
+            end if;
+            coin1_d <= coin1;
+            coin2_d <= coin2;
+            if (coin1='1' and coin1_d='0') or (coin2='1' and coin2_d='0') then
+                coin_edges <= coin_edges + 1;
+            end if;
+            if v_as_n='0' and v_rw_n='0' and v_sel_work='1' and v_lds_n='0'
+               and v_addr(15 downto 1)&'0' = x"7F54" then
+                credits_sn <= v_do(7 downto 0);
+            end if;
+        end if;
+    end process;
+    dbg_resp_stat <= std_logic_vector(resp_reads) & resp_last;
+    dbg_coin_cred <= std_logic_vector(coin_edges) & credits_sn;
+
     -- forward good acks to the JSA client while it owns the external ROM bus
     jsa_rom_ack <= '1' when rom_owner=OWN_J and rom_ack='1' and rom_par_ok='1'
                             and rom_req_i='1' else '0';
@@ -810,8 +853,10 @@ begin
             pf_q     when v_sel_pf='1' else
             mo_q     when v_sel_mo='1' else
             alpha_q  when v_sel_alpha='1' else
+            -- (v61: the compare was a 15-bit literal that decoded as byte
+            -- address FF0C, not 7F0C - Skip Self-Test could never match)
             x"0100"  when v_sel_work='1' and skip_test='1'
-                          and v_addr(15 downto 1) = "111111110000110" else
+                          and v_addr(15 downto 1)&'0' = x"7F0C" else
             work_q   when v_sel_work='1' else
             pfpal_q  when v_sel_pfpal='1' else
             color_q  when v_sel_color='1' else
