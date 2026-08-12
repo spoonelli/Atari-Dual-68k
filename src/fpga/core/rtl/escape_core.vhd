@@ -567,22 +567,27 @@ begin
     -- v58 hot-code shadows: 32K x 16 dpram each; port A = CPU fetch (read),
     -- port B = download fill. In-range fetches bypass the ROM arbiter and use
     -- the standard BRAM dtack path (+1 waitstate) - the proven-solid timing.
+    -- v63: shadows narrowed 64KB -> 32KB to fit the new JSA shadow in the
+    -- 308-M10K budget (fitter overflow at 64/64/64). Every hot address ever
+    -- disassembled sits below 0x8000 on both CPUs: vectors, jump table $106,
+    -- boot $694-$88A, IRQ6 $134C, dequeue $14A4, start-accept $39EE, input
+    -- scan $F7E; extra-CPU reset/march/quiesce ($40586 = offset $586).
     v_sel_shad <= '1' when SHAD_EN=1 and v_sel_rom='1'
-                            and v_addr(23 downto 16) = x"00" else '0';
+                            and v_addr(23 downto 15) = "000000000" else '0';
     e_sel_shad <= '1' when SHAD_EN=1 and e_sel_rom='1'
-                            and e_addr(23 downto 16) = x"00" else '0';
-    vshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"00" else '0';
-    eshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"08" else '0';
+                            and e_addr(23 downto 15) = "000000000" else '0';
+    vshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000000000" else '0';
+    eshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000010000" else '0';
     jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
 
-    vshad : entity work.dpram_dc generic map ( awidth => 15 )
+    vshad : entity work.dpram_dc generic map ( awidth => 14 )
         port map ( wrclk=>shad_wclk, we=>vshad_we,
-                   waddr=>shad_waddr(15 downto 1), wdata=>shad_wdata,
-                   rdclk=>clk, raddr=>v_addr(15 downto 1), q=>vshad_q );
-    eshad : entity work.dpram_dc generic map ( awidth => 15 )
+                   waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad_q );
+    eshad : entity work.dpram_dc generic map ( awidth => 14 )
         port map ( wrclk=>shad_wclk, we=>eshad_we,
-                   waddr=>shad_waddr(15 downto 1), wdata=>shad_wdata,
-                   rdclk=>clk, raddr=>e_addr(15 downto 1), q=>eshad_q );
+                   waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>e_addr(14 downto 1), q=>eshad_q );
 
     -- v63: JSA shadow serves the whole 64KB sound ROM from BRAM.
     jshad : entity work.dpram_dc generic map ( awidth => 15 )
