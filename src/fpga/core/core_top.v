@@ -1233,6 +1233,7 @@ end
     reg [15:0] epc_fr, mbox_fr;
     reg        vb_hud_d;
     reg [15:0] jsapc_fr, jsalink_fr;
+    reg [15:0] respstat_fr, coincred_fr;
     always @(posedge clk_sys_7159) begin
         vb_hud_d <= vblank_w;
         if(vblank_w && !vb_hud_d) begin
@@ -1240,6 +1241,8 @@ end
             mbox_fr   <= dbg_mbox_resp;
             jsapc_fr  <= dbg_jsa_pc;
             jsalink_fr<= dbg_jsa_link;
+            respstat_fr <= dbg_resp_stat;
+            coincred_fr <= dbg_coin_cred;
         end
     end
     reg  [3:0] hex_digit;
@@ -1250,17 +1253,21 @@ end
         // WRHI = last data-write address [23:8] -> names the march region:
         // 16xx shared, 3F5x work, 3F0x pf, 3F2x mo, 3F4x alpha, 3E0x color.
         case(slot)
-        // field 1 (v59): VIDEO-CPU SHADOW FILL CHECKSUM - expect 11E9.
-        // Anything else = the hot-code shadow is corrupt = fill-writer bug.
-        4'd0:  hex_digit = shad_sum_v[15:12];    4'd1:  hex_digit = shad_sum_v[11:8];
-        4'd2:  hex_digit = shad_sum_v[7:4];      4'd3:  hex_digit = shad_sum_v[3:0];
+        // field 1 (v61): {68k response-read count, last response byte}.
+        // Count frozen while jsa_link shows resp_full = game stopped
+        // listening to the JSA. Byte churning with no coins = latch garbage.
+        // (replaces the v59 shadow checksum, verified 11E9 on device)
+        4'd0:  hex_digit = respstat_fr[15:12];   4'd1:  hex_digit = respstat_fr[11:8];
+        4'd2:  hex_digit = respstat_fr[7:4];     4'd3:  hex_digit = respstat_fr[3:0];
         // middle field (v55): JSA 6502 program counter, frame-latched -
         // frozen = sound CPU wedged; churning = alive
         4'd5:  hex_digit = jsapc_fr[15:12];      4'd6:  hex_digit = jsapc_fr[11:8];
         4'd7:  hex_digit = jsapc_fr[7:4];        4'd8:  hex_digit = jsapc_fr[3:0];
-        // field 3 (v59): EXTRA-CPU SHADOW FILL CHECKSUM - expect 8318.
-        4'd10: hex_digit = shad_sum_e[15:12];    4'd11: hex_digit = shad_sum_e[11:8];
-        4'd12: hex_digit = shad_sum_e[7:4];      4'd13: hex_digit = shad_sum_e[3:0];
+        // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
+        // Edges ticking without Select presses = input line glitching.
+        // (replaces the v59 shadow checksum, verified 8318 on device)
+        4'd10: hex_digit = coincred_fr[15:12];   4'd11: hex_digit = coincred_fr[11:8];
+        4'd12: hex_digit = coincred_fr[7:4];     4'd13: hex_digit = coincred_fr[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1271,7 +1278,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0060;   // v60
+    localparam [15:0] BUILD_ID = 16'h0061;   // v61
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1485,6 +1492,7 @@ escape_mob umob (
     wire [1:0]  dbg_fsrc;
     wire [15:0] dbg_epc;
     wire [15:0] dbg_jsa_link, dbg_jsa_pc;
+    wire [15:0] dbg_resp_stat, dbg_coin_cred;
     wire        wdog_expired;
     wire diag_on;
 synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
@@ -1592,6 +1600,8 @@ escape_core ecore (
     .dbg_epc        ( dbg_epc ),
     .dbg_jsa_link   ( dbg_jsa_link ),
     .dbg_jsa_pc     ( dbg_jsa_pc ),
+    .dbg_resp_stat  ( dbg_resp_stat ),
+    .dbg_coin_cred  ( dbg_coin_cred ),
     .wdog_expired   ( wdog_expired )
 );
 
