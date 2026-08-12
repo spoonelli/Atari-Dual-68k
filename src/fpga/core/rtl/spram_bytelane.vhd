@@ -7,7 +7,12 @@ use ieee.numeric_std.all;
 
 entity spram_bytelane is
     generic (
-        awidth : integer := 12                  -- word-address bits
+        awidth : integer := 12;                 -- word-address bits
+        -- initial fill byte: x"00" for RAMs; x"FF" for the EEPROM (a real
+        -- erased 2804 reads FF - the game detects the virgin pattern and
+        -- writes factory defaults; an all-zeros part reads as pathological
+        -- 'valid-shaped' settings with pricing 0 = start never accepted)
+        initbyte : std_logic_vector(7 downto 0) := x"00"
     );
     port (
         clk   : in  std_logic;
@@ -22,7 +27,7 @@ end spram_bytelane;
 
 architecture rtl of spram_bytelane is
     type bank_t is array (0 to 2**awidth-1) of std_logic_vector(7 downto 0);
-    signal hi, lo : bank_t := (others => (others => '0'));
+    signal hi, lo : bank_t := (others => initbyte);
 begin
     process(clk)
     begin
