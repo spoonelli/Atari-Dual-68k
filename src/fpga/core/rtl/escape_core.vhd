@@ -15,7 +15,10 @@ use ieee.numeric_std.all;
 entity escape_core is
     generic (
         -- 1 = bind jt51 (Quartus mixed-language); 0 = GHDL sim stub (docs/JSA.md)
-        YM_ENABLE : integer := 1
+        YM_ENABLE : integer := 1;
+        -- 1 = serve low-64KB code from the download-filled shadows (hardware);
+        -- 0 = disable (GHDL tbs: shadows unfilled, all fetches via arbiter)
+        SHAD_EN   : integer := 1
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -27,6 +30,19 @@ entity escape_core is
         rom_par    : in  std_logic := '0';   -- even parity over rom_data, from server
         rom_req    : out std_logic;
         rom_ack    : in  std_logic;
+
+        -- v58 hot-code shadows: 64KB BRAM per CPU covering its low address
+        -- space (vectors + ISR + main loop + boot). Filled during the ROM
+        -- download via this write port (image byte addr; video shadow takes
+        -- 0x000000-0x00FFFF, extra shadow 0x080000-0x08FFFF). Fetches in
+        -- range are served zero-wait through the proven BRAM dtack path -
+        -- restoring the real board's ~4-cycle fetch budget the game's frame
+        -- architecture assumes (MAME fetches in zero time; SDRAM cost 15-25
+        -- cycles and starved the main loop behind the vblank ISR).
+        shad_wclk  : in  std_logic := '0';
+        shad_waddr : in  std_logic_vector(23 downto 0) := (others=>'0');
+        shad_wdata : in  std_logic_vector(15 downto 0) := (others=>'0');
+        shad_we    : in  std_logic := '0';
 
         -- raster position (from video counters in core_top for now)
         vblank_in  : in  std_logic;
@@ -180,7 +196,7 @@ architecture rtl of escape_core is
         return p;
     end function;
 
-    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E, OWN_J, OWN_VP, OWN_EP);
+    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E, OWN_J);
     signal rom_owner : rom_owner_t;
     signal last_was_v : std_logic;   -- fair round-robin: alternate priority
     signal rom_addr_i : std_logic_vector(23 downto 0);
@@ -208,19 +224,10 @@ architecture rtl of escape_core is
     signal jsa_resp : std_logic_vector(7 downto 0);
     signal jsa_cpu_addr : std_logic_vector(15 downto 0);
     signal jsa_last_cmd : std_logic_vector(7 downto 0);
-    -- v56 word-0-only prefetch: speculative follow-up transaction for addr+2,
-    -- consuming only the burst's FIRST word (the proven-clean capture slot)
-    signal vp_want, ep_want : std_logic;
-    signal vp_addr, ep_addr : std_logic_vector(19 downto 0);
-    -- v57: hit serves are PACED - dtack delayed 2 cycles after the hold
-    -- register loads. Fast back-to-back register serves are the reconciled
-    -- corruption suspect (present in every corrupt build, absent in every
-    -- clean one); SDRAM-served fetches were always naturally slower.
-    signal v_hit_dly, e_hit_dly : unsigned(1 downto 0);
-    -- serve-once-per-bus-cycle: register serves have no SDRAM ack to block
-    -- re-entry, so without this a still-matching cache re-serves the same
-    -- cycle and the second paced pulse lands in the CPU's NEXT fetch
-    signal v_served, e_served : std_logic;
+    -- v58 hot-code shadows
+    signal vshad_q, eshad_q : std_logic_vector(15 downto 0);
+    signal v_sel_shad, e_sel_shad : std_logic;
+    signal vshad_we, eshad_we : std_logic;
     signal jsa_cmd_full, jsa_resp_full, jsa_snd_irq : std_logic;
     signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
     signal wdog_ctr : unsigned(5 downto 0);
@@ -296,8 +303,8 @@ begin
                    sel_slip=>e_unused(10), sel_workram=>e_unused(11), sel_pfpalette=>e_unused(12) );
 
     ---------------------------------------------------------------- ROM bus arbitration
-    v_rom_pend <= '1' when v_sel_rom='1' and v_as_n='0' else '0';
-    e_rom_pend <= '1' when e_sel_rom='1' and e_as_n='0' else '0';
+    v_rom_pend <= '1' when v_sel_rom='1' and v_sel_shad='0' and v_as_n='0' else '0';
+    e_rom_pend <= '1' when e_sel_rom='1' and e_sel_shad='0' and e_as_n='0' else '0';
 
     rom_arb : process(clk)
     begin
@@ -305,25 +312,11 @@ begin
             if reset_n='0' then
                 rom_owner <= OWN_IDLE; rom_req_i <= '0'; last_was_v <= '0';
                 v_pref_valid <= '0'; e_pref_valid <= '0';
-                vp_want <= '0'; ep_want <= '0';
-                v_hit_dly <= "00"; e_hit_dly <= "00";
-                v_served <= '0'; e_served <= '0';
                 v_last_valid <= '0'; e_last_valid <= '0';
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
                 retry_cnt <= (others=>'0');
             else
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
-                if v_as_n='1' then v_served <= '0'; end if;
-                if e_as_n='1' then e_served <= '0'; end if;
-                -- paced hit serves: countdown then dtack
-                if v_hit_dly /= "00" then
-                    v_hit_dly <= v_hit_dly - 1;
-                    if v_hit_dly = "01" then v_rom_dtack <= '1'; end if;
-                end if;
-                if e_hit_dly /= "00" then
-                    e_hit_dly <= e_hit_dly - 1;
-                    if e_hit_dly = "01" then e_rom_dtack <= '1'; end if;
-                end if;
                 case rom_owner is
                     when OWN_IDLE =>
                         -- fair round-robin: whoever was NOT served last gets priority,
@@ -332,68 +325,45 @@ begin
                         if rom_ack='1' then
                             null;                        -- wait out previous ack (4-phase)
                         -- sequential-fetch prefetch hits: served with no SDRAM transaction
-                        elsif v_rom_pend='1' and v_served='0' and v_hit_dly="00"
-                              and v_pref_valid='1'
+                        elsif v_rom_pend='1' and v_rom_dtack='0' and v_pref_valid='1'
                               and (v_addr(19 downto 1) & '0') = v_pref_addr then
                             v_rom_hold   <= v_pref_data;
-                            v_hit_dly    <= "10";          -- paced serve (v57)
-                            v_served     <= '1';
+                            v_rom_dtack  <= '1';
                             v_rom_src    <= "01";          -- prefetch hit
                             v_pref_valid <= '0';
                             v_last_data  <= v_pref_data;   -- cache for the odd-byte repeat
                             v_last_addr  <= v_pref_addr;
                             v_last_valid <= '1';
-                        elsif e_rom_pend='1' and e_served='0' and e_hit_dly="00"
-                              and e_pref_valid='1'
+                        elsif e_rom_pend='1' and e_rom_dtack='0' and e_pref_valid='1'
                               and (e_addr(19 downto 1) & '0') = e_pref_addr then
                             e_rom_hold   <= e_pref_data;
-                            e_hit_dly    <= "10";          -- paced serve (v57)
-                            e_served     <= '1';
+                            e_rom_dtack  <= '1';
                             e_pref_valid <= '0';
                             e_last_data  <= e_pref_data;
                             e_last_addr  <= e_pref_addr;
                             e_last_valid <= '1';
                         -- last-word cache hits (repeat read of same ROM word: no SDRAM txn)
-                        elsif v_rom_pend='1' and v_served='0' and v_hit_dly="00"
-                              and v_last_valid='1'
+                        elsif v_rom_pend='1' and v_rom_dtack='0' and v_last_valid='1'
                               and (v_addr(19 downto 1) & '0') = v_last_addr then
                             v_rom_hold  <= v_last_data;
-                            v_hit_dly   <= "10";           -- paced serve (v57)
-                            v_served    <= '1';
+                            v_rom_dtack <= '1';
                             v_rom_src   <= "10";           -- last-word cache hit
-                        elsif e_rom_pend='1' and e_served='0' and e_hit_dly="00"
-                              and e_last_valid='1'
+                        elsif e_rom_pend='1' and e_rom_dtack='0' and e_last_valid='1'
                               and (e_addr(19 downto 1) & '0') = e_last_addr then
                             e_rom_hold  <= e_last_data;
-                            e_hit_dly   <= "10";           -- paced serve (v57)
-                            e_served    <= '1';
-                        -- v57: no grants for a CPU whose paced serve is counting
-                        -- down - a redundant fetch's late dtack lands in the NEXT
-                        -- bus cycle with stale data (caught by the boot sim)
-                        elsif e_rom_pend='1' and e_hit_dly="00" and e_served='0'
-                              and (last_was_v='1' or v_rom_pend='0' or v_hit_dly/="00") then
+                            e_rom_dtack <= '1';
+                        elsif e_rom_pend='1' and (last_was_v='1' or v_rom_pend='0') then
                             rom_owner <= OWN_E; last_was_v <= '0';
                             rom_addr_i <= std_logic_vector(
                                 unsigned(x"0" & e_addr(19 downto 1) & '0') + x"080000");
                             rom_req_i <= '1';
-                        elsif v_rom_pend='1' and v_hit_dly="00" and v_served='0' then
+                        elsif v_rom_pend='1' then
                             rom_owner <= OWN_V; last_was_v <= '1';
                             rom_addr_i <= x"0" & v_addr(19 downto 1) & '0';
                             rom_req_i <= '1';
                         elsif jsa_rom_req='1' then
                             rom_owner <= OWN_J;
                             rom_addr_i <= jsa_rom_addr;   -- already a full image address
-                            rom_req_i <= '1';
-                        -- v56: speculative word-0 prefetch, lowest priority -
-                        -- only when no real fetch is waiting
-                        elsif vp_want='1' then
-                            rom_owner <= OWN_VP; vp_want <= '0';
-                            rom_addr_i <= x"0" & vp_addr;
-                            rom_req_i <= '1';
-                        elsif ep_want='1' then
-                            rom_owner <= OWN_EP; ep_want <= '0';
-                            rom_addr_i <= std_logic_vector(
-                                unsigned(x"0" & ep_addr) + x"080000");
                             rom_req_i <= '1';
                         end if;
                     when OWN_V =>
@@ -406,17 +376,21 @@ begin
                             retry_cnt <= retry_cnt + 1;
                         elsif rom_ack='1' then
                             rom_req_i <= '0'; v_rom_hold <= rom_data(31 downto 16);
-                            -- v56: word-1 is never consumed (marginal capture);
-                            -- instead arm a speculative follow-up transaction
-                            -- for addr+2 whose word 0 becomes the prefetch
-                            vp_addr <= std_logic_vector(
+                            v_pref_data  <= rom_data(15 downto 0);
+                            v_pref_addr  <= std_logic_vector(
                                 unsigned(v_addr(19 downto 1) & '0') + 2);
-                            vp_want <= '1';
+                            -- v52: prefetch OFF again - the stable config.
+                            -- Word-1 capture stayed marginal through both the
+                            -- v50 spread and v51 no-AP experiments; word-0-only
+                            -- serving is the configuration proven from boot to
+                            -- mission briefing. Investigation plan for re-enable
+                            -- lives in the project notes (swap-order experiment,
+                            -- negedge DQ capture).
+                            v_pref_valid <= '0';
                             v_last_data  <= rom_data(31 downto 16);   -- cache this word
                             v_last_addr  <= v_addr(19 downto 1) & '0';
                             v_last_valid <= '1';
                             v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
-                            v_served    <= '1';   -- bus cycle fully served
                             v_rom_src   <= "11";           -- fresh SDRAM transaction
                         end if;
                         when OWN_J =>
@@ -429,32 +403,6 @@ begin
                             retry_cnt <= retry_cnt + 1;
                         end if;
                         -- good ack is forwarded combinationally via jsa_rom_ack
-                    when OWN_VP =>
-                        if rom_req_i='0' then
-                            if rom_ack='0' then rom_req_i <= '1'; end if;
-                        elsif rom_ack='1' and rom_par_ok='0' then
-                            rom_req_i <= '0';
-                            retry_cnt <= retry_cnt + 1;
-                        elsif rom_ack='1' then
-                            rom_req_i <= '0';
-                            v_pref_data  <= rom_data(31 downto 16);  -- word 0 only
-                            v_pref_addr  <= vp_addr;
-                            v_pref_valid <= '1';
-                            rom_owner <= OWN_IDLE;
-                        end if;
-                    when OWN_EP =>
-                        if rom_req_i='0' then
-                            if rom_ack='0' then rom_req_i <= '1'; end if;
-                        elsif rom_ack='1' and rom_par_ok='0' then
-                            rom_req_i <= '0';
-                            retry_cnt <= retry_cnt + 1;
-                        elsif rom_ack='1' then
-                            rom_req_i <= '0';
-                            e_pref_data  <= rom_data(31 downto 16);
-                            e_pref_addr  <= ep_addr;
-                            e_pref_valid <= '1';
-                            rom_owner <= OWN_IDLE;
-                        end if;
                     when OWN_E =>
                         if e_as_n='1' then
                             rom_req_i <= '0'; rom_owner <= OWN_IDLE;
@@ -465,14 +413,15 @@ begin
                             retry_cnt <= retry_cnt + 1;
                         elsif rom_ack='1' then
                             rom_req_i <= '0'; e_rom_hold <= rom_data(31 downto 16);
-                            ep_addr <= std_logic_vector(
+                            e_pref_data  <= rom_data(15 downto 0);
+                            e_pref_addr  <= std_logic_vector(
                                 unsigned(e_addr(19 downto 1) & '0') + 2);
-                            ep_want <= '1';                -- v56 speculative follow-up
+                            -- v52: off, same as the video CPU path
+                            e_pref_valid <= '0';
                             e_last_data  <= rom_data(31 downto 16);
                             e_last_addr  <= e_addr(19 downto 1) & '0';
                             e_last_valid <= '1';
                             e_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
-                            e_served    <= '1';
                         end if;
                 end case;
             end if;
@@ -595,6 +544,25 @@ begin
     ee_ram    : entity work.spram_bytelane generic map ( awidth=>13 )
         port map ( clk=>clk, addr=>v_addr(13 downto 1), din=>v_do, we=>we_ee,
                    uds_n=>v_uds_n, lds_n=>v_lds_n, q=>ee_q );
+
+    -- v58 hot-code shadows: 32K x 16 dpram each; port A = CPU fetch (read),
+    -- port B = download fill. In-range fetches bypass the ROM arbiter and use
+    -- the standard BRAM dtack path (+1 waitstate) - the proven-solid timing.
+    v_sel_shad <= '1' when SHAD_EN=1 and v_sel_rom='1'
+                            and v_addr(23 downto 16) = x"00" else '0';
+    e_sel_shad <= '1' when SHAD_EN=1 and e_sel_rom='1'
+                            and e_addr(23 downto 16) = x"00" else '0';
+    vshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"00" else '0';
+    eshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"08" else '0';
+
+    vshad : entity work.dpram_dc generic map ( awidth => 15 )
+        port map ( wrclk=>shad_wclk, we=>vshad_we,
+                   waddr=>shad_waddr(15 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>v_addr(15 downto 1), q=>vshad_q );
+    eshad : entity work.dpram_dc generic map ( awidth => 15 )
+        port map ( wrclk=>shad_wclk, we=>eshad_we,
+                   waddr=>shad_waddr(15 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>e_addr(15 downto 1), q=>eshad_q );
 
     -- alpha RAM: dual-port so the video chain can read while the CPU writes
     alpha_ram : entity work.dpram_bytelane_syn generic map ( awidth => 11 )
@@ -835,7 +803,8 @@ begin
 
     ---------------------------------------------------------------- read muxes
     -- I/O: 260000 P1 (D11-D8), 260010 status+P2, 260020-2E ADC0809, 260030 SCOM
-    v_di <= v_rom_hold when v_sel_rom='1' else
+    v_di <= vshad_q    when v_sel_shad='1' else
+            v_rom_hold when v_sel_rom='1' else
             shr_qa   when v_sel_ram='1' else
             pf_q     when v_sel_pf='1' else
             mo_q     when v_sel_mo='1' else
@@ -862,7 +831,8 @@ begin
             x"0000" when v_sel_io='1' else
             (others => '0');
 
-    e_di <= e_rom_hold when e_sel_rom='1' else
+    e_di <= eshad_q    when e_sel_shad='1' else
+            e_rom_hold when e_sel_rom='1' else
             shr_qb   when e_sel_ram='1' else
             (others => '0');
 
@@ -878,7 +848,7 @@ begin
                 -- Non-ROM accesses take one extra waitstate so the BRAM output
                 -- has a full settled cycle in the read mux before capture.
                 if v_as_n='0' then
-                    if v_sel_rom='1' then
+                    if v_sel_rom='1' and v_sel_shad='0' then
                         if v_rom_dtack='1' then v_dtack_n <= '0'; end if;
                     elsif v_ws='1' then
                         v_dtack_n <= '0';
@@ -889,7 +859,7 @@ begin
                     v_dtack_n <= '1'; v_ws <= '0';
                 end if;
                 if e_as_n='0' then
-                    if e_sel_rom='1' then
+                    if e_sel_rom='1' and e_sel_shad='0' then
                         if e_rom_dtack='1' then e_dtack_n <= '0'; end if;
                     elsif e_ws='1' then
                         e_dtack_n <= '0';

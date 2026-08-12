@@ -771,7 +771,22 @@ synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
     reg [9:0]  dl_blk_cur = 10'd0;
     reg [9:0]  blk_max    = 10'd0;
     reg        dlq_d      = 1'b0;      // final-block flush on download-quiet edge
+    // v58 shadow-fill regs (clk_sdram domain; dual-clock rams inside escape_core)
+    reg [23:0] shad_waddr = 24'd0;
+    reg [15:0] shad_wdata = 16'd0;
+    reg        shad_we    = 1'b0;
+    reg [15:0] shad_pend  = 16'd0;
+    reg        shad_second= 1'b0;
 always @(posedge clk_sdram) begin
+    // second beat of the shadow fill; default release
+    if(shad_second) begin
+        shad_waddr  <= shad_waddr + 24'd2;
+        shad_wdata  <= shad_pend;
+        shad_we     <= 1;
+        shad_second <= 0;
+    end else begin
+        shad_we <= 0;
+    end
     case(dl_phase)
     2'd0: begin
         if(dl_req_s != dl_req_last) begin
@@ -780,6 +795,12 @@ always @(posedge clk_sdram) begin
             sd_wr_data <= dl_data_74;      // both halves: one burst write
             sd_wr_req  <= 1;
             dl_phase   <= 2'd1;
+            // v58: hot-code shadow fill (word 0 now, word 1 next cycle)
+            shad_waddr <= dl_addr_74[23:0];
+            shad_wdata <= dl_data_74[31:16];
+            shad_we    <= 1;
+            shad_pend  <= dl_data_74[15:0];
+            shad_second<= 1;
             // ROVING scrubber ground truth: per-4KB-block checksum of the WHOLE
             // image. Sequential download: accumulate; flush on block crossing.
             if(dl_addr_74[21:12] != dl_blk_cur) begin
@@ -1246,7 +1267,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0057;   // v57
+    localparam [15:0] BUILD_ID = 16'h0058;   // v58
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1506,6 +1527,10 @@ escape_core ecore (
     .rom_par    ( core_rom_par ),
     .rom_req    ( core_rom_req ),
     .rom_ack    ( core_rom_ack_s ),
+    .shad_wclk  ( clk_sdram ),
+    .shad_waddr ( shad_waddr ),
+    .shad_wdata ( shad_wdata ),
+    .shad_we    ( shad_we ),
     .vblank_in  ( vblank_w ),
     // {duck, spare, fire, jump} = Pocket {A, -, B, Y}   (schematic sheet 3: CD11..CD8;
     // MAME eprom: D9 = button 1 fire, D8 = button 2 jump, D11 = button 3 duck)

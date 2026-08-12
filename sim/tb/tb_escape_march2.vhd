@@ -31,7 +31,7 @@ begin
     rom_addr2w <= rom_addr(21 downto 2) & '1';   -- real col|1 burst
 
     uut : entity work.escape_core
-        generic map ( YM_ENABLE => 0 )   -- GHDL: no mixed-language jt51
+        generic map ( YM_ENABLE => 0, SHAD_EN => 0 )   -- GHDL: no jt51; shadows unfilled
         port map ( clk=>clk, reset_n=>resetn,
                    rom_addr=>rom_addr, rom_data=>rom_data, rom_par=>rom_par, rom_req=>rom_req, rom_ack=>rom_ack,
                    vblank_in=>vblank,
