@@ -212,6 +212,15 @@ architecture rtl of escape_core is
     -- consuming only the burst's FIRST word (the proven-clean capture slot)
     signal vp_want, ep_want : std_logic;
     signal vp_addr, ep_addr : std_logic_vector(19 downto 0);
+    -- v57: hit serves are PACED - dtack delayed 2 cycles after the hold
+    -- register loads. Fast back-to-back register serves are the reconciled
+    -- corruption suspect (present in every corrupt build, absent in every
+    -- clean one); SDRAM-served fetches were always naturally slower.
+    signal v_hit_dly, e_hit_dly : unsigned(1 downto 0);
+    -- serve-once-per-bus-cycle: register serves have no SDRAM ack to block
+    -- re-entry, so without this a still-matching cache re-serves the same
+    -- cycle and the second paced pulse lands in the CPU's NEXT fetch
+    signal v_served, e_served : std_logic;
     signal jsa_cmd_full, jsa_resp_full, jsa_snd_irq : std_logic;
     signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
     signal wdog_ctr : unsigned(5 downto 0);
@@ -297,11 +306,24 @@ begin
                 rom_owner <= OWN_IDLE; rom_req_i <= '0'; last_was_v <= '0';
                 v_pref_valid <= '0'; e_pref_valid <= '0';
                 vp_want <= '0'; ep_want <= '0';
+                v_hit_dly <= "00"; e_hit_dly <= "00";
+                v_served <= '0'; e_served <= '0';
                 v_last_valid <= '0'; e_last_valid <= '0';
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
                 retry_cnt <= (others=>'0');
             else
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
+                if v_as_n='1' then v_served <= '0'; end if;
+                if e_as_n='1' then e_served <= '0'; end if;
+                -- paced hit serves: countdown then dtack
+                if v_hit_dly /= "00" then
+                    v_hit_dly <= v_hit_dly - 1;
+                    if v_hit_dly = "01" then v_rom_dtack <= '1'; end if;
+                end if;
+                if e_hit_dly /= "00" then
+                    e_hit_dly <= e_hit_dly - 1;
+                    if e_hit_dly = "01" then e_rom_dtack <= '1'; end if;
+                end if;
                 case rom_owner is
                     when OWN_IDLE =>
                         -- fair round-robin: whoever was NOT served last gets priority,
@@ -310,39 +332,51 @@ begin
                         if rom_ack='1' then
                             null;                        -- wait out previous ack (4-phase)
                         -- sequential-fetch prefetch hits: served with no SDRAM transaction
-                        elsif v_rom_pend='1' and v_rom_dtack='0' and v_pref_valid='1'
+                        elsif v_rom_pend='1' and v_served='0' and v_hit_dly="00"
+                              and v_pref_valid='1'
                               and (v_addr(19 downto 1) & '0') = v_pref_addr then
                             v_rom_hold   <= v_pref_data;
-                            v_rom_dtack  <= '1';
+                            v_hit_dly    <= "10";          -- paced serve (v57)
+                            v_served     <= '1';
                             v_rom_src    <= "01";          -- prefetch hit
                             v_pref_valid <= '0';
                             v_last_data  <= v_pref_data;   -- cache for the odd-byte repeat
                             v_last_addr  <= v_pref_addr;
                             v_last_valid <= '1';
-                        elsif e_rom_pend='1' and e_rom_dtack='0' and e_pref_valid='1'
+                        elsif e_rom_pend='1' and e_served='0' and e_hit_dly="00"
+                              and e_pref_valid='1'
                               and (e_addr(19 downto 1) & '0') = e_pref_addr then
                             e_rom_hold   <= e_pref_data;
-                            e_rom_dtack  <= '1';
+                            e_hit_dly    <= "10";          -- paced serve (v57)
+                            e_served     <= '1';
                             e_pref_valid <= '0';
                             e_last_data  <= e_pref_data;
                             e_last_addr  <= e_pref_addr;
                             e_last_valid <= '1';
                         -- last-word cache hits (repeat read of same ROM word: no SDRAM txn)
-                        elsif v_rom_pend='1' and v_rom_dtack='0' and v_last_valid='1'
+                        elsif v_rom_pend='1' and v_served='0' and v_hit_dly="00"
+                              and v_last_valid='1'
                               and (v_addr(19 downto 1) & '0') = v_last_addr then
                             v_rom_hold  <= v_last_data;
-                            v_rom_dtack <= '1';
+                            v_hit_dly   <= "10";           -- paced serve (v57)
+                            v_served    <= '1';
                             v_rom_src   <= "10";           -- last-word cache hit
-                        elsif e_rom_pend='1' and e_rom_dtack='0' and e_last_valid='1'
+                        elsif e_rom_pend='1' and e_served='0' and e_hit_dly="00"
+                              and e_last_valid='1'
                               and (e_addr(19 downto 1) & '0') = e_last_addr then
                             e_rom_hold  <= e_last_data;
-                            e_rom_dtack <= '1';
-                        elsif e_rom_pend='1' and (last_was_v='1' or v_rom_pend='0') then
+                            e_hit_dly   <= "10";           -- paced serve (v57)
+                            e_served    <= '1';
+                        -- v57: no grants for a CPU whose paced serve is counting
+                        -- down - a redundant fetch's late dtack lands in the NEXT
+                        -- bus cycle with stale data (caught by the boot sim)
+                        elsif e_rom_pend='1' and e_hit_dly="00" and e_served='0'
+                              and (last_was_v='1' or v_rom_pend='0' or v_hit_dly/="00") then
                             rom_owner <= OWN_E; last_was_v <= '0';
                             rom_addr_i <= std_logic_vector(
                                 unsigned(x"0" & e_addr(19 downto 1) & '0') + x"080000");
                             rom_req_i <= '1';
-                        elsif v_rom_pend='1' then
+                        elsif v_rom_pend='1' and v_hit_dly="00" and v_served='0' then
                             rom_owner <= OWN_V; last_was_v <= '1';
                             rom_addr_i <= x"0" & v_addr(19 downto 1) & '0';
                             rom_req_i <= '1';
@@ -382,6 +416,7 @@ begin
                             v_last_addr  <= v_addr(19 downto 1) & '0';
                             v_last_valid <= '1';
                             v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
+                            v_served    <= '1';   -- bus cycle fully served
                             v_rom_src   <= "11";           -- fresh SDRAM transaction
                         end if;
                         when OWN_J =>
@@ -437,6 +472,7 @@ begin
                             e_last_addr  <= e_addr(19 downto 1) & '0';
                             e_last_valid <= '1';
                             e_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
+                            e_served    <= '1';
                         end if;
                 end case;
             end if;
