@@ -180,7 +180,7 @@ architecture rtl of escape_core is
         return p;
     end function;
 
-    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E, OWN_J);
+    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E, OWN_J, OWN_VP, OWN_EP);
     signal rom_owner : rom_owner_t;
     signal last_was_v : std_logic;   -- fair round-robin: alternate priority
     signal rom_addr_i : std_logic_vector(23 downto 0);
@@ -208,6 +208,10 @@ architecture rtl of escape_core is
     signal jsa_resp : std_logic_vector(7 downto 0);
     signal jsa_cpu_addr : std_logic_vector(15 downto 0);
     signal jsa_last_cmd : std_logic_vector(7 downto 0);
+    -- v56 word-0-only prefetch: speculative follow-up transaction for addr+2,
+    -- consuming only the burst's FIRST word (the proven-clean capture slot)
+    signal vp_want, ep_want : std_logic;
+    signal vp_addr, ep_addr : std_logic_vector(19 downto 0);
     signal jsa_cmd_full, jsa_resp_full, jsa_snd_irq : std_logic;
     signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
     signal wdog_ctr : unsigned(5 downto 0);
@@ -292,6 +296,7 @@ begin
             if reset_n='0' then
                 rom_owner <= OWN_IDLE; rom_req_i <= '0'; last_was_v <= '0';
                 v_pref_valid <= '0'; e_pref_valid <= '0';
+                vp_want <= '0'; ep_want <= '0';
                 v_last_valid <= '0'; e_last_valid <= '0';
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
                 retry_cnt <= (others=>'0');
@@ -345,6 +350,17 @@ begin
                             rom_owner <= OWN_J;
                             rom_addr_i <= jsa_rom_addr;   -- already a full image address
                             rom_req_i <= '1';
+                        -- v56: speculative word-0 prefetch, lowest priority -
+                        -- only when no real fetch is waiting
+                        elsif vp_want='1' then
+                            rom_owner <= OWN_VP; vp_want <= '0';
+                            rom_addr_i <= x"0" & vp_addr;
+                            rom_req_i <= '1';
+                        elsif ep_want='1' then
+                            rom_owner <= OWN_EP; ep_want <= '0';
+                            rom_addr_i <= std_logic_vector(
+                                unsigned(x"0" & ep_addr) + x"080000");
+                            rom_req_i <= '1';
                         end if;
                     when OWN_V =>
                         if v_as_n='1' then                       -- CPU ended cycle: abort
@@ -356,17 +372,12 @@ begin
                             retry_cnt <= retry_cnt + 1;
                         elsif rom_ack='1' then
                             rom_req_i <= '0'; v_rom_hold <= rom_data(31 downto 16);
-                            v_pref_data  <= rom_data(15 downto 0);
-                            v_pref_addr  <= std_logic_vector(
+                            -- v56: word-1 is never consumed (marginal capture);
+                            -- instead arm a speculative follow-up transaction
+                            -- for addr+2 whose word 0 becomes the prefetch
+                            vp_addr <= std_logic_vector(
                                 unsigned(v_addr(19 downto 1) & '0') + 2);
-                            -- v52: prefetch OFF again - the stable config.
-                            -- Word-1 capture stayed marginal through both the
-                            -- v50 spread and v51 no-AP experiments; word-0-only
-                            -- serving is the configuration proven from boot to
-                            -- mission briefing. Investigation plan for re-enable
-                            -- lives in the project notes (swap-order experiment,
-                            -- negedge DQ capture).
-                            v_pref_valid <= '0';
+                            vp_want <= '1';
                             v_last_data  <= rom_data(31 downto 16);   -- cache this word
                             v_last_addr  <= v_addr(19 downto 1) & '0';
                             v_last_valid <= '1';
@@ -383,6 +394,32 @@ begin
                             retry_cnt <= retry_cnt + 1;
                         end if;
                         -- good ack is forwarded combinationally via jsa_rom_ack
+                    when OWN_VP =>
+                        if rom_req_i='0' then
+                            if rom_ack='0' then rom_req_i <= '1'; end if;
+                        elsif rom_ack='1' and rom_par_ok='0' then
+                            rom_req_i <= '0';
+                            retry_cnt <= retry_cnt + 1;
+                        elsif rom_ack='1' then
+                            rom_req_i <= '0';
+                            v_pref_data  <= rom_data(31 downto 16);  -- word 0 only
+                            v_pref_addr  <= vp_addr;
+                            v_pref_valid <= '1';
+                            rom_owner <= OWN_IDLE;
+                        end if;
+                    when OWN_EP =>
+                        if rom_req_i='0' then
+                            if rom_ack='0' then rom_req_i <= '1'; end if;
+                        elsif rom_ack='1' and rom_par_ok='0' then
+                            rom_req_i <= '0';
+                            retry_cnt <= retry_cnt + 1;
+                        elsif rom_ack='1' then
+                            rom_req_i <= '0';
+                            e_pref_data  <= rom_data(31 downto 16);
+                            e_pref_addr  <= ep_addr;
+                            e_pref_valid <= '1';
+                            rom_owner <= OWN_IDLE;
+                        end if;
                     when OWN_E =>
                         if e_as_n='1' then
                             rom_req_i <= '0'; rom_owner <= OWN_IDLE;
@@ -393,11 +430,9 @@ begin
                             retry_cnt <= retry_cnt + 1;
                         elsif rom_ack='1' then
                             rom_req_i <= '0'; e_rom_hold <= rom_data(31 downto 16);
-                            e_pref_data  <= rom_data(15 downto 0);
-                            e_pref_addr  <= std_logic_vector(
+                            ep_addr <= std_logic_vector(
                                 unsigned(e_addr(19 downto 1) & '0') + 2);
-                            -- v52: off, same as the video CPU path
-                            e_pref_valid <= '0';
+                            ep_want <= '1';                -- v56 speculative follow-up
                             e_last_data  <= rom_data(31 downto 16);
                             e_last_addr  <= e_addr(19 downto 1) & '0';
                             e_last_valid <= '1';
