@@ -154,11 +154,11 @@ entity escape_core is
         -- [11:8] 0, [7:0] last command byte the 68k wrote to 360031
         dbg_jsa_link  : out std_logic_vector(15 downto 0);
         dbg_jsa_pc    : out std_logic_vector(15 downto 0);
-        -- v61 coin-chain probes (HUD): every link from switch to credit.
-        -- resp_stat = {68k-response-read count, last response byte} - reads
-        -- frozen at 00 while jsa_link shows resp_full = the 68k gave up on
-        -- the sound link (IRQ6 masked / init handshake failed); byte churn
-        -- with no coins = latch garbage feeding the credit differ.
+        -- coin-chain probes (HUD): every link from switch to credit.
+        -- v62: resp_stat = {NONZERO-response count, last NONZERO byte}.
+        -- v61 on-device result: total reads churn at frame rate (link
+        -- healthy), input edges clean, yet credits appeared - the phantom
+        -- bytes are sub-frame; this pins their count and value.
         dbg_resp_stat : out std_logic_vector(15 downto 0);
         -- coin_cred = {coin-line edge count, game's credit count ($3F7F55)}
         -- - edges ticking with no Select presses = the input line itself
@@ -803,7 +803,14 @@ begin
     begin
         if rising_edge(clk) then
             resp_rd_d <= snd_resp_rd;
-            if snd_resp_rd='1' and resp_rd_d='0' then
+            -- v62: total read count proved healthy on device (frame-rate
+            -- churn) while credits appeared with the displayed byte stuck
+            -- 00 - the phantom bytes are a sub-frame burst. Count only
+            -- NONZERO response bytes and hold the last one: if the count
+            -- lands at ~6 right after boot with credits=6, the 6502's
+            -- post-reset greeting is leaking into the coin parser, and the
+            -- byte value names the leaking message.
+            if snd_resp_rd='1' and resp_rd_d='0' and jsa_resp /= x"00" then
                 resp_reads <= resp_reads + 1;
                 resp_last  <= jsa_resp;
             end if;

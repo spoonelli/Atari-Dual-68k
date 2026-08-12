@@ -1253,10 +1253,10 @@ end
         // WRHI = last data-write address [23:8] -> names the march region:
         // 16xx shared, 3F5x work, 3F0x pf, 3F2x mo, 3F4x alpha, 3E0x color.
         case(slot)
-        // field 1 (v61): {68k response-read count, last response byte}.
-        // Count frozen while jsa_link shows resp_full = game stopped
-        // listening to the JSA. Byte churning with no coins = latch garbage.
-        // (replaces the v59 shadow checksum, verified 11E9 on device)
+        // field 1 (v62): {NONZERO-response count, last NONZERO byte}.
+        // v61 proved reads churn healthily and coin edges are clean while
+        // credits appear - this catches the sub-frame phantom bytes:
+        // count ~06 after boot with credits=6 = 6502 greeting leak.
         4'd0:  hex_digit = respstat_fr[15:12];   4'd1:  hex_digit = respstat_fr[11:8];
         4'd2:  hex_digit = respstat_fr[7:4];     4'd3:  hex_digit = respstat_fr[3:0];
         // middle field (v55): JSA 6502 program counter, frame-latched -
@@ -1278,7 +1278,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0061;   // v61
+    localparam [15:0] BUILD_ID = 16'h0062;   // v62
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);

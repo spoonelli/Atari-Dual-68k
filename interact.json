@@ -10,7 +10,8 @@
         "address": "0xA0000000",
         "persist": false,
         "writeonly": true,
-        "defaultval": 0
+        "defaultval": 0,
+        "value": 1
       },
       {
         "name": "Soft Reset Core",
