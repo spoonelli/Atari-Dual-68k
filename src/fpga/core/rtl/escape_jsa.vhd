@@ -292,10 +292,14 @@ begin
             if reset_n = '0' or sres_cnt /= 0 then
                 cmd_full_i <= '0'; resp_full_i <= '0';
                 timed_int <= '0'; irqctr <= (others => '0');
-                bank <= "00"; wrio_reg <= (others => '0'); mix_reg <= (others => '0');
-                tms_data <= (others => '0');
-                tms_ws_n <= '1'; tms_rs_n <= '1'; tms_squeak <= '0';
+                -- v63: WRIO (bank/YAMRES/squeak/TMS strobes) and MIX live in
+                -- LS273s cleared only by /POR on the real board (SP-332
+                -- sheets 12/13) - they survive a 68k sound reset
                 if reset_n = '0' then
+                    bank <= "00"; wrio_reg <= (others => '0');
+                    mix_reg <= (others => '0');
+                    tms_data <= (others => '0');
+                    tms_ws_n <= '1'; tms_rs_n <= '1'; tms_squeak <= '0';
                     cmd_latch <= (others => '0'); resp_latch <= (others => '0');
                 end if;
             else

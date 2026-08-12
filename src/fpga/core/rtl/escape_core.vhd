@@ -206,7 +206,10 @@ architecture rtl of escape_core is
         return p;
     end function;
 
-    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E, OWN_J);
+    -- v63: OWN_J retired - the JSA fetches from its own BRAM shadow now,
+    -- shrinking this to a two-client arbiter and freeing SDRAM slots for
+    -- the video fetch path (playfield corruption relief)
+    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E);
     signal rom_owner : rom_owner_t;
     signal last_was_v : std_logic;   -- fair round-robin: alternate priority
     signal rom_addr_i : std_logic_vector(23 downto 0);
@@ -230,7 +233,7 @@ architecture rtl of escape_core is
     signal vec_i : std_logic_vector(15 downto 0);
     -- JSA sound board link
     signal jsa_rom_addr : std_logic_vector(23 downto 0);
-    signal jsa_rom_req, jsa_rom_ack : std_logic;
+    signal jsa_rom_req : std_logic;
     signal jsa_resp : std_logic_vector(7 downto 0);
     signal jsa_cpu_addr : std_logic_vector(15 downto 0);
     signal jsa_last_cmd : std_logic_vector(7 downto 0);
@@ -238,6 +241,18 @@ architecture rtl of escape_core is
     signal vshad_q, eshad_q : std_logic_vector(15 downto 0);
     signal v_sel_shad, e_sel_shad : std_logic;
     signal vshad_we, eshad_we : std_logic;
+    -- v63: JSA 6502 BRAM shadow (whole 64KB sound ROM, image 100000-10FFFF).
+    -- The 6502 fetched every opcode over the marginal SDRAM path (the 68ks
+    -- got shadows in v58, the 6502 never did) - one corrupt fetch derails
+    -- it into RAM (observed: jsa_pc frame-latched at 0001/0162) where
+    -- runaway FF opcodes spray the response latch = phantom credits /
+    -- dead coins / intermittent sound, differing every boot.
+    signal jshad_we    : std_logic;
+    signal jshad_q     : std_logic_vector(15 downto 0);
+    signal jshad_raddr : std_logic_vector(14 downto 0) := (others=>'0');
+    signal jsa_srv     : unsigned(2 downto 0) := "000";
+    signal jsa_rom_data32 : std_logic_vector(31 downto 0) := (others=>'0');
+    signal jsa_shad_ack   : std_logic := '0';
     signal jsa_cmd_full, jsa_resp_full, jsa_snd_irq : std_logic;
     signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
     -- v61 coin-chain probe state
@@ -378,10 +393,6 @@ begin
                             rom_owner <= OWN_V; last_was_v <= '1';
                             rom_addr_i <= x"0" & v_addr(19 downto 1) & '0';
                             rom_req_i <= '1';
-                        elsif jsa_rom_req='1' then
-                            rom_owner <= OWN_J;
-                            rom_addr_i <= jsa_rom_addr;   -- already a full image address
-                            rom_req_i <= '1';
                         end if;
                     when OWN_V =>
                         if v_as_n='1' then                       -- CPU ended cycle: abort
@@ -410,16 +421,6 @@ begin
                             v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                             v_rom_src   <= "11";           -- fresh SDRAM transaction
                         end if;
-                        when OWN_J =>
-                        if jsa_rom_req='0' then          -- client captured and released
-                            rom_req_i <= '0'; rom_owner <= OWN_IDLE;
-                        elsif rom_req_i='0' then         -- parity retry: re-issue
-                            if rom_ack='0' then rom_req_i <= '1'; end if;
-                        elsif rom_ack='1' and rom_par_ok='0' then
-                            rom_req_i <= '0';
-                            retry_cnt <= retry_cnt + 1;
-                        end if;
-                        -- good ack is forwarded combinationally via jsa_rom_ack
                     when OWN_E =>
                         if e_as_n='1' then
                             rom_req_i <= '0'; rom_owner <= OWN_IDLE;
@@ -572,6 +573,7 @@ begin
                             and e_addr(23 downto 16) = x"00" else '0';
     vshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"00" else '0';
     eshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"08" else '0';
+    jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
 
     vshad : entity work.dpram_dc generic map ( awidth => 15 )
         port map ( wrclk=>shad_wclk, we=>vshad_we,
@@ -581,6 +583,50 @@ begin
         port map ( wrclk=>shad_wclk, we=>eshad_we,
                    waddr=>shad_waddr(15 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>e_addr(15 downto 1), q=>eshad_q );
+
+    -- v63: JSA shadow serves the whole 64KB sound ROM from BRAM.
+    jshad : entity work.dpram_dc generic map ( awidth => 15 )
+        port map ( wrclk=>shad_wclk, we=>jshad_we,
+                   waddr=>shad_waddr(15 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>jshad_raddr, q=>jshad_q );
+
+    -- two-word serve matching the SDRAM client protocol (data[31:16] = word
+    -- at rom_addr, data[15:0] = word at rom_addr+2), 4-phase level handshake.
+    -- BRAM read latency is one cycle, hence the capture states.
+    jsa_shadow_serve : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                jsa_srv <= "000"; jsa_shad_ack <= '0';
+            else
+                case jsa_srv is
+                    when "000" =>
+                        if jsa_rom_req='1' and jsa_shad_ack='0' then
+                            jshad_raddr <= jsa_rom_addr(15 downto 1);
+                            jsa_srv <= "001";
+                        elsif jsa_rom_req='0' then
+                            jsa_shad_ack <= '0';
+                        end if;
+                    when "001" =>
+                        jshad_raddr <= std_logic_vector(
+                            unsigned(jsa_rom_addr(15 downto 1)) + 1);
+                        jsa_srv <= "010";
+                    when "010" =>
+                        jsa_rom_data32(31 downto 16) <= jshad_q;
+                        jsa_srv <= "011";
+                    when "011" =>
+                        jsa_rom_data32(15 downto 0) <= jshad_q;
+                        jsa_shad_ack <= '1';
+                        jsa_srv <= "100";
+                    when others =>
+                        if jsa_rom_req='0' then
+                            jsa_shad_ack <= '0';
+                            jsa_srv <= "000";
+                        end if;
+                end case;
+            end if;
+        end if;
+    end process;
 
     -- alpha RAM: dual-port so the video chain can read while the CPU writes
     alpha_ram : entity work.dpram_bytelane_syn generic map ( awidth => 11 )
@@ -770,8 +816,8 @@ begin
     jsa : entity work.escape_jsa
         generic map ( YM_ENABLE => (YM_ENABLE = 1) )
         port map ( clk=>clk, reset_n=>reset_n, snd_res=>snd_res_p,
-                   rom_addr=>jsa_rom_addr, rom_data=>rom_data,
-                   rom_req=>jsa_rom_req, rom_ack=>jsa_rom_ack,
+                   rom_addr=>jsa_rom_addr, rom_data=>jsa_rom_data32,
+                   rom_req=>jsa_rom_req, rom_ack=>jsa_shad_ack,
                    cmd_data=>v_do(7 downto 0), cmd_we=>snd_cmd_we,
                    resp_data=>jsa_resp, resp_rd=>snd_resp_rd,
                    cmd_full=>jsa_cmd_full, resp_full=>jsa_resp_full,
@@ -827,10 +873,6 @@ begin
     end process;
     dbg_resp_stat <= std_logic_vector(resp_reads) & resp_last;
     dbg_coin_cred <= std_logic_vector(coin_edges) & credits_sn;
-
-    -- forward good acks to the JSA client while it owns the external ROM bus
-    jsa_rom_ack <= '1' when rom_owner=OWN_J and rom_ack='1' and rom_par_ok='1'
-                            and rom_req_i='1' else '0';
 
     dbg_v_pc_fetch <= v_pc_seen;
     dbg_e_running  <= extra_release;
