@@ -1,4 +1,0 @@
-Put your self-built atari_escape.rom in this folder.
-Build it from your own verified dumps:
-  python3 support/build_rom.py /path/to/eprom ./atari_escape.rom
-This project does not distribute ROMs.

@@ -45,3 +45,5 @@ dist/assets/**/*.rom
 # Built release packages + stale bitstreams
 output/*.zip
 output/*.rbf_r
+output/*
+!output/.gitkeep
