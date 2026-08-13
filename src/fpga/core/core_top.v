@@ -1263,12 +1263,12 @@ end
         scrub_bad_m  <= scrub_bad;   scrub_bad_px  <= scrub_bad_m;
     end
     // v54 live button probe: the exact nibble the game scanner reads
-    // v73: Input Probe evidence (single press = 0x0100, Y+X = 0x0180,
-    // Y+B+A = 0x0160): the face buttons arrive one bit HIGHER than the
-    // documented APF map - Y=8, X=7, B=6, A=5. Start never fired because
-    // our jump tap sat on bit7 = the actual X.
-    wire [3:0] btn_probe = {cont1_key[5]|cont1_key[7], 1'b0,
-                            cont1_key[6]|cont1_key[7], cont1_key[8]|cont1_key[7]};
+    // v74: user-decoded probe truth: Y+B+A(+X held) = 0x01B0 - so A=4,
+    // B=5, Y=7 are the DOCUMENTED bits after all; the only deviation is
+    // X = bit 8 (not 6). The lone 0x0100 presses were X itself (macro
+    // tests). v73's wholesale shift reverted; macro source moved to [8].
+    wire [3:0] btn_probe = {cont1_key[4]|cont1_key[8], 1'b0,
+                            cont1_key[5]|cont1_key[8], cont1_key[7]|cont1_key[8]};
     // per-frame display latches for fast-changing HUD values
     reg [15:0] epc_fr, mbox_fr;
     reg        vb_hud_d;
@@ -1330,7 +1330,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0073;   // v73
+    localparam [15:0] BUILD_ID = 16'h0074;   // v74
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1639,7 +1639,7 @@ escape_core ecore (
     // MAME eprom: D9 = button 1 fire, D8 = button 2 jump, D11 = button 3 duck)
     // QoL layout: Jump on the left (Y), Fire in the middle (B), Duck on the right (A);
     // X (top, otherwise unused) = all three at once = the in-game BOMB
-    .p1_buttons ( {cont1_key[5]|cont1_key[7], 1'b0, cont1_key[6]|cont1_key[7], cont1_key[8]|cont1_key[7]} ),
+    .p1_buttons ( {cont1_key[4]|cont1_key[8], 1'b0, cont1_key[5]|cont1_key[8], cont1_key[7]|cont1_key[8]} ),
     .svc_n      ( ~svc_mode_s ),
     .coin1      ( coin1_s ),
     .coin2      ( coin2_s ),
@@ -1648,7 +1648,7 @@ escape_core ecore (
     .irq_strict ( irqstrict_s ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
-    .p2_buttons ( {cont2_key[5]|cont2_key[7], 1'b0, cont2_key[6]|cont2_key[7], cont2_key[8]|cont2_key[7]} ),
+    .p2_buttons ( {cont2_key[4]|cont2_key[8], 1'b0, cont2_key[5]|cont2_key[8], cont2_key[7]|cont2_key[8]} ),
     .adc_p1x    ( adc_p1x ),
     .adc_p1y    ( adc_p1y ),
     .adc_p2x    ( adc_p2x ),
