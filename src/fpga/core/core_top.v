@@ -985,7 +985,8 @@ always @(posedge clk_sdram) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
             rd_addr_q   <= {1'b0, vg_addr_px};
-            rd_pre_q    <= 1;   // v48: armor ALL reads (v41's 'starvation' was the collision)
+            rd_pre_q    <= 0;   // v69: video fast path - scrub proved reads clean;
+                                // the armor cost ~6 cycles of the cell budget
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
@@ -1307,7 +1308,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0068;   // v68
+    localparam [15:0] BUILD_ID = 16'h0069;   // v69
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1331,9 +1332,11 @@ end
     wire [8:0]  xscroll, yscroll;
 
     wire [8:0] pf_y   = visible_y[8:0] + yscroll;           // scrolled row (mod 512)
-    wire [8:0] pf_x2  = vis_x[8:0] + 9'd16 + xscroll;       // scrolled col, 2 cells ahead
-    reg  [4:0] pfcol_q0, pfcol_q1, pfcol_show;              // {flip, color[3:0]}
-    reg  [3:0] pfcode_q0, pfcode_q1, pfcode_show;           // v66: code hash for map debug
+    wire [8:0] pf_x2  = vis_x[8:0] + 9'd24 + xscroll;       // v69: 3 cells ahead - a
+                                                            // full extra cell of fetch
+                                                            // margin for the handshake
+    reg  [4:0] pfcol_q0, pfcol_q1, pfcol_q2, pfcol_show;    // {flip, color[3:0]}
+    reg  [3:0] pfcode_q0, pfcode_q1, pfcode_q2, pfcode_show; // v66: code hash for map debug
     reg [15:0] probe_code = 16'd0, probe_data = 16'd0;      // v67 fetch-truth probe
     reg        probe_arm = 1'b0;
     reg        vg_pending = 1'b0;   // v68: outstanding-fetch flag (the handshake)
@@ -1351,9 +1354,11 @@ end
                 // gfx - persistent in-tile garbage independent of the memory
                 // fixes. A still-pending fetch repeats the last tile instead.
                 if(!vg_pending) pf_show <= pf_fetch;
-                pfcol_show <= pfcol_q1;
+                pfcol_show <= pfcol_q2;
+                pfcol_q2   <= pfcol_q1;
                 pfcol_q1   <= pfcol_q0;
-                pfcode_show<= pfcode_q1;
+                pfcode_show<= pfcode_q2;
+                pfcode_q2  <= pfcode_q1;
                 pfcode_q1  <= pfcode_q0;
             end
             3'd3: begin
