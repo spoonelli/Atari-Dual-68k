@@ -70,6 +70,7 @@ entity escape_core is
         -- diagnostic: force reads of the tests-passed flag ($3F7F0C) to 0x0100
         -- so the boot takes its already-passed branch (Interact "Skip Self-Test")
         skip_test  : in  std_logic := '0';
+        irq_strict : in  std_logic := '0';   -- v71: JSA timed-IRQ ack strictness
 
         -- JSA-I audio out (signed 16-bit)
         audio_l    : out std_logic_vector(15 downto 0);
@@ -828,6 +829,7 @@ begin
                    cmd_full=>jsa_cmd_full, resp_full=>jsa_resp_full,
                    snd_irq=>jsa_snd_irq,
                    coin1=>coin1, coin2=>coin2, test_mode=>not svc_n,
+                   irq_strict=>irq_strict,
                    audio_l=>audio_l, audio_r=>audio_r,
                    dbg_cpu_addr=>jsa_cpu_addr, dbg_cpu_sync=>open );
 

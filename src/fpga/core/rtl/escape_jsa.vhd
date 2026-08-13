@@ -45,6 +45,10 @@ entity escape_jsa is
         coin1     : in  std_logic := '0';
         coin2     : in  std_logic := '0';
         test_mode : in  std_logic := '0';
+        -- v71: restrict the timed-IRQ ack to the exact 2806 address instead
+        -- of every a(2:1)="11" alias across 2800-29FF - if main-loop code
+        -- touches an alias, the coin-scan IRQ is swallowed before it is taken
+        irq_strict : in std_logic := '0';
 
         -- audio out, signed
         audio_l   : out std_logic_vector(15 downto 0);
@@ -316,7 +320,9 @@ begin
                 -- 6502 accesses (one per enabled tick)
                 if cpu_ena = '1' then
                     -- /IRQACK 2806: read or write clears the timed interrupt
-                    if sel_r28 = '1' and a16(2 downto 1) = "11" then
+                    -- (v71: strict mode requires the exact 2806/2807 address)
+                    if sel_r28 = '1' and a16(2 downto 1) = "11" and
+                       (irq_strict = '0' or a16(8 downto 3) = "000000") then
                         timed_int <= '0';
                     end if;
                     -- /RDP 2802 read: consume command, release NMI
@@ -365,7 +371,11 @@ begin
     rdio <= test_mode                -- D7 self-test (MAME nets 0 in normal play)
             & (not cmd_full_i)       -- D6 /input-buffer-full (0 = command pending)
             & resp_full_i            -- D5 output-buffer-full (active high)
-            & '0'                    -- D4 TMS5220 /ready (active LOW: 0 = ready)
+            -- v71: D4 /SPHRDY must TOGGLE like the real TMS5220 readyq (MAME
+            -- measures 0x50<->0x40). Held constant, the 6502 boot init spins
+            -- forever polling 280C for a transition (sim: 86K polls/4ms at
+            -- $42F4, IRQs still masked) - killing coins, commands, sound.
+            & irqctr(9)              -- ~1.7 kHz idle toggle stand-in
             -- D3:2 idle LOW. The schematic doc calls these "+5V", but the
             -- JSA harness wires 0x04 as a third coin input (MAME JSAI port:
             -- Coin 3, IP_ACTIVE_HIGH; measured idle 2804 = 0x50/0x40, D3:2

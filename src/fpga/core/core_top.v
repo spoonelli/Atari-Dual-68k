@@ -737,6 +737,10 @@ end
     reg        pfprobe_74   = 1'b0;   // 0xA0000060: 'PF Fetch Probe' - HUD fields
                                       // 1/3 become {probed tile code} and
                                       // {fetched gfx word0} for screen cell (16,16)
+    reg [2:0]  prefd_74     = 3'd3;   // 0xA0000070: 'PF Prefetch Cells' slider 2-4
+    reg        armor_74     = 1'b1;   // 0xA0000080: 'Video Read Armor' (default ON)
+    reg        irqstrict_74 = 1'b0;   // 0xA0000090: 'Strict IRQ Ack' (coin suspect)
+    reg        inprobe_74   = 1'b0;   // 0xA00000A0: 'Input Probe' - field1 = raw cont1_key
     reg        pfmap_74     = 1'b0;   // 0xA0000050: 'PF Map Debug' - render each
                                       // playfield cell as a flat color hashed from
                                       // its TILE CODE (no gfx fetch): structured
@@ -751,6 +755,10 @@ always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000040) tone_74      <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000050) pfmap_74     <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000070) prefd_74     <= bridge_wr_data[2:0];
+    if(bridge_wr && bridge_addr == 32'hA0000080) armor_74     <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000090) irqstrict_74 <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA00000A0) inprobe_74   <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000060) pfprobe_74   <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
     else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
@@ -758,6 +766,12 @@ end
     wire soft_rst_74 = (soft_rst_ctr != 23'd0);   // ~113ms self-clearing pulse
     wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s, tone_s, pfmap_s, pfprobe_s;
 synch_3 s_pfmap(pfmap_74, pfmap_s, clk_sys_7159);
+    wire armor_s, irqstrict_s, inprobe_s;
+    wire [2:0] prefd_s;
+synch_3 s_armor(armor_74, armor_s, clk_sdram);
+synch_3 s_irqst(irqstrict_74, irqstrict_s, clk_sys_7159);
+synch_3 s_inpb(inprobe_74, inprobe_s, clk_sys_7159);
+synch_3 #(.WIDTH(3)) s_prefd(prefd_74, prefd_s, clk_sys_7159);
 synch_3 s_pfprobe(pfprobe_74, pfprobe_s, clk_sys_7159);
 synch_3 s_tone(tone_74, tone_s, clk_sys_7159);
 synch_3 s_skip(skip_test_74, skip_test_s, clk_sys_7159);
@@ -985,10 +999,8 @@ always @(posedge clk_sdram) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
             rd_addr_q   <= {1'b0, vg_addr_px};
-            rd_pre_q    <= 1;   // v70: armor RESTORED - v69's unarmored video
-                                // reads brought back RAM/ROM self-test errors
-                                // (row-state disturbance for other clients);
-                                // the 3-cell prefetch alone carries the margin
+            rd_pre_q    <= armor_s;  // v71: runtime toggle (default armored;
+                                     // v69 proved unarmored breaks self-test)
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
@@ -1281,10 +1293,14 @@ end
         // v61 proved reads churn healthily and coin edges are clean while
         // credits appear - this catches the sub-frame phantom bytes:
         // count ~06 after boot with credits=6 = 6502 greeting leak.
-        4'd0:  hex_digit = pfprobe_s ? probe_code[15:12] : respstat_fr[15:12];
-        4'd1:  hex_digit = pfprobe_s ? probe_code[11:8]  : respstat_fr[11:8];
-        4'd2:  hex_digit = pfprobe_s ? probe_code[7:4]   : respstat_fr[7:4];
-        4'd3:  hex_digit = pfprobe_s ? probe_code[3:0]   : respstat_fr[3:0];
+        4'd0:  hex_digit = inprobe_s ? cont1_key[15:12] :
+                           pfprobe_s ? probe_code[15:12] : respstat_fr[15:12];
+        4'd1:  hex_digit = inprobe_s ? cont1_key[11:8]  :
+                           pfprobe_s ? probe_code[11:8]  : respstat_fr[11:8];
+        4'd2:  hex_digit = inprobe_s ? cont1_key[7:4]   :
+                           pfprobe_s ? probe_code[7:4]   : respstat_fr[7:4];
+        4'd3:  hex_digit = inprobe_s ? cont1_key[3:0]   :
+                           pfprobe_s ? probe_code[3:0]   : respstat_fr[3:0];
         // middle field (v65): {scrub pass count, scrub ERROR count}. The
         // roving scrubber re-reads the WHOLE image (gfx included) verifying
         // BOTH burst words against download truth. err=00 with passes
@@ -1310,7 +1326,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0070;   // v70
+    localparam [15:0] BUILD_ID = 16'h0071;   // v71
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1334,11 +1350,10 @@ end
     wire [8:0]  xscroll, yscroll;
 
     wire [8:0] pf_y   = visible_y[8:0] + yscroll;           // scrolled row (mod 512)
-    wire [8:0] pf_x2  = vis_x[8:0] + 9'd24 + xscroll;       // v69: 3 cells ahead - a
-                                                            // full extra cell of fetch
-                                                            // margin for the handshake
-    reg  [4:0] pfcol_q0, pfcol_q1, pfcol_q2, pfcol_show;    // {flip, color[3:0]}
-    reg  [3:0] pfcode_q0, pfcode_q1, pfcode_q2, pfcode_show; // v66: code hash for map debug
+    wire [8:0] pf_x2  = vis_x[8:0] + {3'b0, prefd_s, 3'b0} + xscroll;  // v71: slider
+                                                            // 2-4 cells ahead (depth*8)
+    reg  [4:0] pfcol_q0, pfcol_q1, pfcol_q2, pfcol_q3, pfcol_show;  // {flip, color[3:0]}
+    reg  [3:0] pfcode_q0, pfcode_q1, pfcode_q2, pfcode_q3, pfcode_show; // v66 map debug
     reg [15:0] probe_code = 16'd0, probe_data = 16'd0;      // v67 fetch-truth probe
     reg        probe_arm = 1'b0;
     reg        vg_pending = 1'b0;   // v68: outstanding-fetch flag (the handshake)
@@ -1356,10 +1371,14 @@ end
                 // gfx - persistent in-tile garbage independent of the memory
                 // fixes. A still-pending fetch repeats the last tile instead.
                 if(!vg_pending) pf_show <= pf_fetch;
-                pfcol_show <= pfcol_q2;
+                pfcol_show <= (prefd_s == 3'd2) ? pfcol_q1 :
+                              (prefd_s == 3'd4) ? pfcol_q3 : pfcol_q2;
+                pfcode_show<= (prefd_s == 3'd2) ? pfcode_q1 :
+                              (prefd_s == 3'd4) ? pfcode_q3 : pfcode_q2;
+                pfcol_q3   <= pfcol_q2;
                 pfcol_q2   <= pfcol_q1;
                 pfcol_q1   <= pfcol_q0;
-                pfcode_show<= pfcode_q2;
+                pfcode_q3  <= pfcode_q2;
                 pfcode_q2  <= pfcode_q1;
                 pfcode_q1  <= pfcode_q0;
             end
@@ -1622,6 +1641,7 @@ escape_core ecore (
     .coin2      ( coin2_s ),
     .step_btn   ( step_s ),
     .skip_test  ( skip_test_s ),
+    .irq_strict ( irqstrict_s ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
     .p2_buttons ( {cont2_key[4]|cont2_key[6], 1'b0, cont2_key[5]|cont2_key[6], cont2_key[7]|cont2_key[6]} ),
