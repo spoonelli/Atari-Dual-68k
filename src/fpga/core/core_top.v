@@ -989,18 +989,7 @@ always @(posedge clk_sdram) begin
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
-            vg_data[31:16] <= sd_rd_data[31:16];
-            sd_rd_req <= 0;
-            vg_phase  <= 2'd2;
-        end
-        if(vg_phase==2'd2 && !sd_rd_ack && !sd_rd_req) begin
-            sd_rd_req <= 1;
-            rd_addr_q <= {1'b0, vg_addr_px} + 25'd2;
-            rd_pre_q  <= 1;
-            vg_phase  <= 2'd3;
-        end
-        if(vg_phase==2'd3 && sd_rd_ack) begin
-            vg_data[15:0] <= sd_rd_data[31:16];
+            vg_data   <= sd_rd_data;   // v68: back to single burst - latency margin
             sd_rd_req <= 0;
             vg_done_85 <= ~vg_done_85;
             vg_phase  <= 2'd0;
@@ -1024,20 +1013,8 @@ always @(posedge clk_sdram) begin
             rd_pre_q    <= 1;
             mg_phase    <= 2'd1;
         end
-        // v64: same two-beat word-0-only discipline for sprite gfx
         if(mg_phase==2'd1 && sd_rd_ack) begin
-            mg_data[31:16] <= sd_rd_data[31:16];
-            sd_rd_req <= 0;
-            mg_phase  <= 2'd2;
-        end
-        if(mg_phase==2'd2 && !sd_rd_ack && !sd_rd_req) begin
-            sd_rd_req <= 1;
-            rd_addr_q <= {1'b0, mo_gfx_addr} + 25'd2;
-            rd_pre_q  <= 1;
-            mg_phase  <= 2'd3;
-        end
-        if(mg_phase==2'd3 && sd_rd_ack) begin
-            mg_data[15:0] <= sd_rd_data[31:16];
+            mg_data   <= sd_rd_data;
             sd_rd_req <= 0;
             mg_done_85 <= ~mg_done_85;
             mg_phase  <= 2'd0;
@@ -1330,7 +1307,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0067;   // v67
+    localparam [15:0] BUILD_ID = 16'h0068;   // v68
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1359,6 +1336,7 @@ end
     reg  [3:0] pfcode_q0, pfcode_q1, pfcode_show;           // v66: code hash for map debug
     reg [15:0] probe_code = 16'd0, probe_data = 16'd0;      // v67 fetch-truth probe
     reg        probe_arm = 1'b0;
+    reg        vg_pending = 1'b0;   // v68: outstanding-fetch flag (the handshake)
     reg  [31:0] pf_fetch, pf_show;
     reg  vg_done_last;
 
@@ -1367,7 +1345,12 @@ end
             3'd0: begin
                 pf_vaddr <= {pf_y[8:3], pf_x2[8:3]};        // map row*64 + col
                 // cell boundary: advance pipelines
-                pf_show    <= pf_fetch;
+                // v68 HANDSHAKE: only show a COMPLETED fetch. The old code
+                // advanced unconditionally, so any late return (video queued
+                // behind CPU/scrub/MO service) displayed the PREVIOUS cell's
+                // gfx - persistent in-tile garbage independent of the memory
+                // fixes. A still-pending fetch repeats the last tile instead.
+                if(!vg_pending) pf_show <= pf_fetch;
                 pfcol_show <= pfcol_q1;
                 pfcol_q1   <= pfcol_q0;
                 pfcode_show<= pfcode_q1;
@@ -1378,6 +1361,7 @@ end
                 if(y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE) begin
                     vg_addr_px <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
                     vg_req_px  <= ~vg_req_px;
+                    vg_pending <= 1'b1;
                 end
                 pfcol_q0   <= {pf_vdata[15], pfx_vdata[11:8]};
                 pfcode_q0  <= pf_vdata[3:0] ^ pf_vdata[7:4] ^ pf_vdata[11:8];
@@ -1390,7 +1374,10 @@ end
         endcase
         // capture SDRAM response whenever it lands
         vg_done_last <= vg_done_s;
-        if(vg_done_s != vg_done_last) pf_fetch <= vg_data;
+        if(vg_done_s != vg_done_last) begin
+            pf_fetch <= vg_data;
+            vg_pending <= 1'b0;
+        end
         // v67 probe: when the request for the probed cell goes out, remember
         // to capture its returned word0 on the next completion
         if(probe_arm && vg_done_s != vg_done_last) begin
