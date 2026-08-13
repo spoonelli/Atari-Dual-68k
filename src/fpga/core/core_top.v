@@ -734,6 +734,9 @@ end
     reg        skip_test_74 = 1'b0;   // 0xA0000020: 'Skip Self-Test' checkbox
     reg        wdis_74      = 1'b0;   // 0xA0000030: 'Watchdog Disable' (authentic
                                       // WDIS line, schematic sheet 4 test hook)
+    reg        pfprobe_74   = 1'b0;   // 0xA0000060: 'PF Fetch Probe' - HUD fields
+                                      // 1/3 become {probed tile code} and
+                                      // {fetched gfx word0} for screen cell (16,16)
     reg        pfmap_74     = 1'b0;   // 0xA0000050: 'PF Map Debug' - render each
                                       // playfield cell as a flat color hashed from
                                       // its TILE CODE (no gfx fetch): structured
@@ -748,12 +751,14 @@ always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000040) tone_74      <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000050) pfmap_74     <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000060) pfprobe_74   <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
     else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
 end
     wire soft_rst_74 = (soft_rst_ctr != 23'd0);   // ~113ms self-clearing pulse
-    wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s, tone_s, pfmap_s;
+    wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s, tone_s, pfmap_s, pfprobe_s;
 synch_3 s_pfmap(pfmap_74, pfmap_s, clk_sys_7159);
+synch_3 s_pfprobe(pfprobe_74, pfprobe_s, clk_sys_7159);
 synch_3 s_tone(tone_74, tone_s, clk_sys_7159);
 synch_3 s_skip(skip_test_74, skip_test_s, clk_sys_7159);
 synch_3 s_wdis(wdis_74, wdis_s, clk_sys_7159);
@@ -1296,8 +1301,10 @@ end
         // v61 proved reads churn healthily and coin edges are clean while
         // credits appear - this catches the sub-frame phantom bytes:
         // count ~06 after boot with credits=6 = 6502 greeting leak.
-        4'd0:  hex_digit = respstat_fr[15:12];   4'd1:  hex_digit = respstat_fr[11:8];
-        4'd2:  hex_digit = respstat_fr[7:4];     4'd3:  hex_digit = respstat_fr[3:0];
+        4'd0:  hex_digit = pfprobe_s ? probe_code[15:12] : respstat_fr[15:12];
+        4'd1:  hex_digit = pfprobe_s ? probe_code[11:8]  : respstat_fr[11:8];
+        4'd2:  hex_digit = pfprobe_s ? probe_code[7:4]   : respstat_fr[7:4];
+        4'd3:  hex_digit = pfprobe_s ? probe_code[3:0]   : respstat_fr[3:0];
         // middle field (v65): {scrub pass count, scrub ERROR count}. The
         // roving scrubber re-reads the WHOLE image (gfx included) verifying
         // BOTH burst words against download truth. err=00 with passes
@@ -1309,8 +1316,10 @@ end
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = coincred_fr[15:12];   4'd11: hex_digit = coincred_fr[11:8];
-        4'd12: hex_digit = coincred_fr[7:4];     4'd13: hex_digit = coincred_fr[3:0];
+        4'd10: hex_digit = pfprobe_s ? probe_data[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = pfprobe_s ? probe_data[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = pfprobe_s ? probe_data[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = pfprobe_s ? probe_data[3:0]   : coincred_fr[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1321,7 +1330,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0066;   // v66
+    localparam [15:0] BUILD_ID = 16'h0067;   // v67
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1348,6 +1357,8 @@ end
     wire [8:0] pf_x2  = vis_x[8:0] + 9'd16 + xscroll;       // scrolled col, 2 cells ahead
     reg  [4:0] pfcol_q0, pfcol_q1, pfcol_show;              // {flip, color[3:0]}
     reg  [3:0] pfcode_q0, pfcode_q1, pfcode_show;           // v66: code hash for map debug
+    reg [15:0] probe_code = 16'd0, probe_data = 16'd0;      // v67 fetch-truth probe
+    reg        probe_arm = 1'b0;
     reg  [31:0] pf_fetch, pf_show;
     reg  vg_done_last;
 
@@ -1370,12 +1381,25 @@ end
                 end
                 pfcol_q0   <= {pf_vdata[15], pfx_vdata[11:8]};
                 pfcode_q0  <= pf_vdata[3:0] ^ pf_vdata[7:4] ^ pf_vdata[11:8];
+                // v67 fetch-truth probe: fixed map cell row16/col16, tile row 0
+                if(pf_vaddr == 12'h410 && pf_y[2:0] == 3'd0) begin
+                    probe_code <= pf_vdata;
+                end
             end
             default: ;
         endcase
         // capture SDRAM response whenever it lands
         vg_done_last <= vg_done_s;
         if(vg_done_s != vg_done_last) pf_fetch <= vg_data;
+        // v67 probe: when the request for the probed cell goes out, remember
+        // to capture its returned word0 on the next completion
+        if(probe_arm && vg_done_s != vg_done_last) begin
+            probe_data <= vg_data[31:16];
+            probe_arm  <= 1'b0;
+        end
+        if(vis_x[2:0]==3'd3 && pf_vaddr == 12'h410 && pf_y[2:0]==3'd0
+           && y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE)
+            probe_arm <= 1'b1;
     end
 
     // pixel extraction: chunky nibbles px0..px7 across the 32-bit row; xflip reverses
