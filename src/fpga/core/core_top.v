@@ -924,7 +924,8 @@ synch_3 s_vgd(vg_done_85, vg_done_s, clk_sys_7159);
     wire       allcomplete_sd;
 synch_3 s_acsd(dataslot_allcomplete, allcomplete_sd, clk_sdram);
     wire vidkill_sd;
-synch_3 s_vk(cont1_key[11], vidkill_sd, clk_sdram);   // R2: video-fetch kill (diag)
+    wire vidkill_src = cont1_key[11] | m_vidkill_px;
+synch_3 s_vk(vidkill_src, vidkill_sd, clk_sdram);   // R2 hold or debug mode 6
 
 always @(posedge clk_sdram) begin
     case(chk_state)
@@ -999,8 +1000,7 @@ always @(posedge clk_sdram) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
             rd_addr_q   <= {1'b0, vg_addr_px};
-            rd_pre_q    <= armor_s;  // v71: runtime toggle (default armored;
-                                     // v69 proved unarmored breaks self-test)
+            rd_pre_q    <= armor_s & ~m_armoff_sd;  // menu toggle or debug mode 4
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
@@ -1263,6 +1263,24 @@ end
         scrub_bad_m  <= scrub_bad;   scrub_bad_px  <= scrub_bad_m;
     end
     // v54 live button probe: the exact nibble the game scanner reads
+    // v75: R button (bit 9) cycles an on-device debug mode 0-7, shown as
+    // the first digit of the on-screen build ID:
+    //   0 normal | 1 PF map debug | 2 input probe | 3 PF fetch probe
+    //   4 video armor OFF | 5 strict IRQ ack | 6 vidkill | 7 reserved
+    reg [2:0] dbgmode = 3'd0;
+    reg       rbtn_d  = 1'b0;
+    always @(posedge clk_sys_7159) begin
+        rbtn_d <= cont1_key[9];
+        if(cont1_key[9] & ~rbtn_d) dbgmode <= dbgmode + 3'd1;
+    end
+    wire m_pfmap   = pfmap_s   | (dbgmode == 3'd1);
+    wire m_inprobe = inprobe_s | (dbgmode == 3'd2);
+    wire m_pfprobe = pfprobe_s | (dbgmode == 3'd3);
+    wire m_armoff_px = (dbgmode == 3'd4);
+    wire m_armoff_sd;
+synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
+    wire m_irqstrict_px = (dbgmode == 3'd5);
+    wire m_vidkill_px   = (dbgmode == 3'd6);
     // v74: user-decoded probe truth: Y+B+A(+X held) = 0x01B0 - so A=4,
     // B=5, Y=7 are the DOCUMENTED bits after all; the only deviation is
     // X = bit 8 (not 6). The lone 0x0100 presses were X itself (macro
@@ -1297,14 +1315,14 @@ end
         // v61 proved reads churn healthily and coin edges are clean while
         // credits appear - this catches the sub-frame phantom bytes:
         // count ~06 after boot with credits=6 = 6502 greeting leak.
-        4'd0:  hex_digit = inprobe_s ? cont1_key[15:12] :
-                           pfprobe_s ? probe_code[15:12] : respstat_fr[15:12];
-        4'd1:  hex_digit = inprobe_s ? cont1_key[11:8]  :
-                           pfprobe_s ? probe_code[11:8]  : respstat_fr[11:8];
-        4'd2:  hex_digit = inprobe_s ? cont1_key[7:4]   :
-                           pfprobe_s ? probe_code[7:4]   : respstat_fr[7:4];
-        4'd3:  hex_digit = inprobe_s ? cont1_key[3:0]   :
-                           pfprobe_s ? probe_code[3:0]   : respstat_fr[3:0];
+        4'd0:  hex_digit = m_inprobe ? cont1_key[15:12] :
+                           m_pfprobe ? probe_code[15:12] : respstat_fr[15:12];
+        4'd1:  hex_digit = m_inprobe ? cont1_key[11:8]  :
+                           m_pfprobe ? probe_code[11:8]  : respstat_fr[11:8];
+        4'd2:  hex_digit = m_inprobe ? cont1_key[7:4]   :
+                           m_pfprobe ? probe_code[7:4]   : respstat_fr[7:4];
+        4'd3:  hex_digit = m_inprobe ? cont1_key[3:0]   :
+                           m_pfprobe ? probe_code[3:0]   : respstat_fr[3:0];
         // middle field (v65): {scrub pass count, scrub ERROR count}. The
         // roving scrubber re-reads the WHOLE image (gfx included) verifying
         // BOTH burst words against download truth. err=00 with passes
@@ -1316,10 +1334,10 @@ end
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = pfprobe_s ? probe_data[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = pfprobe_s ? probe_data[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = pfprobe_s ? probe_data[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = pfprobe_s ? probe_data[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_pfprobe ? probe_data[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_pfprobe ? probe_data[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_pfprobe ? probe_data[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_pfprobe ? probe_data[3:0]   : coincred_fr[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1330,14 +1348,14 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0074;   // v74
+    localparam [15:0] BUILD_ID = 16'h0075;   // v75
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
     wire [1:0] ver_slot = vx0[5:4];
     reg  [3:0] ver_digit;
     always @(*) case(ver_slot)
-        2'd0: ver_digit = BUILD_ID[15:12]; 2'd1: ver_digit = BUILD_ID[11:8];
+        2'd0: ver_digit = {1'b0, dbgmode};  2'd1: ver_digit = BUILD_ID[11:8];
         2'd2: ver_digit = BUILD_ID[7:4];   default: ver_digit = BUILD_ID[3:0];
     endcase
     wire [2:0] ver_gy  = visible_y[2:0] - 3'd4;      // y228..233 -> rows 0..5
@@ -1423,7 +1441,7 @@ end
     wire [2:0] pf_n   = pfcol_show[4] ? (3'd7 - visible_x[2:0]) : visible_x[2:0];
     reg  [3:0] pf_pix;
     always @(*) begin
-        if(pfmap_s) begin
+        if(m_pfmap) begin
             pf_pix = pfcode_show;    // v66 map-debug: flat color per tile code
         end else
         case(pf_n)
@@ -1645,7 +1663,7 @@ escape_core ecore (
     .coin2      ( coin2_s ),
     .step_btn   ( step_s ),
     .skip_test  ( skip_test_s ),
-    .irq_strict ( irqstrict_s ),
+    .irq_strict ( irqstrict_s | m_irqstrict_px ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
     .p2_buttons ( {cont2_key[4]|cont2_key[8], 1'b0, cont2_key[5]|cont2_key[8], cont2_key[7]|cont2_key[8]} ),
