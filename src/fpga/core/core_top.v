@@ -734,6 +734,11 @@ end
     reg        skip_test_74 = 1'b0;   // 0xA0000020: 'Skip Self-Test' checkbox
     reg        wdis_74      = 1'b0;   // 0xA0000030: 'Watchdog Disable' (authentic
                                       // WDIS line, schematic sheet 4 test hook)
+    reg        pfmap_74     = 1'b0;   // 0xA0000050: 'PF Map Debug' - render each
+                                      // playfield cell as a flat color hashed from
+                                      // its TILE CODE (no gfx fetch): structured
+                                      // layout = map content good, gfx side guilty;
+                                      // noise = the game writes garbage (extra CPU)
     reg        tone_74      = 1'b0;   // 0xA0000040: 'Audio Test Tone' - splits
                                       // i2s-path faults from JSA-side silence
     reg [22:0] soft_rst_ctr = 23'd0;
@@ -742,11 +747,13 @@ always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000040) tone_74      <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000050) pfmap_74     <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
     else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
 end
     wire soft_rst_74 = (soft_rst_ctr != 23'd0);   // ~113ms self-clearing pulse
-    wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s, tone_s;
+    wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s, tone_s, pfmap_s;
+synch_3 s_pfmap(pfmap_74, pfmap_s, clk_sys_7159);
 synch_3 s_tone(tone_74, tone_s, clk_sys_7159);
 synch_3 s_skip(skip_test_74, skip_test_s, clk_sys_7159);
 synch_3 s_wdis(wdis_74, wdis_s, clk_sys_7159);
@@ -1314,7 +1321,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0065;   // v65
+    localparam [15:0] BUILD_ID = 16'h0066;   // v66
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1340,6 +1347,7 @@ end
     wire [8:0] pf_y   = visible_y[8:0] + yscroll;           // scrolled row (mod 512)
     wire [8:0] pf_x2  = vis_x[8:0] + 9'd16 + xscroll;       // scrolled col, 2 cells ahead
     reg  [4:0] pfcol_q0, pfcol_q1, pfcol_show;              // {flip, color[3:0]}
+    reg  [3:0] pfcode_q0, pfcode_q1, pfcode_show;           // v66: code hash for map debug
     reg  [31:0] pf_fetch, pf_show;
     reg  vg_done_last;
 
@@ -1351,6 +1359,8 @@ end
                 pf_show    <= pf_fetch;
                 pfcol_show <= pfcol_q1;
                 pfcol_q1   <= pfcol_q0;
+                pfcode_show<= pfcode_q1;
+                pfcode_q1  <= pfcode_q0;
             end
             3'd3: begin
                 // request gfx for cell+2 (idle during deep vblank to free CPU bandwidth)
@@ -1359,6 +1369,7 @@ end
                     vg_req_px  <= ~vg_req_px;
                 end
                 pfcol_q0   <= {pf_vdata[15], pfx_vdata[11:8]};
+                pfcode_q0  <= pf_vdata[3:0] ^ pf_vdata[7:4] ^ pf_vdata[11:8];
             end
             default: ;
         endcase
@@ -1371,6 +1382,9 @@ end
     wire [2:0] pf_n   = pfcol_show[4] ? (3'd7 - visible_x[2:0]) : visible_x[2:0];
     reg  [3:0] pf_pix;
     always @(*) begin
+        if(pfmap_s) begin
+            pf_pix = pfcode_show;    // v66 map-debug: flat color per tile code
+        end else
         case(pf_n)
             3'd0: pf_pix = pf_show[31:28]; 3'd1: pf_pix = pf_show[27:24];
             3'd2: pf_pix = pf_show[23:20]; 3'd3: pf_pix = pf_show[19:16];

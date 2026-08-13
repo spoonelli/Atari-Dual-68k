@@ -54,6 +54,17 @@
         "writeonly": true,
         "defaultval": 0,
         "value": 1
+      },
+      {
+        "name": "PF Map Debug",
+        "id": 15,
+        "type": "check",
+        "enabled": true,
+        "address": "0xA0000050",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
       }
     ],
     "messages": []
