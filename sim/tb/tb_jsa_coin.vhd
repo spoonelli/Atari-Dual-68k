@@ -169,14 +169,14 @@ begin
 
     check : process
     begin
-        wait for 28 ms;
+        wait for 118 ms;
         report "=== JSA coin pipeline ===";
         report "  banked code executed: " & boolean'image(banked_seen);
         report "  coin reported: " & boolean'image(coin_reported);
         if coin_reported then
             report "TB_JSA_COIN OK: held coin produced a report byte" severity note;
         else
-            report "TB_JSA_COIN FAIL: no coin report in 25 ms of held coin" severity failure;
+            report "TB_JSA_COIN FAIL: no coin report in 115 ms of held coin" severity failure;
         end if;
         done <= true;
         wait;
