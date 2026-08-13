@@ -1291,10 +1291,14 @@ end
         // count ~06 after boot with credits=6 = 6502 greeting leak.
         4'd0:  hex_digit = respstat_fr[15:12];   4'd1:  hex_digit = respstat_fr[11:8];
         4'd2:  hex_digit = respstat_fr[7:4];     4'd3:  hex_digit = respstat_fr[3:0];
-        // middle field (v55): JSA 6502 program counter, frame-latched -
-        // frozen = sound CPU wedged; churning = alive
-        4'd5:  hex_digit = jsapc_fr[15:12];      4'd6:  hex_digit = jsapc_fr[11:8];
-        4'd7:  hex_digit = jsapc_fr[7:4];        4'd8:  hex_digit = jsapc_fr[3:0];
+        // middle field (v65): {scrub pass count, scrub ERROR count}. The
+        // roving scrubber re-reads the WHOLE image (gfx included) verifying
+        // BOTH burst words against download truth. err=00 with passes
+        // climbing = SDRAM content and read path proven good, so the pf
+        // corruption is in what the CPUs WRITE (game logic / extra CPU);
+        // err climbing = the read path is still lying to us.
+        4'd5:  hex_digit = scrub_pass_px[7:4];   4'd6:  hex_digit = scrub_pass_px[3:0];
+        4'd7:  hex_digit = scrub_err_px[7:4];    4'd8:  hex_digit = scrub_err_px[3:0];
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
@@ -1310,7 +1314,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0064;   // v64
+    localparam [15:0] BUILD_ID = 16'h0065;   // v65
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
