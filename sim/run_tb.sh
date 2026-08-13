@@ -6,6 +6,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="ghdl/ghdl:ubuntu20-mcode"
 TB="${1:-tb_syngen}"
+STOPTIME="${2:-500us}"
 # tb_escape_adc boots from a generated stub image (hand-assembled words, no
 # game ROM); rebuild it here on the host, since hex files are never committed
 if [ "$TB" = "tb_escape_adc" ]; then
@@ -21,5 +22,5 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work -w /work "$IMA
   FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd)\"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W $TB >/dev/null
-  ghdl -r \$STD --workdir=\$W $TB --ieee-asserts=disable --stop-time=500us
+  ghdl -r \$STD --workdir=\$W $TB --ieee-asserts=disable --stop-time=$STOPTIME
 "

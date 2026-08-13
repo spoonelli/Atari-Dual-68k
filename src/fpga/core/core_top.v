@@ -959,8 +959,17 @@ always @(posedge clk_sdram) begin
         end
     end
     4'd10: begin
-        // VIDEO gfx fetch: one 32-bit burst, priority over CPU
-        if(!vidkill_sd && vg_req_s != vg_req_last && !sd_rd_req && !sd_rd_ack && vg_phase==2'd0) begin
+        // VIDEO gfx fetch (v64): TWO word-0-only reads instead of one burst.
+        // The second burst word is the capture proven marginal across the
+        // v45-v51 CPU saga; the CPU path was cured by word-0-only serving
+        // but the video path kept consuming word 1 - that asymmetry is the
+        // in-tile playfield/sprite noise. Each beat takes sd_rd_data[31:16]
+        // only. Bandwidth: the arbiter just lost the JSA client and the 68ks
+        // run hot code from BRAM, so SDRAM is nearly video-exclusive now.
+        // (v64: mg_phase==0 required too - the two-beat fetches leave an
+        // idle gap between beats that the other client must not fire into)
+        if(!vidkill_sd && vg_req_s != vg_req_last && !sd_rd_req && !sd_rd_ack
+           && vg_phase==2'd0 && mg_phase==2'd0) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
             rd_addr_q   <= {1'b0, vg_addr_px};
@@ -968,7 +977,18 @@ always @(posedge clk_sdram) begin
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
-            vg_data   <= sd_rd_data;
+            vg_data[31:16] <= sd_rd_data[31:16];
+            sd_rd_req <= 0;
+            vg_phase  <= 2'd2;
+        end
+        if(vg_phase==2'd2 && !sd_rd_ack && !sd_rd_req) begin
+            sd_rd_req <= 1;
+            rd_addr_q <= {1'b0, vg_addr_px} + 25'd2;
+            rd_pre_q  <= 1;
+            vg_phase  <= 2'd3;
+        end
+        if(vg_phase==2'd3 && sd_rd_ack) begin
+            vg_data[15:0] <= sd_rd_data[31:16];
             sd_rd_req <= 0;
             vg_done_85 <= ~vg_done_85;
             vg_phase  <= 2'd0;
@@ -992,8 +1012,20 @@ always @(posedge clk_sdram) begin
             rd_pre_q    <= 1;
             mg_phase    <= 2'd1;
         end
+        // v64: same two-beat word-0-only discipline for sprite gfx
         if(mg_phase==2'd1 && sd_rd_ack) begin
-            mg_data   <= sd_rd_data;
+            mg_data[31:16] <= sd_rd_data[31:16];
+            sd_rd_req <= 0;
+            mg_phase  <= 2'd2;
+        end
+        if(mg_phase==2'd2 && !sd_rd_ack && !sd_rd_req) begin
+            sd_rd_req <= 1;
+            rd_addr_q <= {1'b0, mo_gfx_addr} + 25'd2;
+            rd_pre_q  <= 1;
+            mg_phase  <= 2'd3;
+        end
+        if(mg_phase==2'd3 && sd_rd_ack) begin
+            mg_data[15:0] <= sd_rd_data[31:16];
             sd_rd_req <= 0;
             mg_done_85 <= ~mg_done_85;
             mg_phase  <= 2'd0;
@@ -1278,7 +1310,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0063;   // v63
+    localparam [15:0] BUILD_ID = 16'h0064;   // v64
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
