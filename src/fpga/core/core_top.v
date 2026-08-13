@@ -985,8 +985,10 @@ always @(posedge clk_sdram) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
             rd_addr_q   <= {1'b0, vg_addr_px};
-            rd_pre_q    <= 0;   // v69: video fast path - scrub proved reads clean;
-                                // the armor cost ~6 cycles of the cell budget
+            rd_pre_q    <= 1;   // v70: armor RESTORED - v69's unarmored video
+                                // reads brought back RAM/ROM self-test errors
+                                // (row-state disturbance for other clients);
+                                // the 3-cell prefetch alone carries the margin
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
@@ -1308,7 +1310,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0069;   // v69
+    localparam [15:0] BUILD_ID = 16'h0070;   // v70
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
