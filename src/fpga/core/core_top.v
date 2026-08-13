@@ -1326,7 +1326,7 @@ end
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0071;   // v71
+    localparam [15:0] BUILD_ID = 16'h0072;   // v72
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1350,8 +1350,10 @@ end
     wire [8:0]  xscroll, yscroll;
 
     wire [8:0] pf_y   = visible_y[8:0] + yscroll;           // scrolled row (mod 512)
-    wire [8:0] pf_x2  = vis_x[8:0] + {3'b0, prefd_s, 3'b0} + xscroll;  // v71: slider
-                                                            // 2-4 cells ahead (depth*8)
+    wire [8:0] pf_x2  = vis_x[8:0] + 9'd24 + xscroll;   // v72: fixed 3 ahead again -
+                                                        // the runtime depth mux sent
+                                                        // the fitter into a 90-minute
+                                                        // spiral twice; slider deferred
     reg  [4:0] pfcol_q0, pfcol_q1, pfcol_q2, pfcol_q3, pfcol_show;  // {flip, color[3:0]}
     reg  [3:0] pfcode_q0, pfcode_q1, pfcode_q2, pfcode_q3, pfcode_show; // v66 map debug
     reg [15:0] probe_code = 16'd0, probe_data = 16'd0;      // v67 fetch-truth probe
@@ -1371,10 +1373,8 @@ end
                 // gfx - persistent in-tile garbage independent of the memory
                 // fixes. A still-pending fetch repeats the last tile instead.
                 if(!vg_pending) pf_show <= pf_fetch;
-                pfcol_show <= (prefd_s == 3'd2) ? pfcol_q1 :
-                              (prefd_s == 3'd4) ? pfcol_q3 : pfcol_q2;
-                pfcode_show<= (prefd_s == 3'd2) ? pfcode_q1 :
-                              (prefd_s == 3'd4) ? pfcode_q3 : pfcode_q2;
+                pfcol_show <= pfcol_q2;
+                pfcode_show<= pfcode_q2;
                 pfcol_q3   <= pfcol_q2;
                 pfcol_q2   <= pfcol_q1;
                 pfcol_q1   <= pfcol_q0;
