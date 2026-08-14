@@ -1000,7 +1000,9 @@ always @(posedge clk_sdram) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
             rd_addr_q   <= {1'b0, vg_addr_px};
-            rd_pre_q    <= armor_s & ~m_armoff_sd;  // menu toggle or debug mode 4
+            rd_pre_q    <= armor_s & ~m_armoff_sd & 1'b0;  // v79: video fast path;
+                                        // IO-cell capture (v78) makes the
+                                        // v69-era armor need obsolete
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
@@ -1281,6 +1283,20 @@ end
 synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
     wire m_irqstrict_px = (dbgmode == 3'd5);
     wire m_vidkill_px   = (dbgmode == 3'd6);
+    wire m_moprobe      = (dbgmode == 3'd7);
+    reg [7:0] mgreq_cnt, mopen_cnt;
+    reg [15:0] moprobe_fr;
+    reg mgreq_d2;
+    always @(posedge clk_sys_7159) begin
+        mgreq_d2 <= mo_gfx_req;
+        if(mo_gfx_req != mgreq_d2) mgreq_cnt <= mgreq_cnt + 8'd1;
+        if(mo_valid && mo_pen[3:0] != 4'h0) mopen_cnt <= mopen_cnt + 8'd1;
+        if(vblank_w && !vb_hud_d) begin
+            moprobe_fr <= {mgreq_cnt, mopen_cnt};
+            mgreq_cnt  <= 8'd0;
+            mopen_cnt  <= 8'd0;
+        end
+    end
     // v74: user-decoded probe truth: Y+B+A(+X held) = 0x01B0 - so A=4,
     // B=5, Y=7 are the DOCUMENTED bits after all; the only deviation is
     // X = bit 8 (not 6). The lone 0x0100 presses were X itself (macro
@@ -1315,13 +1331,17 @@ synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
         // v61 proved reads churn healthily and coin edges are clean while
         // credits appear - this catches the sub-frame phantom bytes:
         // count ~06 after boot with credits=6 = 6502 greeting leak.
-        4'd0:  hex_digit = m_inprobe ? cont1_key[15:12] :
+        4'd0:  hex_digit = m_moprobe ? moprobe_fr[15:12] :
+                           m_inprobe ? cont1_key[15:12] :
                            m_pfprobe ? probe_code[15:12] : respstat_fr[15:12];
-        4'd1:  hex_digit = m_inprobe ? cont1_key[11:8]  :
+        4'd1:  hex_digit = m_moprobe ? moprobe_fr[11:8] :
+                           m_inprobe ? cont1_key[11:8]  :
                            m_pfprobe ? probe_code[11:8]  : respstat_fr[11:8];
-        4'd2:  hex_digit = m_inprobe ? cont1_key[7:4]   :
+        4'd2:  hex_digit = m_moprobe ? moprobe_fr[7:4] :
+                           m_inprobe ? cont1_key[7:4]   :
                            m_pfprobe ? probe_code[7:4]   : respstat_fr[7:4];
-        4'd3:  hex_digit = m_inprobe ? cont1_key[3:0]   :
+        4'd3:  hex_digit = m_moprobe ? moprobe_fr[3:0] :
+                           m_inprobe ? cont1_key[3:0]   :
                            m_pfprobe ? probe_code[3:0]   : respstat_fr[3:0];
         // middle field (v65): {scrub pass count, scrub ERROR count}. The
         // roving scrubber re-reads the WHOLE image (gfx included) verifying
@@ -1348,7 +1368,7 @@ synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0078;   // v78
+    localparam [15:0] BUILD_ID = 16'h0079;   // v79
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1395,8 +1415,8 @@ synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
                 // gfx - persistent in-tile garbage independent of the memory
                 // fixes. A still-pending fetch repeats the last tile instead.
                 if(!vg_pending) pf_show <= pf_fetch;
-                pfcol_show <= pfcol_q2;
-                pfcode_show<= pfcode_q2;
+                pfcol_show <= pfcol_q3;
+                pfcode_show<= pfcode_q3;
                 pfcol_q3   <= pfcol_q2;
                 pfcol_q2   <= pfcol_q1;
                 pfcol_q1   <= pfcol_q0;
