@@ -1281,7 +1281,6 @@ end
     // v81 render-timing lab: mode 4 = early pf gfx request (cell phase 1
     // instead of 3, +2px deadline margin); mode 5 = MO fetches win over PF
     // when both pending (PF always won before - sprite shimmer suspect)
-    wire m_earlyreq_px  = (dbgmode == 3'd4);
     wire m_mopri_px     = (dbgmode == 3'd5);
     wire m_mopri_sd;
 synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
@@ -1371,7 +1370,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0081;   // v81
+    localparam [15:0] BUILD_ID = 16'h0082;   // v82
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1405,12 +1404,13 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     reg        probe_arm = 1'b0;
     reg        vg_pending = 1'b0;   // v68: outstanding-fetch flag (the handshake)
     reg  [31:0] pf_fetch, pf_show;
-    // v81: the gfx DATA pipeline must match the 4-deep address/attr
-    // prefetch. It was a 2-stage buffer: data showed ~1 cell after fetch,
-    // misaligning gfx vs attributes AND shrinking the effective fetch
-    // deadline from 4 cells (384 clk) to a sliver of one - any contention
-    // burst (sprites!) forced a repeat-tile. Chevron killer.
-    reg  [31:0] pfg_q0, pfg_q1, pfg_q2;
+    // v81b: SLOT-ADDRESSED RING replaces the shift pipe. A late completion
+    // in the shift design landed in the NEXT cell's slot - the alternating
+    // correct/wrong columns ('scrunch') seen when sprite fetches interleave.
+    // Each fetch now delivers into the slot for ITS OWN cell whenever it
+    // completes; rp re-syncs to wp at every line start (-4 = 0 mod 4).
+    reg  [31:0] pfring0, pfring1, pfring2, pfring3;
+    reg  [1:0]  pf_wp, pf_infl, pf_rp;
     reg  vg_done_last;
 
     always @(posedge clk_sys_7159) begin
@@ -1418,15 +1418,13 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             3'd0: begin
                 pf_vaddr <= {pf_y[8:3], pf_x2[8:3]};        // map row*64 + col
                 // cell boundary: advance pipelines
-                // v81: 4-stage gfx pipeline mirroring pfcol q0-q3. The
-                // fetch issued during cell N (for N+4) lands in pf_fetch,
-                // enters q0 at the next boundary, and surfaces exactly at
-                // N+4 alongside its attributes. A genuinely late fetch
-                // leaves stale data in pf_fetch = one localized repeat.
-                pf_show <= pfg_q2;
-                pfg_q2  <= pfg_q1;
-                pfg_q1  <= pfg_q0;
-                pfg_q0  <= pf_fetch;
+                // show the slot for THIS cell; a still-pending fetch shows
+                // that slot's previous-line row (localized, non-spreading)
+                case(pf_rp)
+                    2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
+                    2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
+                endcase
+                pf_rp <= pf_rp + 2'd1;
                 pfcol_show <= pfcol_q3;
                 pfcode_show<= pfcode_q3;
                 pfcol_q3   <= pfcol_q2;
@@ -1436,14 +1434,14 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                 pfcode_q2  <= pfcode_q1;
                 pfcode_q1  <= pfcode_q0;
             end
-            3'd1, 3'd3: begin
-                // request gfx (phase 3 normally; ALSO phase 1 in mode 4 for
-                // +2px margin - the phase-3 issue is skipped that pass)
-                if(((vis_x[2:0]==3'd3 && !m_earlyreq_px) || (vis_x[2:0]==3'd1 && m_earlyreq_px))
-                   && y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE) begin
+            3'd3: begin
+                // request gfx for cell+4 (map data valid: addr set at phase 0)
+                if(y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE) begin
                     vg_addr_px <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
                     vg_req_px  <= ~vg_req_px;
                     vg_pending <= 1'b1;
+                    pf_infl    <= pf_wp;
+                    pf_wp      <= pf_wp + 2'd1;
                 end
                 pfcol_q0   <= {pf_vdata[15], pfx_vdata[11:8]};
                 pfcode_q0  <= pf_vdata[3:0] ^ pf_vdata[7:4] ^ pf_vdata[11:8];
@@ -1454,12 +1452,18 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             end
             default: ;
         endcase
-        // capture SDRAM response whenever it lands
+        // completion delivers into the in-flight request's own slot
         vg_done_last <= vg_done_s;
         if(vg_done_s != vg_done_last) begin
-            pf_fetch <= vg_data;
+            case(pf_infl)
+                2'd0: pfring0 <= vg_data;  2'd1: pfring1 <= vg_data;
+                2'd2: pfring2 <= vg_data;  default: pfring3 <= vg_data;
+            endcase
             vg_pending <= 1'b0;
         end
+        // line-start re-sync: the fetch shown at cell 0 was issued 4 cells
+        // ago into slot wp-4 = wp (mod 4)
+        if(x_count == 10'd0) pf_rp <= pf_wp;
         // v67 probe: when the request for the probed cell goes out, remember
         // to capture its returned word0 on the next completion
         if(probe_arm && vg_done_s != vg_done_last) begin
