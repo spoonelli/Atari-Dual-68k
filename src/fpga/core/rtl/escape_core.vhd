@@ -196,6 +196,10 @@ architecture rtl of escape_core is
 
     signal extra_release, video_off : std_logic;
     signal xscroll, yscroll : std_logic_vector(8 downto 0);
+    -- v83: pending scroll (written any time) vs applied scroll (latched at
+    -- frame start) - MAME eprom scanline_update applies alpha 780/781 only
+    -- at scanline 0; instant application tore animated-scroll screens
+    signal xs_pend, ys_pend : std_logic_vector(8 downto 0);
     signal intensity : std_logic_vector(3 downto 0);
     signal virq, vblank_d, v_pc_seen : std_logic;
 
@@ -738,9 +742,14 @@ begin
                 extra_release <= '0'; video_off <= '0'; intensity <= (others=>'0');
                 virq <= '0'; vblank_d <= '0'; v_pc_seen <= '0';
                 xscroll <= (others=>'0'); yscroll <= (others=>'0');
+                xs_pend <= (others=>'0'); ys_pend <= (others=>'0');
             else
                 vblank_d <= vblank_in;
-                if vblank_in='1' and vblank_d='0' then virq <= '1'; end if;
+                if vblank_in='1' and vblank_d='0' then
+                    virq <= '1';
+                    xscroll <= xs_pend;       -- v83: frame-latched scroll
+                    yscroll <= ys_pend;
+                end if;
 
                 if v_as_n='0' and v_rw_n='0' and v_sel_vctl='1' then
                     case v_addr(5 downto 4) is
@@ -763,9 +772,9 @@ begin
                 -- playfield scroll: latched from cfg writes (3F4F00 word0=X, word1=Y)
                 if we_cfg='1' then
                     if v_addr(7 downto 1) = "0000000" then
-                        xscroll <= v_do(15 downto 7);
+                        xs_pend <= v_do(15 downto 7);
                     elsif v_addr(7 downto 1) = "0000001" then
-                        yscroll <= v_do(15 downto 7);
+                        ys_pend <= v_do(15 downto 7);
                     end if;
                 end if;
             end if;
