@@ -1,7 +1,11 @@
-Atari Dual 68k
+Atari Dual 68k (Escape from the Planet of the Robot Monsters)
+Alpha - openFPGA core for Analogue Pocket
 
-An openFPGA core for Atari Games' "Escape" arcade hardware (dual 68000):
-Escape from the Planet of the Robot Monsters (E.P.R.O.M.), plus the Klax
-and Guts n' Glory prototypes that ran on the same board.
+Dual 68000 + JSA-I audio (YM2151), hall-effect stick emulation.
+ROM required: MAME 'eprom' set (not included).
 
-Ships no ROMs. Supply your own dumps. Early scaffold — see docs/ARCHITECTURE.md.
+R button cycles debug modes 0-7 (first build-ID digit).
+Debug/tuning toggles in the Interact menu.
+
+github.com/spoonelli/Atari-Dual-68k  (GPL-3.0)
+Uses TG68K, T65, jt51 (see third_party licenses).
