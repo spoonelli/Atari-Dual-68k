@@ -120,18 +120,21 @@ module escape_mob (
             wr_en <= 0;
             gfx_done_last <= gfx_done;
 
+            // v85: the line trigger fires from ANY state - a build stalled
+            // by fetch starvation previously missed the restart and kept
+            // blitting stale rows into the now-DISPLAYED buffer (the
+            // interior garble on tall attract objects). Abort and restart.
+            if(x_count == 10'd0 && y_count >= vbporch - 10'd1
+               && y_count < vbporch + vactive - 10'd1) begin
+                build_sel <= ~build_sel;
+                ly <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
+                clr_x <= 9'd0;
+                clearing <= 1;
+                wr_en <= 0;
+                state <= S_CLEAR;
+            end else
             case(state)
             S_IDLE: begin
-                // start building at each hblank start for the NEXT display line
-                if(x_count == 10'd0 && y_count >= vbporch - 10'd1
-                   && y_count < vbporch + vactive - 10'd1) begin
-                    build_sel <= ~build_sel;
-                    // line to build (screen) -> playfield space
-                    ly <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
-                    clr_x <= 9'd0;
-                    clearing <= 1;
-                    state <= S_CLEAR;
-                end
             end
 
             S_CLEAR: begin
