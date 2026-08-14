@@ -1370,7 +1370,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0083;   // v83
+    localparam [15:0] BUILD_ID = 16'h0084;   // v84
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1411,6 +1411,14 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // completes; rp re-syncs to wp at every line start (-4 = 0 mod 4).
     reg  [31:0] pfring0, pfring1, pfring2, pfring3;
     reg  [1:0]  pf_wp, pf_infl, pf_rp;
+    // v84: request queue decouples issue cadence from channel latency.
+    // The old unconditional toggle CANCELLED an unserved request when the
+    // next cell's phase arrived (two toggles = no net change) - each burst
+    // of MO/CPU/scrub traffic vaporized a fetch = trailing ghost columns.
+    reg  [23:0] pfq_addr0, pfq_addr1, pfq_addr2, pfq_addr3;
+    reg  [1:0]  pfq_slot0, pfq_slot1, pfq_slot2, pfq_slot3;
+    reg  [2:0]  pfq_count;
+    reg  [1:0]  pfq_wr, pfq_rd;
     reg  vg_done_last;
 
     always @(posedge clk_sys_7159) begin
@@ -1435,13 +1443,18 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                 pfcode_q1  <= pfcode_q0;
             end
             3'd3: begin
-                // request gfx for cell+4 (map data valid: addr set at phase 0)
-                if(y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE) begin
-                    vg_addr_px <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
-                    vg_req_px  <= ~vg_req_px;
-                    vg_pending <= 1'b1;
-                    pf_infl    <= pf_wp;
-                    pf_wp      <= pf_wp + 2'd1;
+                // enqueue this cell's fetch (issue side drains when free)
+                if(y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE
+                   && pfq_count != 3'd4) begin
+                    case(pfq_wr)
+                        2'd0: begin pfq_addr0 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot0 <= pf_wp; end
+                        2'd1: begin pfq_addr1 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot1 <= pf_wp; end
+                        2'd2: begin pfq_addr2 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot2 <= pf_wp; end
+                        default: begin pfq_addr3 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot3 <= pf_wp; end
+                    endcase
+                    pfq_wr    <= pfq_wr + 2'd1;
+                    pfq_count <= pfq_count + 3'd1;
+                    pf_wp     <= pf_wp + 2'd1;
                 end
                 pfcol_q0   <= {pf_vdata[15], pfx_vdata[11:8]};
                 pfcode_q0  <= pf_vdata[3:0] ^ pf_vdata[7:4] ^ pf_vdata[11:8];
@@ -1461,9 +1474,24 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             endcase
             vg_pending <= 1'b0;
         end
-        // line-start re-sync: the fetch shown at cell 0 was issued 4 cells
-        // ago into slot wp-4 = wp (mod 4)
-        if(x_count == 10'd0) pf_rp <= pf_wp;
+        // issue side: drain the queue whenever the channel is free
+        if(!vg_pending && pfq_count != 3'd0 && !(vg_done_s != vg_done_last)) begin
+            case(pfq_rd)
+                2'd0: begin vg_addr_px <= pfq_addr0; pf_infl <= pfq_slot0; end
+                2'd1: begin vg_addr_px <= pfq_addr1; pf_infl <= pfq_slot1; end
+                2'd2: begin vg_addr_px <= pfq_addr2; pf_infl <= pfq_slot2; end
+                default: begin vg_addr_px <= pfq_addr3; pf_infl <= pfq_slot3; end
+            endcase
+            vg_req_px  <= ~vg_req_px;
+            vg_pending <= 1'b1;
+            pfq_rd     <= pfq_rd + 2'd1;
+            pfq_count  <= pfq_count - 3'd1;
+        end
+        // line-start re-sync (lead 4 = 0 mod 4) + queue flush
+        if(x_count == 10'd0) begin
+            pf_rp <= pf_wp;
+            pfq_count <= 3'd0; pfq_rd <= pfq_wr;
+        end
         // v67 probe: when the request for the probed cell goes out, remember
         // to capture its returned word0 on the next completion
         if(probe_arm && vg_done_s != vg_done_last) begin
