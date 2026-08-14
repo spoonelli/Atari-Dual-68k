@@ -102,7 +102,11 @@ module escape_mob (
     reg [5:0]  fetch_budget;
     reg [9:0]  cur_line_latch;
 
-    wire [8:0] ydiff = (ly - spr_y) & 9'h1FF;
+    // v80: MAME atarimo ground truth - the entry Y field is NEGATED and
+    // offset by the sprite height: top = -yfield - (height+1)*8. So
+    // ydiff = ly - top = ly + yfield + (height+1)*8. The raw-field compare
+    // matched almost nothing (v79 probe: 97 fetches, 12 pixels/frame).
+    wire [8:0] ydiff = (ly + spr_y + {1'b0, height_t, 3'b000} + 9'd8) & 9'h1FF;
     wire       ymatch = ydiff < {height_t, 3'b000} + 9'd8;   // (height+1)*8 lines
 
     always @(posedge clk) begin
