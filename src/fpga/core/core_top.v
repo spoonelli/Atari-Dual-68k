@@ -996,13 +996,13 @@ always @(posedge clk_sdram) begin
         // (v64: mg_phase==0 required too - the two-beat fetches leave an
         // idle gap between beats that the other client must not fire into)
         if(!vidkill_sd && vg_req_s != vg_req_last && !sd_rd_req && !sd_rd_ack
-           && vg_phase==2'd0 && mg_phase==2'd0) begin
+           && vg_phase==2'd0 && mg_phase==2'd0
+           && !(m_mopri_sd && mg_req_s != mg_req_last)) begin
             vg_req_last <= vg_req_s;
             sd_rd_req   <= 1;
             rd_addr_q   <= {1'b0, vg_addr_px};
-            rd_pre_q    <= armor_s & ~m_armoff_sd & 1'b0;  // v79: video fast path;
-                                        // IO-cell capture (v78) makes the
-                                        // v69-era armor need obsolete
+            rd_pre_q    <= 1'b0;    // v79: video fast path (IO-cell capture
+                                    // made the v69-era armor obsolete)
             vg_phase    <= 2'd1;
         end
         if(vg_phase==2'd1 && sd_rd_ack) begin
@@ -1278,10 +1278,13 @@ end
     wire m_pfmap   = pfmap_s   | (dbgmode == 3'd1);
     wire m_inprobe = inprobe_s | (dbgmode == 3'd2);
     wire m_pfprobe = pfprobe_s | (dbgmode == 3'd3);
-    wire m_armoff_px = (dbgmode == 3'd4);
-    wire m_armoff_sd;
-synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
-    wire m_irqstrict_px = (dbgmode == 3'd5);
+    // v81 render-timing lab: mode 4 = early pf gfx request (cell phase 1
+    // instead of 3, +2px deadline margin); mode 5 = MO fetches win over PF
+    // when both pending (PF always won before - sprite shimmer suspect)
+    wire m_earlyreq_px  = (dbgmode == 3'd4);
+    wire m_mopri_px     = (dbgmode == 3'd5);
+    wire m_mopri_sd;
+synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire m_vidkill_px   = (dbgmode == 3'd6);
     wire m_moprobe      = (dbgmode == 3'd7);
     reg [7:0] mgreq_cnt, mopen_cnt;
@@ -1368,7 +1371,7 @@ synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0080;   // v80
+    localparam [15:0] BUILD_ID = 16'h0081;   // v81
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1402,6 +1405,12 @@ synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
     reg        probe_arm = 1'b0;
     reg        vg_pending = 1'b0;   // v68: outstanding-fetch flag (the handshake)
     reg  [31:0] pf_fetch, pf_show;
+    // v81: the gfx DATA pipeline must match the 4-deep address/attr
+    // prefetch. It was a 2-stage buffer: data showed ~1 cell after fetch,
+    // misaligning gfx vs attributes AND shrinking the effective fetch
+    // deadline from 4 cells (384 clk) to a sliver of one - any contention
+    // burst (sprites!) forced a repeat-tile. Chevron killer.
+    reg  [31:0] pfg_q0, pfg_q1, pfg_q2;
     reg  vg_done_last;
 
     always @(posedge clk_sys_7159) begin
@@ -1409,12 +1418,15 @@ synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
             3'd0: begin
                 pf_vaddr <= {pf_y[8:3], pf_x2[8:3]};        // map row*64 + col
                 // cell boundary: advance pipelines
-                // v68 HANDSHAKE: only show a COMPLETED fetch. The old code
-                // advanced unconditionally, so any late return (video queued
-                // behind CPU/scrub/MO service) displayed the PREVIOUS cell's
-                // gfx - persistent in-tile garbage independent of the memory
-                // fixes. A still-pending fetch repeats the last tile instead.
-                if(!vg_pending) pf_show <= pf_fetch;
+                // v81: 4-stage gfx pipeline mirroring pfcol q0-q3. The
+                // fetch issued during cell N (for N+4) lands in pf_fetch,
+                // enters q0 at the next boundary, and surfaces exactly at
+                // N+4 alongside its attributes. A genuinely late fetch
+                // leaves stale data in pf_fetch = one localized repeat.
+                pf_show <= pfg_q2;
+                pfg_q2  <= pfg_q1;
+                pfg_q1  <= pfg_q0;
+                pfg_q0  <= pf_fetch;
                 pfcol_show <= pfcol_q3;
                 pfcode_show<= pfcode_q3;
                 pfcol_q3   <= pfcol_q2;
@@ -1424,9 +1436,11 @@ synch_3 s_armoff(m_armoff_px, m_armoff_sd, clk_sdram);
                 pfcode_q2  <= pfcode_q1;
                 pfcode_q1  <= pfcode_q0;
             end
-            3'd3: begin
-                // request gfx for cell+2 (idle during deep vblank to free CPU bandwidth)
-                if(y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE) begin
+            3'd1, 3'd3: begin
+                // request gfx (phase 3 normally; ALSO phase 1 in mode 4 for
+                // +2px margin - the phase-3 issue is skipped that pass)
+                if(((vis_x[2:0]==3'd3 && !m_earlyreq_px) || (vis_x[2:0]==3'd1 && m_earlyreq_px))
+                   && y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE) begin
                     vg_addr_px <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
                     vg_req_px  <= ~vg_req_px;
                     vg_pending <= 1'b1;
