@@ -1697,7 +1697,7 @@ escape_core ecore (
     .coin2      ( coin2_s ),
     .step_btn   ( step_s ),
     .skip_test  ( skip_test_s ),
-    .irq_strict ( irqstrict_s | m_irqstrict_px ),
+    .irq_strict ( irqstrict_s ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
     .p2_buttons ( {cont2_key[4]|cont2_key[8], 1'b0, cont2_key[5]|cont2_key[8], cont2_key[7]|cont2_key[8]} ),
