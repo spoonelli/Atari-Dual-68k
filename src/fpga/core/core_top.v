@@ -1118,9 +1118,10 @@ always @(posedge clk_sdram) begin
         // MO address, and the CPU is served sprite pixels as instructions.
         // (Root cause of the v14-v19 per-boot corruption: phantom RAM-test
         // failures, wrong palettes, duplicated chars in ROM-sourced text.)
-        if(vg_phase==2'd0 && vg_req_s == vg_req_last
-           && mg_phase==2'd0 && mg_req_s == mg_req_last
-           && !scrub_urgent && scrub_phase==1'd0) begin
+        // CRAM lane: video no longer touches SDRAM - the CPU service
+        // must NOT wait on video-channel state (a stuck CRAM path was
+        // starving CPU fetches -> extra CPU death -> watchdog boot loop)
+        if(!scrub_urgent && scrub_phase==1'd0) begin
             if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
                 sd_rd_req <= 1;
                 rd_addr_q <= {1'b0, core_rom_addr};
@@ -1144,8 +1145,6 @@ always @(posedge clk_sdram) begin
         scrub_tick <= scrub_tick + 12'd1;
         if(&scrub_tick) scrub_urgent <= 1;
         if(scrub_urgent && scrub_phase==1'd0 && !sd_rd_req && !sd_rd_ack
-           && vg_phase==2'd0 && vg_req_s==vg_req_last
-           && mg_phase==2'd0 && mg_req_s==mg_req_last
            && !cpu_owner) begin
             sd_rd_req    <= 1;
             rd_addr_q    <= {3'd0, scrub_blk, scrub_addr, 1'b0};
@@ -1448,7 +1447,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3087;   // bake-off lane 3 (CRAM), base v87
+    localparam [15:0] BUILD_ID = 16'h3033;   // lane 3 (CRAM) - screen shows '33'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
