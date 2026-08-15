@@ -1455,7 +1455,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire [1:0] ver_slot = vx0[5:4];
     reg  [3:0] ver_digit;
     always @(*) case(ver_slot)
-        2'd0: ver_digit = {1'b0, dbgmode};  2'd1: ver_digit = BUILD_ID[11:8];
+        2'd0: ver_digit = {1'b0, dbgmode};  2'd1: ver_digit = BUILD_ID[15:12];
         2'd2: ver_digit = BUILD_ID[7:4];   default: ver_digit = BUILD_ID[3:0];
     endcase
     wire [2:0] ver_gy  = visible_y[2:0] - 3'd4;      // y228..233 -> rows 0..5
