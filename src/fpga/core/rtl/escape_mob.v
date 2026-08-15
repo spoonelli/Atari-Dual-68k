@@ -131,6 +131,12 @@ module escape_mob (
                 clr_x <= 9'd0;
                 clearing <= 1;
                 wr_en <= 0;
+                // v87: RESYNC the gfx handshake on restart. An aborted
+                // build's in-flight completion otherwise flips the done
+                // toggle unconsumed, and every later fetch pairs with the
+                // PREVIOUS fetch's data for the rest of the frame - the
+                // exact 'right art, wrong place' interior garble.
+                gfx_done_last <= gfx_done;
                 state <= S_CLEAR;
             end else
             case(state)
