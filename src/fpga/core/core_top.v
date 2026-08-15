@@ -845,7 +845,9 @@ always @(posedge clk_sdram) begin
         end
     end
     2'd2: begin
-        if(!sd_wr_ack) dl_phase <= 2'd0;
+        // LANE3e backpressure: hold the download step until the CRAM
+        // mirror queue has drained - zero dropped gfx words by construction
+        if(!sd_wr_ack && cq_bp_ok) dl_phase <= 2'd0;
     end
     default: dl_phase <= 2'd0;
     endcase
@@ -893,15 +895,16 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
 );
 
     // download mirror: queue gfx-region words for CRAM while SDRAM write runs
-    reg  [21:0] cq_addr [0:3];
-    reg  [15:0] cq_data [0:3];
-    reg  [1:0]  cq_wr = 0, cq_rd = 0;
-    reg  [2:0]  cq_n = 0;
+    reg  [21:0] cq_addr [0:7];
+    reg  [15:0] cq_data [0:7];
+    reg  [2:0]  cq_wr = 0, cq_rd = 0;
+    reg  [3:0]  cq_n = 0;
     reg  [1:0]  cwr_ph = 0;
     // video fetch service from CRAM: two words per 32-bit request
     reg  [1:0]  cvg_ph = 0, cmg_ph = 0;
     reg  [15:0] cvg_hi, cmg_hi;
     reg         cwr_snoop_d = 0;
+    wire        cq_bp_ok = (cq_n <= 4'd2);
 
     // ---------------- escape_core ROM fetch (7.159 domain) -> SDRAM (85.9 domain)
     wire [23:0] core_rom_addr;
@@ -972,16 +975,16 @@ always @(posedge clk_sdram) begin
     // CRAM stayed virgin and reads returned constants: the checkerboard).
         // download-mirror: snoop SDRAM writes (gfx range), enqueue words
         cwr_snoop_d <= sd_wr_req;
-        if(sd_wr_req && !cwr_snoop_d && sd_wr_addr >= 25'h110000 && cq_n <= 3'd2) begin
+        if(sd_wr_req && !cwr_snoop_d && sd_wr_addr >= 25'h110000 && cq_n <= 4'd6) begin
             cq_addr[cq_wr]      <= sd_wr_addr[22:1] - 22'h88000;
             cq_data[cq_wr]      <= sd_wr_data[31:16];
-            cq_addr[cq_wr+2'd1] <= (sd_wr_addr[22:1] - 22'h88000) + 22'd1;
-            cq_data[cq_wr+2'd1] <= sd_wr_data[15:0];
-            cq_wr <= cq_wr + 2'd2;
-            cq_n  <= cq_n + 3'd2;
+            cq_addr[cq_wr+3'd1] <= (sd_wr_addr[22:1] - 22'h88000) + 22'd1;
+            cq_data[cq_wr+3'd1] <= sd_wr_data[15:0];
+            cq_wr <= cq_wr + 3'd2;
+            cq_n  <= cq_n + 4'd2;
         end
         // download-mirror drain (idle slots only)
-        if(cq_n != 3'd0 && cvg_ph==2'd0 && cmg_ph==2'd0
+        if(cq_n != 4'd0 && cvg_ph==2'd0 && cmg_ph==2'd0
            && !cram_busy && !cram_read_en && cwr_ph==2'd0) begin
             cram_addr     <= cq_addr[cq_rd];
             cram_din      <= cq_data[cq_rd];
@@ -991,8 +994,8 @@ always @(posedge clk_sdram) begin
         if(cwr_ph==2'd1) begin
             cram_write_en <= 1'b0;
             if(!cram_busy) begin
-                cq_rd  <= cq_rd + 2'd1;
-                cq_n   <= cq_n - 3'd1;
+                cq_rd  <= cq_rd + 3'd1;
+                cq_n   <= cq_n - 4'd1;
                 cwr_ph <= 2'd0;
             end
         end
@@ -1451,7 +1454,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3034;   // lane 3d - screen shows '34'
+    localparam [15:0] BUILD_ID = 16'h3035;   // lane 3e - screen shows '35'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
