@@ -1282,6 +1282,8 @@ end
     // instead of 3, +2px deadline margin); mode 5 = MO fetches win over PF
     // when both pending (PF always won before - sprite shimmer suspect)
     wire m_mopri_px     = (dbgmode == 3'd5);
+    wire m_mokill       = (dbgmode == 3'd4);   // v86: sprite-layer kill -
+                                               // isolates the dash overlay
     wire m_mopri_sd;
 synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire m_vidkill_px   = (dbgmode == 3'd6);
@@ -1370,7 +1372,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0085;   // v85
+    localparam [15:0] BUILD_ID = 16'h0087;   // v87
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1527,7 +1529,8 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire [6:0]  cfg_vaddr;
     wire [15:0] cfg_vdata;
     wire [7:0]  mo_pen;
-    wire        mo_valid;
+    wire        mo_valid_raw;
+    wire        mo_valid = mo_valid_raw & ~m_mokill;
 
 escape_mob umob (
     .clk      ( clk_sys_7159 ),
@@ -1549,7 +1552,7 @@ escape_mob umob (
     .gfx_data ( mg_data ),
     .disp_x   ( visible_x[8:0] ),
     .disp_pen ( mo_pen ),
-    .disp_valid( mo_valid )
+    .disp_valid( mo_valid_raw )
 );
 
     // ---------------- alpha scanout pipeline (pixel clock domain)
