@@ -906,6 +906,14 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg         cwr_snoop_d = 0;
     wire        cq_bp_ok = (cq_n <= 4'd2);
     reg         cq_enq, cq_deq;
+    // LANE3g CRAM self-test: after download, read back 256 words from the
+    // char region (cram words 0..255 = image 0x110000..0x1101FF) and 256
+    // from the sprite region (words 0x8000.. = image 0x120000..); sum16s
+    // shown on HUD fields. Python computes expected from the local image.
+    reg  [1:0]  cst_ph = 0;
+    reg  [8:0]  cst_i = 0;
+    reg  [15:0] cst_sum0 = 0, cst_sum1 = 0;
+    reg         cst_go = 0, cst_done = 0;
 
     // ---------------- escape_core ROM fetch (7.159 domain) -> SDRAM (85.9 domain)
     wire [23:0] core_rom_addr;
@@ -1099,6 +1107,27 @@ always @(posedge clk_sdram) begin
                 mg_req_last <= mg_req_s; mg_data <= 32'd0; mg_done_85 <= ~mg_done_85;
             end
         end
+        // CRAM self-test reader (runs once when triggered, idle slots only)
+        if(cst_go && !cst_done && cst_ph==2'd0 && cvg_ph==2'd0 && cmg_ph==2'd0
+           && cwr_ph==2'd0 && cq_n==4'd0 && !cram_busy && !cram_read_en) begin
+            cram_addr    <= (cst_i < 9'd256) ? {13'd0, cst_i} : {7'd1, 6'd0, cst_i[8:0]} ;
+            cram_addr    <= (cst_i < 9'd256) ? {13'd0, cst_i[8:0]} : (22'h8000 + {13'd0, cst_i[7:0]});
+            cram_read_en <= 1'b1;
+            cst_ph       <= 2'd1;
+        end
+        if(cst_ph==2'd1) begin
+            cram_read_en <= 1'b0;
+            if(cram_avail) begin
+                if(cst_i < 9'd256) cst_sum0 <= cst_sum0 + cram_dout;
+                else               cst_sum1 <= cst_sum1 + cram_dout;
+                cst_i  <= cst_i + 9'd1;
+                cst_ph <= 2'd0;
+                if(cst_i == 9'd511) cst_done <= 1'b1;
+            end
+        end
+        // trigger once the machine reaches steady state (download over)
+        if(chk_state == 4'd10) cst_go <= 1'b1;
+
         // MO gfx from CRAM: outranks a new vg start (cvg gate above yields
         // via cmg_ph check); two reads per request
         if(!vidkill_sd && mg_req_s != mg_req_last && cvg_ph==2'd0 && cmg_ph==2'd0
@@ -1378,11 +1407,14 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire m_moprobe      = (dbgmode == 3'd7);
     reg [7:0] mgreq_cnt, mopen_cnt;
     reg [15:0] moprobe_fr;
+    reg [15:0] cst0_px, cst1_px, cst0_m, cst1_m;
     reg mgreq_d2;
     always @(posedge clk_sys_7159) begin
         mgreq_d2 <= mo_gfx_req;
         if(mo_gfx_req != mgreq_d2) mgreq_cnt <= mgreq_cnt + 8'd1;
         if(mo_valid && mo_pen[3:0] != 4'h0) mopen_cnt <= mopen_cnt + 8'd1;
+        cst0_m <= cst_sum0; cst0_px <= cst0_m;
+        cst1_m <= cst_sum1; cst1_px <= cst1_m;
         if(vblank_w && !vb_hud_d) begin
             moprobe_fr <= {mgreq_cnt, mopen_cnt};
             mgreq_cnt  <= 8'd0;
@@ -1423,16 +1455,16 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // v61 proved reads churn healthily and coin edges are clean while
         // credits appear - this catches the sub-frame phantom bytes:
         // count ~06 after boot with credits=6 = 6502 greeting leak.
-        4'd0:  hex_digit = m_moprobe ? moprobe_fr[15:12] :
+        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] :
                            m_inprobe ? cont1_key[15:12] :
                            m_pfprobe ? probe_code[15:12] : respstat_fr[15:12];
-        4'd1:  hex_digit = m_moprobe ? moprobe_fr[11:8] :
+        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8] :
                            m_inprobe ? cont1_key[11:8]  :
                            m_pfprobe ? probe_code[11:8]  : respstat_fr[11:8];
-        4'd2:  hex_digit = m_moprobe ? moprobe_fr[7:4] :
+        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4] :
                            m_inprobe ? cont1_key[7:4]   :
                            m_pfprobe ? probe_code[7:4]   : respstat_fr[7:4];
-        4'd3:  hex_digit = m_moprobe ? moprobe_fr[3:0] :
+        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0] :
                            m_inprobe ? cont1_key[3:0]   :
                            m_pfprobe ? probe_code[3:0]   : respstat_fr[3:0];
         // middle field (v65): {scrub pass count, scrub ERROR count}. The
@@ -1446,10 +1478,14 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = m_pfprobe ? probe_data[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = m_pfprobe ? probe_data[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = m_pfprobe ? probe_data[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = m_pfprobe ? probe_data[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] :
+                           m_pfprobe ? probe_data[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_moprobe ? cst1_px[11:8] :
+                           m_pfprobe ? probe_data[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_moprobe ? cst1_px[7:4] :
+                           m_pfprobe ? probe_data[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_moprobe ? cst1_px[3:0] :
+                           m_pfprobe ? probe_data[3:0]   : coincred_fr[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1460,7 +1496,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3036;   // lane 3f - screen shows '36'
+    localparam [15:0] BUILD_ID = 16'h3037;   // lane 3g - screen shows '37'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
