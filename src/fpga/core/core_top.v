@@ -864,6 +864,55 @@ always @(posedge clk_sdram) begin
     if(dl_quiet_sd && !dlq_d) blktab[dl_blk_cur] <= dl_blk_sum;
 end
 
+    // ---------------- CRAM0: graphics assets on their own bus (bake-off #3)
+    // Gfx region (image 0x110000+) mirrors into CRAM0 during download; the
+    // vg/mg video fetch channels are served ENTIRELY from CRAM - the SDRAM
+    // belongs to the CPUs (+scrubber). True separate buses, PCB-style.
+    wire        cram_busy;
+    reg         cram_read_en;
+    reg  [21:0] cram_addr;
+    wire [15:0] cram_dout;
+    wire        cram_avail;
+    reg         cram_write_en;
+    reg  [15:0] cram_din;
+
+psram cram0 (
+    .clk        ( clk_sdram ),
+    .bank_sel   ( 1'b0 ),
+    .addr       ( cram_addr ),
+    .write_en   ( cram_write_en ),
+    .data_in    ( cram_din ),
+    .write_high_byte ( 1'b1 ),
+    .write_low_byte  ( 1'b1 ),
+    .read_en    ( cram_read_en ),
+    .read_avail ( cram_avail ),
+    .data_out   ( cram_dout ),
+    .busy       ( cram_busy ),
+    .cram_a     ( cram0_a ),
+    .cram_dq    ( cram0_dq ),
+    .cram_wait  ( cram0_wait ),
+    .cram_clk   ( cram0_clk ),
+    .cram_adv_n ( cram0_adv_n ),
+    .cram_cre   ( cram0_cre ),
+    .cram_ce0_n ( cram0_ce0_n ),
+    .cram_ce1_n ( cram0_ce1_n ),
+    .cram_oe_n  ( cram0_oe_n ),
+    .cram_we_n  ( cram0_we_n ),
+    .cram_ub_n  ( cram0_ub_n ),
+    .cram_lb_n  ( cram0_lb_n )
+);
+
+    // download mirror: queue gfx-region words for CRAM while SDRAM write runs
+    reg  [21:0] cq_addr [0:3];
+    reg  [15:0] cq_data [0:3];
+    reg  [1:0]  cq_wr = 0, cq_rd = 0;
+    reg  [2:0]  cq_n = 0;
+    reg  [1:0]  cwr_ph = 0;
+    // video fetch service from CRAM: two words per 32-bit request
+    reg  [1:0]  cvg_ph = 0, cmg_ph = 0;
+    reg  [15:0] cvg_hi, cmg_hi;
+    reg         cwr_snoop_d = 0;
+
     // ---------------- escape_core ROM fetch (7.159 domain) -> SDRAM (85.9 domain)
     wire [23:0] core_rom_addr;
     wire        core_rom_req;
@@ -1021,20 +1070,57 @@ always @(posedge clk_sdram) begin
                 mg_req_last <= mg_req_s; mg_data <= 32'd0; mg_done_85 <= ~mg_done_85;
             end
         end
-        // MO gfx fetch: served when PF idle
-        if(!vidkill_sd && mg_req_s != mg_req_last && vg_phase==2'd0 && vg_req_s==vg_req_last
-           && !sd_rd_req && !sd_rd_ack && mg_phase==2'd0) begin
-            mg_req_last <= mg_req_s;
-            sd_rd_req   <= 1;
-            rd_addr_q   <= {1'b0, mo_gfx_addr};
-            rd_pre_q    <= 1;
-            mg_phase    <= 2'd1;
+        // MO gfx from CRAM: outranks a new vg start (cvg gate above yields
+        // via cmg_ph check); two reads per request
+        if(!vidkill_sd && mg_req_s != mg_req_last && cvg_ph==2'd0 && cmg_ph==2'd0
+           && cwr_ph==2'd0 && !cram_busy && !cram_read_en) begin
+            mg_req_last  <= mg_req_s;
+            cram_addr    <= mo_gfx_addr[22:1] - 22'h88000;
+            cram_read_en <= 1'b1;
+            cmg_ph       <= 2'd1;
         end
-        if(mg_phase==2'd1 && sd_rd_ack) begin
-            mg_data   <= sd_rd_data;
-            sd_rd_req <= 0;
-            mg_done_85 <= ~mg_done_85;
-            mg_phase  <= 2'd0;
+        if(cmg_ph==2'd1) begin
+            cram_read_en <= 1'b0;
+            if(cram_avail) begin cmg_hi <= cram_dout; cmg_ph <= 2'd2; end
+        end
+        if(cmg_ph==2'd2 && !cram_busy && !cram_read_en) begin
+            cram_addr    <= (mo_gfx_addr[22:1] - 22'h88000) | 22'd1;
+            cram_read_en <= 1'b1;
+            cmg_ph       <= 2'd3;
+        end
+        if(cmg_ph==2'd3) begin
+            cram_read_en <= 1'b0;
+            if(cram_avail) begin
+                mg_data    <= {cmg_hi, cram_dout};
+                mg_done_85 <= ~mg_done_85;
+                cmg_ph     <= 2'd0;
+            end
+        end
+        // download-mirror: snoop SDRAM writes (gfx range), enqueue words
+        cwr_snoop_d <= sd_wr_req;
+        if(sd_wr_req && !cwr_snoop_d && sd_wr_addr >= 25'h110000 && cq_n <= 3'd2) begin
+            cq_addr[cq_wr]      <= sd_wr_addr[22:1] - 22'h88000;
+            cq_data[cq_wr]      <= sd_wr_data[31:16];
+            cq_addr[cq_wr+2'd1] <= (sd_wr_addr[22:1] - 22'h88000) + 22'd1;
+            cq_data[cq_wr+2'd1] <= sd_wr_data[15:0];
+            cq_wr <= cq_wr + 2'd2;
+            cq_n  <= cq_n + 3'd2;
+        end
+        // download-mirror drain (idle slots only)
+        if(cq_n != 3'd0 && cvg_ph==2'd0 && cmg_ph==2'd0
+           && !cram_busy && !cram_read_en && cwr_ph==2'd0) begin
+            cram_addr     <= cq_addr[cq_rd];
+            cram_din      <= cq_data[cq_rd];
+            cram_write_en <= 1'b1;
+            cwr_ph        <= 2'd1;
+        end
+        if(cwr_ph==2'd1) begin
+            cram_write_en <= 1'b0;
+            if(!cram_busy) begin
+                cq_rd  <= cq_rd + 2'd1;
+                cq_n   <= cq_n - 3'd1;
+                cwr_ph <= 2'd0;
+            end
         end
         // CPU fetch service. MUST also yield to a PENDING MO request
         // (mg_req_s != mg_req_last), not just an in-flight one: without that
@@ -1372,7 +1458,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h0087;   // v87
+    localparam [15:0] BUILD_ID = 16'h3087;   // bake-off lane 3 (CRAM), base v87
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1477,8 +1563,6 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             vg_pending <= 1'b0;
         end
         // issue side: drain the queue whenever the channel is free.
-        // v85: a pending MO fetch goes FIRST (default, was mode-5 only) -
-        // the pf queue has 4 cells of margin, the sprite engine has none
         if(!vg_pending && pfq_count != 3'd0 && !(vg_done_s != vg_done_last)
            && !(mg_req_s != mg_req_last)) begin
             case(pfq_rd)
