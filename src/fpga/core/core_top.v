@@ -1406,15 +1406,17 @@ end
         rbtn_d <= cont1_key[9];
         if(cont1_key[9] & ~rbtn_d) dbgmode <= dbgmode + 3'd1;
     end
-    wire m_pfmap   = pfmap_s   | (dbgmode == 3'd1);
-    wire m_inprobe = inprobe_s | (dbgmode == 3'd2);
-    wire m_pfprobe = pfprobe_s | (dbgmode == 3'd3);
-    // v81 render-timing lab: mode 4 = early pf gfx request (cell phase 1
-    // instead of 3, +2px deadline margin); mode 5 = MO fetches win over PF
-    // when both pending (PF always won before - sprite shimmer suspect)
-    wire m_mopri_px     = (dbgmode == 3'd5);
-    wire m_mokill       = (dbgmode == 3'd4);   // v86: sprite-layer kill -
-                                               // isolates the dash overlay
+    // LANE3h3: modes 1-5 RETIRED (answered questions - PF map, input probe,
+    // fetch probe, MO-kill, MO-priority). The design sits at the routing
+    // ceiling (constant hotspot X33_Y23-X43_Y33: 63% peak on '37', 74% on
+    // failed '38' attempts); these probes held wide muxes + counters alive
+    // through the render path. Tied off so Quartus prunes them. Modes kept:
+    // 0 normal | 6 vidkill | 7 CRAM self-test sums.
+    wire m_pfmap   = 1'b0;
+    wire m_inprobe = 1'b0;
+    wire m_pfprobe = 1'b0;
+    wire m_mopri_px     = 1'b0;
+    wire m_mokill       = 1'b0;
     wire m_mopri_sd;
 synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire m_vidkill_px   = (dbgmode == 3'd6);
