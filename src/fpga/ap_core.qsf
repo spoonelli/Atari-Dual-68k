@@ -774,6 +774,5 @@ set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to dram_dq[*]
 # and a fixed fitter seed so good placements are reproducible
 set_global_assignment -name SEED 17
-set_global_assignment -name FITTER_AGGRESSIVE_ROUTABILITY_OPTIMIZATION ALWAYS
 
 set_global_assignment -name SYSTEMVERILOG_FILE ../../third_party/analogue-pocket-utils/psram.sv
