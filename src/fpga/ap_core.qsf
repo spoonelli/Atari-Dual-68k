@@ -773,6 +773,6 @@ set_global_assignment -name SLD_FILE db/stp1_auto_stripped.stp
 # v75/v76/v77's shifting per-build corruption)
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to dram_dq[*]
 # and a fixed fitter seed so good placements are reproducible
-set_global_assignment -name SEED 17
+set_global_assignment -name SEED 23
 
 set_global_assignment -name SYSTEMVERILOG_FILE ../../third_party/analogue-pocket-utils/psram.sv
