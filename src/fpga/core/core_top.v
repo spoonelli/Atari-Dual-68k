@@ -950,10 +950,8 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg [9:0]  scrub_blk   = 10'd0;        // roving 4KB block index
     reg [15:0] scrub_bad   = 16'h0FFF;     // last failing block (0FFF = none yet)
     reg [15:0] blk_exp     = 16'd0;
-    reg [1:0]  vg_phase;
     reg [31:0] vg_data;
     reg        mg_req_last, mg_done_85;
-    reg [1:0]  mg_phase;
     reg [31:0] mg_data;
     wire       mg_req_s;
     wire       mo_gfx_req;
@@ -996,7 +994,7 @@ always @(posedge clk_sdram) begin
             cq_wr <= cq_wr + 3'd2;
         end
         // download-mirror drain (idle slots only)
-        if(cq_n != 4'd0 && cvg_ph==2'd0 && cmg_ph==2'd0
+        if(cq_n != 4'd0 && cvg_ph==2'd0 && cmg_ph==2'd0 && cst_ph==2'd0
            && !cram_busy && !cram_read_en && cwr_ph==2'd0) begin
             cram_addr     <= cq_addr[cq_rd];
             cram_din      <= cq_data[cq_rd];
@@ -1072,71 +1070,70 @@ always @(posedge clk_sdram) begin
         end
     end
     4'd10: begin
-        // VIDEO gfx fetch (v64): TWO word-0-only reads instead of one burst.
-        // The second burst word is the capture proven marginal across the
-        // v45-v51 CPU saga; the CPU path was cured by word-0-only serving
-        // but the video path kept consuming word 1 - that asymmetry is the
-        // in-tile playfield/sprite noise. Each beat takes sd_rd_data[31:16]
-        // only. Bandwidth: the arbiter just lost the JSA client and the 68ks
-        // run hot code from BRAM, so SDRAM is nearly video-exclusive now.
-        // (v64: mg_phase==0 required too - the two-beat fetches leave an
-        // idle gap between beats that the other client must not fire into)
-        if(!vidkill_sd && vg_req_s != vg_req_last && !sd_rd_req && !sd_rd_ack
-           && vg_phase==2'd0 && mg_phase==2'd0
-           && !(m_mopri_sd && mg_req_s != mg_req_last)) begin
-            vg_req_last <= vg_req_s;
-            sd_rd_req   <= 1;
-            rd_addr_q   <= {1'b0, vg_addr_px};
-            rd_pre_q    <= 1'b0;    // v79: video fast path (IO-cell capture
-                                    // made the v69-era armor obsolete)
-            vg_phase    <= 2'd1;
-        end
-        if(vg_phase==2'd1 && sd_rd_ack) begin
-            vg_data   <= sd_rd_data;   // v68: back to single burst - latency margin
-            sd_rd_req <= 0;
-            vg_done_85 <= ~vg_done_85;
-            vg_phase  <= 2'd0;
-        end
-        // diagnostic (hold R2): consume video-fetch toggles WITHOUT touching
-        // SDRAM - isolates the vg/mg service from the CPU path on hardware
+        // LANE3h: the missing half of the lane. cvg_ph existed but its FSM
+        // was never written - PF gfx was STILL served from SDRAM, and the
+        // LANE3c CPU-gate decoupling removed the mutual exclusion that had
+        // kept the PF and CPU arms apart. Both could fire on the same clock
+        // (both saw an idle bus), both wrote rd_addr_q, last-writer won, and
+        // the PF channel captured data fetched from the CPU's address: the
+        // flat tiles. Proof the fix belongs on CRAM: the mode-7 self-test
+        // read back both gfx regions through this controller sum-exact
+        // (A8DC/FF80 on hardware). PF now uses that identical handshake.
+        // SDRAM belongs to the CPUs + scrubber alone; every CRAM start goes
+        // through ONE strict-priority chain - drain > PF > MO > self-test -
+        // so no two clients can ever collide by construction.
+        // diagnostic (hold R2 / mode 6): consume video-fetch toggles WITHOUT
+        // touching CRAM - isolates the gfx service from everything else
         if(vidkill_sd) begin
-            if(vg_req_s != vg_req_last && vg_phase==2'd0) begin
+            if(vg_req_s != vg_req_last && cvg_ph==2'd0) begin
                 vg_req_last <= vg_req_s; vg_data <= 32'd0; vg_done_85 <= ~vg_done_85;
             end
-            if(mg_req_s != mg_req_last && mg_phase==2'd0) begin
+            if(mg_req_s != mg_req_last && cmg_ph==2'd0) begin
                 mg_req_last <= mg_req_s; mg_data <= 32'd0; mg_done_85 <= ~mg_done_85;
             end
         end
-        // CRAM self-test reader (runs once when triggered, idle slots only)
-        if(cst_go && !cst_done && cst_ph==2'd0 && cvg_ph==2'd0 && cmg_ph==2'd0
-           && cwr_ph==2'd0 && cq_n==4'd0 && !cram_busy && !cram_read_en) begin
-            cram_addr    <= (cst_i < 9'd256) ? {13'd0, cst_i} : {7'd1, 6'd0, cst_i[8:0]} ;
-            cram_addr    <= (cst_i < 9'd256) ? {13'd0, cst_i[8:0]} : (22'h8000 + {13'd0, cst_i[7:0]});
-            cram_read_en <= 1'b1;
-            cst_ph       <= 2'd1;
-        end
-        if(cst_ph==2'd1) begin
-            cram_read_en <= 1'b0;
-            if(cram_avail) begin
-                if(cst_i < 9'd256) cst_sum0 <= cst_sum0 + cram_dout;
-                else               cst_sum1 <= cst_sum1 + cram_dout;
-                cst_i  <= cst_i + 9'd1;
-                cst_ph <= 2'd0;
-                if(cst_i == 9'd511) cst_done <= 1'b1;
+        // unified CRAM read-start chain (drain owns cq_n!=0 cycles; reads
+        // require cq_n==0 - write vs read starts are exclusive on cq_n)
+        if(cvg_ph==2'd0 && cmg_ph==2'd0 && cst_ph==2'd0 && cwr_ph==2'd0
+           && cq_n==4'd0 && !cram_busy && !cram_read_en && !cram_write_en) begin
+            if(!vidkill_sd && vg_req_s != vg_req_last
+               && !(m_mopri_sd && mg_req_s != mg_req_last)) begin
+                vg_req_last  <= vg_req_s;
+                cram_addr    <= vg_addr_px[22:1] - 22'h88000;
+                cram_read_en <= 1'b1;
+                cvg_ph       <= 2'd1;
+            end else if(!vidkill_sd && mg_req_s != mg_req_last) begin
+                mg_req_last  <= mg_req_s;
+                cram_addr    <= mo_gfx_addr[22:1] - 22'h88000;
+                cram_read_en <= 1'b1;
+                cmg_ph       <= 2'd1;
+            end else if(cst_go && !cst_done) begin
+                cram_addr    <= (cst_i < 9'd256) ? {13'd0, cst_i[8:0]}
+                                                 : (22'h8000 + {14'd0, cst_i[7:0]});
+                cram_read_en <= 1'b1;
+                cst_ph       <= 2'd1;
             end
         end
-        // trigger once the machine reaches steady state (download over)
-        if(chk_state == 4'd10) cst_go <= 1'b1;
-
-        // MO gfx from CRAM: outranks a new vg start (cvg gate above yields
-        // via cmg_ph check); two reads per request
-        if(!vidkill_sd && mg_req_s != mg_req_last && cvg_ph==2'd0 && cmg_ph==2'd0
-           && cwr_ph==2'd0 && !cram_busy && !cram_read_en) begin
-            mg_req_last  <= mg_req_s;
-            cram_addr    <= mo_gfx_addr[22:1] - 22'h88000;
-            cram_read_en <= 1'b1;
-            cmg_ph       <= 2'd1;
+        // PF gfx from CRAM: two words per 32-bit request, {even, odd} to
+        // match the SDRAM burst byte order the pixel side already expects
+        if(cvg_ph==2'd1) begin
+            cram_read_en <= 1'b0;
+            if(cram_avail) begin cvg_hi <= cram_dout; cvg_ph <= 2'd2; end
         end
+        if(cvg_ph==2'd2 && !cram_busy && !cram_read_en) begin
+            cram_addr    <= (vg_addr_px[22:1] - 22'h88000) | 22'd1;
+            cram_read_en <= 1'b1;
+            cvg_ph       <= 2'd3;
+        end
+        if(cvg_ph==2'd3) begin
+            cram_read_en <= 1'b0;
+            if(cram_avail) begin
+                vg_data    <= {cvg_hi, cram_dout};
+                vg_done_85 <= ~vg_done_85;
+                cvg_ph     <= 2'd0;
+            end
+        end
+        // MO gfx from CRAM: same two-read shape
         if(cmg_ph==2'd1) begin
             cram_read_en <= 1'b0;
             if(cram_avail) begin cmg_hi <= cram_dout; cmg_ph <= 2'd2; end
@@ -1154,6 +1151,19 @@ always @(posedge clk_sdram) begin
                 cmg_ph     <= 2'd0;
             end
         end
+        // CRAM self-test reader (lowest priority; permanent regression fixture)
+        if(cst_ph==2'd1) begin
+            cram_read_en <= 1'b0;
+            if(cram_avail) begin
+                if(cst_i < 9'd256) cst_sum0 <= cst_sum0 + cram_dout;
+                else               cst_sum1 <= cst_sum1 + cram_dout;
+                cst_i  <= cst_i + 9'd1;
+                cst_ph <= 2'd0;
+                if(cst_i == 9'd511) cst_done <= 1'b1;
+            end
+        end
+        // trigger once the machine reaches steady state (download over)
+        if(chk_state == 4'd10) cst_go <= 1'b1;
         // CPU fetch service. MUST also yield to a PENDING MO request
         // (mg_req_s != mg_req_last), not just an in-flight one: without that
         // check both gates fire on the same edge, one read goes out with the
@@ -1496,7 +1506,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3037;   // lane 3g - screen shows '37'
+    localparam [15:0] BUILD_ID = 16'h3038;   // lane 3h - screen shows '38'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
