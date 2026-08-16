@@ -1121,7 +1121,11 @@ always @(posedge clk_sdram) begin
             if(cram_avail) begin cvg_hi <= cram_dout; cvg_ph <= 2'd2; end
         end
         if(cvg_ph==2'd2 && !cram_busy && !cram_read_en) begin
-            cram_addr    <= (vg_addr_px[22:1] - 22'h88000) | 22'd1;
+            // cram_addr still holds the first-read word (nothing else may
+            // write it mid-transaction): |1 in place - no recompute from the
+            // live cross-domain bus (v39 latched-address discipline; the
+            // duplicated subtractor cones were a router congestion hotspot)
+            cram_addr    <= cram_addr | 22'd1;
             cram_read_en <= 1'b1;
             cvg_ph       <= 2'd3;
         end
@@ -1139,7 +1143,7 @@ always @(posedge clk_sdram) begin
             if(cram_avail) begin cmg_hi <= cram_dout; cmg_ph <= 2'd2; end
         end
         if(cmg_ph==2'd2 && !cram_busy && !cram_read_en) begin
-            cram_addr    <= (mo_gfx_addr[22:1] - 22'h88000) | 22'd1;
+            cram_addr    <= cram_addr | 22'd1;
             cram_read_en <= 1'b1;
             cmg_ph       <= 2'd3;
         end
