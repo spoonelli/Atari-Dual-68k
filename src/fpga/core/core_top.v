@@ -1462,7 +1462,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h303B;   // lane 3i2 scrubber retired - screen shows '3B'
+    localparam [15:0] BUILD_ID = 16'h303C;   // lane 3j map transpose fix - screen shows '3C'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1516,7 +1516,13 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     always @(posedge clk_sys_7159) begin
         case(vis_x[2:0])
             3'd0: begin
-                pf_vaddr <= {pf_y[8:3], pf_x2[8:3]};        // map row*64 + col
+                // LANE3j: the pf map is COLUMN-MAJOR scanned (MAME SCAN_COLS
+                // semantics; proven empirically - rendering the live MAME map
+                // dump with idx=col*64+row reproduces the attract art pixel-
+                // exact, row-major produces the on-device diagonal hash).
+                // Our row-major read transposed every map lookup since v13:
+                // symmetric tiles (borders/pillars) hid it for 90+ builds.
+                pf_vaddr <= {pf_x2[8:3], pf_y[8:3]};        // map col*64 + row
                 // cell boundary: advance pipelines
                 // show the slot for THIS cell; a still-pending fetch shows
                 // that slot's previous-line row (localized, non-spreading)
