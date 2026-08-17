@@ -782,10 +782,6 @@ synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
     reg [24:0] sd_wr_addr;
     reg [31:0] sd_wr_data;
     wire       sd_wr_ack;
-    reg [15:0] blktab [0:1023];        // per-4KB-block checksum table (whole image)
-    reg [15:0] dl_blk_sum = 16'd0;
-    reg [9:0]  dl_blk_cur = 10'd0;
-    reg [9:0]  blk_max    = 10'd0;
     reg        dlq_d      = 1'b0;      // final-block flush on download-quiet edge
     // v58 shadow-fill regs (clk_sdram domain; dual-clock rams inside escape_core)
     reg [23:0] shad_waddr = 24'd0;
@@ -826,16 +822,6 @@ always @(posedge clk_sdram) begin
             shad_we    <= 1;
             shad_pend  <= dl_data_74[15:0];
             shad_second<= 1;
-            // ROVING scrubber ground truth: per-4KB-block checksum of the WHOLE
-            // image. Sequential download: accumulate; flush on block crossing.
-            if(dl_addr_74[21:12] != dl_blk_cur) begin
-                blktab[dl_blk_cur] <= dl_blk_sum;
-                dl_blk_cur <= dl_addr_74[21:12];
-                dl_blk_sum <= dl_data_74[31:16] + dl_data_74[15:0];
-                if(dl_addr_74[21:12] > blk_max) blk_max <= dl_addr_74[21:12];
-            end else begin
-                dl_blk_sum <= dl_blk_sum + dl_data_74[31:16] + dl_data_74[15:0];
-            end
         end
     end
     2'd1: begin
@@ -851,9 +837,7 @@ always @(posedge clk_sdram) begin
     end
     default: dl_phase <= 2'd0;
     endcase
-    // flush the final block's sum once the download goes quiet
     dlq_d <= dl_quiet_sd;
-    if(dl_quiet_sd && !dlq_d) blktab[dl_blk_cur] <= dl_blk_sum;
 end
 
     // ---------------- CRAM0: graphics assets on their own bus (bake-off #3)
@@ -948,16 +932,6 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg        vg_reqA_last, vg_doneA_85;
     reg        vg_reqB_last, vg_doneB_85;
     reg        cpu_owner;
-    reg        scrub_phase = 1'd0;         // read-integrity scrubber state
-    reg [11:0] scrub_tick  = 12'd0;        // ~114us periodic slot timer
-    reg        scrub_urgent= 1'd0;         // guaranteed-slot request
-    reg [10:0] scrub_addr  = 11'd0;        // word index into first 4KB (steps of 2)
-    reg [15:0] scrub_sum   = 16'd0;
-    reg [15:0] scrub_err   = 16'd0;        // blocks that mismatched their checksum
-    reg [15:0] scrub_pass  = 16'd0;        // completed full-image sweeps
-    reg [9:0]  scrub_blk   = 10'd0;        // roving 4KB block index
-    reg [15:0] scrub_bad   = 16'h0FFF;     // last failing block (0FFF = none yet)
-    reg [15:0] blk_exp     = 16'd0;
     reg [31:0] vg_dataA, vg_dataB;
     reg        cvg_ch;                    // channel served by the in-flight cvg op
     reg        mg_req_last, mg_done_85;
@@ -1203,7 +1177,7 @@ always @(posedge clk_sdram) begin
         // CRAM lane: video no longer touches SDRAM - the CPU service
         // must NOT wait on video-channel state (a stuck CRAM path was
         // starving CPU fetches -> extra CPU death -> watchdog boot loop)
-        if(!scrub_urgent && scrub_phase==1'd0) begin
+        begin
             if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
                 sd_rd_req <= 1;
                 rd_addr_q <= {1'b0, core_rom_addr};
@@ -1219,43 +1193,12 @@ always @(posedge clk_sdram) begin
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
-        // READ-INTEGRITY SCRUBBER: continuously re-read the first 4KB of the
-        // image and re-verify against the download checksum. A purely idle-slot
-        // scrubber starves forever behind the CPUs' continuous fetch stream
-        // (v23: PASSES stayed 0), so it earns a guaranteed slot every ~114us:
-        // one read each tick, priority over the CPU, ~0.3% of bandwidth.
-        scrub_tick <= scrub_tick + 12'd1;
-        if(&scrub_tick) scrub_urgent <= 1;
-        if(scrub_urgent && scrub_phase==1'd0 && !sd_rd_req && !sd_rd_ack
-           && !cpu_owner) begin
-            sd_rd_req    <= 1;
-            rd_addr_q    <= {3'd0, scrub_blk, scrub_addr, 1'b0};
-            rd_pre_q     <= 1;
-            scrub_phase  <= 1'd1;
-            scrub_urgent <= 0;
-        end
-        blk_exp <= blktab[scrub_blk];              // registered table read
-        if(scrub_phase==1'd1 && sd_rd_ack) begin
-            sd_rd_req   <= 0;
-            scrub_phase <= 1'd0;
-            if(scrub_addr == 11'd2046) begin       // block done: verify + rove on
-                scrub_addr <= 11'd0;
-                if((scrub_sum + sd_rd_data[31:16] + sd_rd_data[15:0]) != blk_exp) begin
-                    scrub_err <= scrub_err + 16'd1;
-                    scrub_bad <= {6'd0, scrub_blk};
-                end
-                scrub_sum <= 16'd0;
-                if(scrub_blk >= blk_max) begin
-                    scrub_blk  <= 10'd0;
-                    scrub_pass <= scrub_pass + 16'd1;   // full-image sweeps
-                end else begin
-                    scrub_blk <= scrub_blk + 10'd1;
-                end
-            end else begin
-                scrub_addr <= scrub_addr + 11'd2;
-                scrub_sum  <= scrub_sum + sd_rd_data[31:16] + sd_rd_data[15:0];
-            end
-        end
+        // LANE3i2: the READ-INTEGRITY SCRUBBER is RETIRED. It answered its
+        // questions (v23-v29 exoneration arc; final verdict 0100 = full pass,
+        // zero errors during LANE3g) and the routing ceiling now blocks the
+        // lane verdict - the roving FSM + blktab BRAM + guaranteed-slot
+        // arbitration buy back real interconnect. chk_ok/chk2_ok strip
+        // probes remain as the SDRAM canary. Restore from git if needed.
         // while failing, re-probe + re-DMA every ~0.6s
         recheck_ctr <= recheck_ctr + 24'd1;
         if(!chk2_ok && recheck_ctr == 24'hFFFFFF && !sd_rd_req && !sd_rd_ack
@@ -1413,13 +1356,7 @@ end
     wire [3:0] slot = hx[8:4];                       // 16px per digit slot
     wire [1:0] gx   = hx[3:2];                       // glyph column (4px scale)
     wire [2:0] gy   = (visible_y - 'd100) >> 2;      // glyph row
-    // scrub counters cross clk_sdram -> pixel domain; quasi-static, 2-stage reg
-    reg [15:0] scrub_err_px, scrub_pass_px, scrub_bad_px;
-    reg [15:0] scrub_err_m,  scrub_pass_m,  scrub_bad_m;
     always @(posedge clk_sys_7159) begin
-        scrub_err_m  <= scrub_err;   scrub_err_px  <= scrub_err_m;
-        scrub_pass_m <= scrub_pass;  scrub_pass_px <= scrub_pass_m;
-        scrub_bad_m  <= scrub_bad;   scrub_bad_px  <= scrub_bad_m;
     end
     // v54 live button probe: the exact nibble the game scanner reads
     // v75: R button (bit 9) cycles an on-device debug mode 0-7, shown as
@@ -1501,14 +1438,13 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : respstat_fr[11:8];
         4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : respstat_fr[7:4];
         4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : respstat_fr[3:0];
-        // middle field (v65): {scrub pass count, scrub ERROR count}. The
-        // roving scrubber re-reads the WHOLE image (gfx included) verifying
+        // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
         // corruption is in what the CPUs WRITE (game logic / extra CPU);
         // err climbing = the read path is still lying to us.
-        4'd5:  hex_digit = scrub_pass_px[7:4];   4'd6:  hex_digit = scrub_pass_px[3:0];
-        4'd7:  hex_digit = scrub_err_px[7:4];    4'd8:  hex_digit = scrub_err_px[3:0];
+        4'd5:  hex_digit = 4'h0;   4'd6:  hex_digit = 4'h0;
+        4'd7:  hex_digit = 4'h0;   4'd8:  hex_digit = 4'h0;
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
@@ -1526,7 +1462,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h303A;   // lane 3i ping-pong - screen shows '3A'
+    localparam [15:0] BUILD_ID = 16'h303B;   // lane 3i2 scrubber retired - screen shows '3B'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
