@@ -20,6 +20,7 @@
 
 module tb_pf_cram;
     parameter SINGLE_CH = 0;   // 1 = old one-in-flight design (control run)
+    parameter REAL_DATA = 0;   // 1 = load real gfx (cram_words.hex) + real map (pf_map.hex)
     parameter MO_BURST  = 2;   // MO fetches per 8px slot (attract worst case)
     // ---------------- clocks: 85.909MHz service, /12 pixel (real PLL ratio)
     reg clk85 = 0;
@@ -66,10 +67,16 @@ module tb_pf_cram;
     integer k;
     initial begin
         chip_rd_valid = 0;
-        // word[a] = low 16 bits of (a*2654435761) - address-unique pattern
-        for(k = 0; k < (1<<21); k = k + 1)
-            cmem[k] = k[15:0];
+        if (REAL_DATA) begin
+            $readmemh("sim/build/cram_words.hex", cmem);
+        end else begin
+            // word[a] = low 16 bits of address - address-unique pattern
+            for(k = 0; k < (1<<21); k = k + 1)
+                cmem[k] = k[15:0];
+        end
     end
+    reg [15:0] mapmem [0:4095];
+    initial if (REAL_DATA) $readmemh("sim/build/pf_map.hex", mapmem);
     // latch address while ADV low (controller drives addr on a+dq)
     always @(*) if(!cram0_adv_n && (!cram0_ce0_n || !cram0_ce1_n))
         chip_addr = {cram0_a[21:16], cram0_dq};
@@ -145,10 +152,13 @@ module tb_pf_cram;
     wire [8:0] pf_y  = visible_y[8:0] + yscroll;
     wire [8:0] pf_x2 = vis_x[8:0] + 9'd24 + xscroll;
 
-    // map BRAM model: registered read, distinct code per cell
+    // map BRAM model: registered read; synthetic distinct codes, or the
+    // real MAME map dump when REAL_DATA (col-major scanned, matching LANE3j)
     reg  [11:0] pf_vaddr;
     reg  [15:0] pf_vdata;
-    always @(posedge clk_px) pf_vdata <= {1'b0, 1'b0, pf_vaddr[11:0], 2'b00} | {4'd0, pf_vaddr};
+    always @(posedge clk_px)
+        pf_vdata <= REAL_DATA ? mapmem[pf_vaddr]
+                              : ({1'b0, 1'b0, pf_vaddr[11:0], 2'b00} | {4'd0, pf_vaddr});
     wire [15:0] pfx_vdata = 16'h0000;
 
     reg  [4:0] pfcol_q0, pfcol_q1, pfcol_q2, pfcol_q3, pfcol_show;
@@ -169,13 +179,7 @@ module tb_pf_cram;
     always @(posedge clk_px) begin
         case(vis_x[2:0])
             3'd0: begin
-                pf_vaddr <= {pf_y[8:3], pf_x2[8:3]};
-                case(pf_rp)
-                    2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
-                    2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
-                endcase
-                pf_rp <= pf_rp + 2'd1;
-                pfcol_show <= pfcol_q3;
+                pf_vaddr <= {pf_x2[8:3], pf_y[8:3]};   // LANE3j col-major
                 pfcol_q3   <= pfcol_q2;
                 pfcol_q2   <= pfcol_q1;
                 pfcol_q1   <= pfcol_q0;
@@ -194,6 +198,20 @@ module tb_pf_cram;
                     pf_wp     <= pf_wp + 2'd1;
                 end
                 pfcol_q0 <= {pf_vdata[15], pfx_vdata[11:8]};
+            end
+            3'd7: begin
+                // LANE3k: show-registers load one pixel EARLY (phase 7) so
+                // they are fresh when pixel 0 samples them. Loading at phase
+                // 0 left pixel 0 rendering the PREVIOUS cell's word - the
+                // 1px vertical tears at every cell boundary in detailed art
+                // (proven in the real-data art sim: 100% of mismatches were
+                // pixel-in-cell 0 showing the left cell's first pixel).
+                case(pf_rp)
+                    2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
+                    2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
+                endcase
+                pf_rp <= pf_rp + 2'd1;
+                pfcol_show <= pfcol_q3;
             end
             default: ;
         endcase

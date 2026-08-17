@@ -1376,7 +1376,11 @@ end
     // through the render path. Tied off so Quartus prunes them. Modes kept:
     // 0 normal | 6 vidkill | 7 CRAM self-test sums.
     wire m_pfmap   = 1'b0;
-    wire m_inprobe = 1'b0;
+    // LANE3k: mode 2 returns as the SECOND-PROCESSOR window - the extra 68k
+    // draws the in-game world; when gameplay fails to populate, this names
+    // where it is: field1 = extra-CPU PC (frame-latched; frozen = wedged/
+    // quiesced, churning = alive), field3 = last mailbox response word.
+    wire m_eprobe  = (dbgmode == 3'd2);
     wire m_pfprobe = 1'b0;
     wire m_mopri_px     = 1'b0;
     wire m_mokill       = 1'b0;
@@ -1434,10 +1438,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // v61 proved reads churn healthily and coin edges are clean while
         // credits appear - this catches the sub-frame phantom bytes:
         // count ~06 after boot with credits=6 = 6502 greeting leak.
-        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : respstat_fr[15:12];
-        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : respstat_fr[11:8];
-        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : respstat_fr[7:4];
-        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : respstat_fr[3:0];
+        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : m_eprobe ? epc_fr[15:12] : respstat_fr[15:12];
+        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : m_eprobe ? epc_fr[11:8]  : respstat_fr[11:8];
+        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : m_eprobe ? epc_fr[7:4]   : respstat_fr[7:4];
+        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : m_eprobe ? epc_fr[3:0]   : respstat_fr[3:0];
         // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
@@ -1448,10 +1452,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] : m_eprobe ? mbox_fr[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : coincred_fr[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1462,7 +1466,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h303C;   // lane 3j map transpose fix - screen shows '3C'
+    localparam [15:0] BUILD_ID = 16'h303D;   // lane 3k tears + extra-CPU probe - screen shows '3D'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1526,13 +1530,6 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                 // cell boundary: advance pipelines
                 // show the slot for THIS cell; a still-pending fetch shows
                 // that slot's previous-line row (localized, non-spreading)
-                case(pf_rp)
-                    2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
-                    2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
-                endcase
-                pf_rp <= pf_rp + 2'd1;
-                pfcol_show <= pfcol_q3;
-                pfcode_show<= pfcode_q3;
                 pfcol_q3   <= pfcol_q2;
                 pfcol_q2   <= pfcol_q1;
                 pfcol_q1   <= pfcol_q0;
@@ -1556,6 +1553,21 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                 end
                 pfcol_q0   <= {pf_vdata[15], pfx_vdata[11:8]};
                 pfcode_q0  <= pf_vdata[3:0] ^ pf_vdata[7:4] ^ pf_vdata[11:8];
+            end
+            3'd7: begin
+                // LANE3k: show-registers load one pixel EARLY (phase 7) so
+                // they are fresh when pixel 0 samples them. Loading at phase
+                // 0 left pixel 0 rendering the PREVIOUS cell's word - the
+                // 1px vertical tears at every cell boundary in detailed art
+                // (proven in the real-data art sim: 100% of mismatches were
+                // pixel-in-cell 0 showing the left cell's first pixel).
+                case(pf_rp)
+                    2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
+                    2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
+                endcase
+                pf_rp <= pf_rp + 2'd1;
+                pfcol_show <= pfcol_q3;
+                pfcode_show<= pfcode_q3;
             end
             default: ;
         endcase
