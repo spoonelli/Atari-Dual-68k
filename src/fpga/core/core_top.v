@@ -939,7 +939,15 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg [15:0] probe0, probe1;      // words @0x000000 (expect 003F) and @0x110400 (expect 33CC)
 
     reg [23:0] recheck_ctr;
-    reg        vg_req_last, vg_done_85, cpu_owner;
+    // LANE3i: TWO PF fetch channels (A/B ping-pong). One-in-flight paid the
+    // full CDC round trip per word (~420ns done-sync + issue gap) on top of
+    // the ~280ns two-read CRAM service = ~875ns/word against a 1117ns budget;
+    // any MO fetch pushed a line over and the deficit accumulated rightward
+    // (build 39: perfect left column, double-struck right). Two in flight
+    // overlaps the round trips - throughput becomes service-bound.
+    reg        vg_reqA_last, vg_doneA_85;
+    reg        vg_reqB_last, vg_doneB_85;
+    reg        cpu_owner;
     reg        scrub_phase = 1'd0;         // read-integrity scrubber state
     reg [11:0] scrub_tick  = 12'd0;        // ~114us periodic slot timer
     reg        scrub_urgent= 1'd0;         // guaranteed-slot request
@@ -950,7 +958,8 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg [9:0]  scrub_blk   = 10'd0;        // roving 4KB block index
     reg [15:0] scrub_bad   = 16'h0FFF;     // last failing block (0FFF = none yet)
     reg [15:0] blk_exp     = 16'd0;
-    reg [31:0] vg_data;
+    reg [31:0] vg_dataA, vg_dataB;
+    reg        cvg_ch;                    // channel served by the in-flight cvg op
     reg        mg_req_last, mg_done_85;
     reg [31:0] mg_data;
     wire       mg_req_s;
@@ -959,12 +968,14 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
 synch_3 s_mg(mo_gfx_req, mg_req_s, clk_sdram);
     wire mg_done_s;
 synch_3 s_mgd(mg_done_85, mg_done_s, clk_sys_7159);
-    wire       vg_req_s;
-    reg        vg_req_px;                 // pixel-domain request toggle
-    reg [23:0] vg_addr_px;                // stable while request in flight
-synch_3 s_vg(vg_req_px, vg_req_s, clk_sdram);
-    wire vg_done_s;
-synch_3 s_vgd(vg_done_85, vg_done_s, clk_sys_7159);
+    wire       vg_reqA_s, vg_reqB_s;
+    reg        vg_reqA_px, vg_reqB_px;    // pixel-domain request toggles
+    reg [23:0] vg_addrA_px, vg_addrB_px;  // stable while request in flight
+synch_3 s_vgA(vg_reqA_px, vg_reqA_s, clk_sdram);
+synch_3 s_vgB(vg_reqB_px, vg_reqB_s, clk_sdram);
+    wire vg_doneA_s, vg_doneB_s;
+synch_3 s_vgdA(vg_doneA_85, vg_doneA_s, clk_sys_7159);
+synch_3 s_vgdB(vg_doneB_85, vg_doneB_s, clk_sys_7159);
     reg [3:0]  chk_state;
     // char ROM DMA: combined image 0x110000..0x113FFF -> 8192x16 BRAM
     reg [13:0] chr_dma_word;         // word index 0..8191
@@ -1085,8 +1096,11 @@ always @(posedge clk_sdram) begin
         // diagnostic (hold R2 / mode 6): consume video-fetch toggles WITHOUT
         // touching CRAM - isolates the gfx service from everything else
         if(vidkill_sd) begin
-            if(vg_req_s != vg_req_last && cvg_ph==2'd0) begin
-                vg_req_last <= vg_req_s; vg_data <= 32'd0; vg_done_85 <= ~vg_done_85;
+            if(vg_reqA_s != vg_reqA_last && cvg_ph==2'd0) begin
+                vg_reqA_last <= vg_reqA_s; vg_dataA <= 32'd0; vg_doneA_85 <= ~vg_doneA_85;
+            end
+            if(vg_reqB_s != vg_reqB_last && cvg_ph==2'd0) begin
+                vg_reqB_last <= vg_reqB_s; vg_dataB <= 32'd0; vg_doneB_85 <= ~vg_doneB_85;
             end
             if(mg_req_s != mg_req_last && cmg_ph==2'd0) begin
                 mg_req_last <= mg_req_s; mg_data <= 32'd0; mg_done_85 <= ~mg_done_85;
@@ -1096,10 +1110,17 @@ always @(posedge clk_sdram) begin
         // require cq_n==0 - write vs read starts are exclusive on cq_n)
         if(cvg_ph==2'd0 && cmg_ph==2'd0 && cst_ph==2'd0 && cwr_ph==2'd0
            && cq_n==4'd0 && !cram_busy && !cram_read_en && !cram_write_en) begin
-            if(!vidkill_sd && vg_req_s != vg_req_last
+            if(!vidkill_sd && (vg_reqA_s != vg_reqA_last || vg_reqB_s != vg_reqB_last)
                && !(m_mopri_sd && mg_req_s != mg_req_last)) begin
-                vg_req_last  <= vg_req_s;
-                cram_addr    <= vg_addr_px[22:1] - 22'h88000;
+                if(vg_reqA_s != vg_reqA_last) begin
+                    vg_reqA_last <= vg_reqA_s;
+                    cram_addr    <= vg_addrA_px[22:1] - 22'h88000;
+                    cvg_ch       <= 1'b0;
+                end else begin
+                    vg_reqB_last <= vg_reqB_s;
+                    cram_addr    <= vg_addrB_px[22:1] - 22'h88000;
+                    cvg_ch       <= 1'b1;
+                end
                 cram_read_en <= 1'b1;
                 cvg_ph       <= 2'd1;
             end else if(!vidkill_sd && mg_req_s != mg_req_last) begin
@@ -1132,8 +1153,13 @@ always @(posedge clk_sdram) begin
         if(cvg_ph==2'd3) begin
             cram_read_en <= 1'b0;
             if(cram_avail) begin
-                vg_data    <= {cvg_hi, cram_dout};
-                vg_done_85 <= ~vg_done_85;
+                if(cvg_ch) begin
+                    vg_dataB    <= {cvg_hi, cram_dout};
+                    vg_doneB_85 <= ~vg_doneB_85;
+                end else begin
+                    vg_dataA    <= {cvg_hi, cram_dout};
+                    vg_doneA_85 <= ~vg_doneA_85;
+                end
                 cvg_ph     <= 2'd0;
             end
         end
@@ -1512,7 +1538,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3039;   // lane 3h reseed - screen shows '39'
+    localparam [15:0] BUILD_ID = 16'h303A;   // lane 3i ping-pong - screen shows '3A'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1542,9 +1568,9 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                                                         // spiral twice; slider deferred
     reg  [4:0] pfcol_q0, pfcol_q1, pfcol_q2, pfcol_q3, pfcol_show;  // {flip, color[3:0]}
     reg  [3:0] pfcode_q0, pfcode_q1, pfcode_q2, pfcode_q3, pfcode_show; // v66 map debug
-    reg [15:0] probe_code = 16'd0, probe_data = 16'd0;      // v67 fetch-truth probe
-    reg        probe_arm = 1'b0;
-    reg        vg_pending = 1'b0;   // v68: outstanding-fetch flag (the handshake)
+    // LANE3i: two fetches in flight (A/B ping-pong) - see channel decls at
+    // the sdram-domain end. inflA/inflB = per-channel outstanding flags.
+    reg        inflA = 1'b0, inflB = 1'b0;
     reg  [31:0] pf_fetch, pf_show;
     // v81b: SLOT-ADDRESSED RING replaces the shift pipe. A late completion
     // in the shift design landed in the NEXT cell's slot - the alternating
@@ -1552,7 +1578,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // Each fetch now delivers into the slot for ITS OWN cell whenever it
     // completes; rp re-syncs to wp at every line start (-4 = 0 mod 4).
     reg  [31:0] pfring0, pfring1, pfring2, pfring3;
-    reg  [1:0]  pf_wp, pf_infl, pf_rp;
+    reg  [1:0]  pf_wp, pf_inflA, pf_inflB, pf_rp;
     // v84: request queue decouples issue cadence from channel latency.
     // The old unconditional toggle CANCELLED an unserved request when the
     // next cell's phase arrived (two toggles = no net change) - each burst
@@ -1561,7 +1587,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     reg  [1:0]  pfq_slot0, pfq_slot1, pfq_slot2, pfq_slot3;
     reg  [2:0]  pfq_count;
     reg  [1:0]  pfq_wr, pfq_rd;
-    reg  vg_done_last;
+    reg  vg_doneA_last, vg_doneB_last;
 
     always @(posedge clk_sys_7159) begin
         case(vis_x[2:0])
@@ -1600,50 +1626,61 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                 end
                 pfcol_q0   <= {pf_vdata[15], pfx_vdata[11:8]};
                 pfcode_q0  <= pf_vdata[3:0] ^ pf_vdata[7:4] ^ pf_vdata[11:8];
-                // v67 fetch-truth probe: fixed map cell row16/col16, tile row 0
-                if(pf_vaddr == 12'h410 && pf_y[2:0] == 3'd0) begin
-                    probe_code <= pf_vdata;
-                end
             end
             default: ;
         endcase
-        // completion delivers into the in-flight request's own slot
-        vg_done_last <= vg_done_s;
-        if(vg_done_s != vg_done_last) begin
-            case(pf_infl)
-                2'd0: pfring0 <= vg_data;  2'd1: pfring1 <= vg_data;
-                2'd2: pfring2 <= vg_data;  default: pfring3 <= vg_data;
+        // completions deliver into each in-flight request's own slot; the
+        // two channels are independent (slot tags differ for consecutive
+        // fetches, so same-cycle delivery never collides on a ring slot)
+        vg_doneA_last <= vg_doneA_s;
+        if(vg_doneA_s != vg_doneA_last) begin
+            case(pf_inflA)
+                2'd0: pfring0 <= vg_dataA;  2'd1: pfring1 <= vg_dataA;
+                2'd2: pfring2 <= vg_dataA;  default: pfring3 <= vg_dataA;
             endcase
-            vg_pending <= 1'b0;
+            inflA <= 1'b0;
         end
-        // issue side: drain the queue whenever the channel is free.
-        if(!vg_pending && pfq_count != 3'd0 && !(vg_done_s != vg_done_last)
-           && !(mg_req_s != mg_req_last)) begin
-            case(pfq_rd)
-                2'd0: begin vg_addr_px <= pfq_addr0; pf_infl <= pfq_slot0; end
-                2'd1: begin vg_addr_px <= pfq_addr1; pf_infl <= pfq_slot1; end
-                2'd2: begin vg_addr_px <= pfq_addr2; pf_infl <= pfq_slot2; end
-                default: begin vg_addr_px <= pfq_addr3; pf_infl <= pfq_slot3; end
+        vg_doneB_last <= vg_doneB_s;
+        if(vg_doneB_s != vg_doneB_last) begin
+            case(pf_inflB)
+                2'd0: pfring0 <= vg_dataB;  2'd1: pfring1 <= vg_dataB;
+                2'd2: pfring2 <= vg_dataB;  default: pfring3 <= vg_dataB;
             endcase
-            vg_req_px  <= ~vg_req_px;
-            vg_pending <= 1'b1;
-            pfq_rd     <= pfq_rd + 2'd1;
-            pfq_count  <= pfq_count - 3'd1;
+            inflB <= 1'b0;
+        end
+        // issue side: drain the queue into whichever channel is free (one
+        // issue per pixel clock; the old wait-for-MO gate is gone - the
+        // sdram-domain priority chain arbitrates PF vs MO now)
+        if(pfq_count != 3'd0) begin
+            if(!inflA && !(vg_doneA_s != vg_doneA_last)) begin
+                case(pfq_rd)
+                    2'd0: begin vg_addrA_px <= pfq_addr0; pf_inflA <= pfq_slot0; end
+                    2'd1: begin vg_addrA_px <= pfq_addr1; pf_inflA <= pfq_slot1; end
+                    2'd2: begin vg_addrA_px <= pfq_addr2; pf_inflA <= pfq_slot2; end
+                    default: begin vg_addrA_px <= pfq_addr3; pf_inflA <= pfq_slot3; end
+                endcase
+                vg_reqA_px <= ~vg_reqA_px;
+                inflA      <= 1'b1;
+                pfq_rd     <= pfq_rd + 2'd1;
+                pfq_count  <= pfq_count - 3'd1;
+            end else if(!inflB && !(vg_doneB_s != vg_doneB_last)) begin
+                case(pfq_rd)
+                    2'd0: begin vg_addrB_px <= pfq_addr0; pf_inflB <= pfq_slot0; end
+                    2'd1: begin vg_addrB_px <= pfq_addr1; pf_inflB <= pfq_slot1; end
+                    2'd2: begin vg_addrB_px <= pfq_addr2; pf_inflB <= pfq_slot2; end
+                    default: begin vg_addrB_px <= pfq_addr3; pf_inflB <= pfq_slot3; end
+                endcase
+                vg_reqB_px <= ~vg_reqB_px;
+                inflB      <= 1'b1;
+                pfq_rd     <= pfq_rd + 2'd1;
+                pfq_count  <= pfq_count - 3'd1;
+            end
         end
         // line-start re-sync (lead 4 = 0 mod 4) + queue flush
         if(x_count == 10'd0) begin
             pf_rp <= pf_wp;
             pfq_count <= 3'd0; pfq_rd <= pfq_wr;
         end
-        // v67 probe: when the request for the probed cell goes out, remember
-        // to capture its returned word0 on the next completion
-        if(probe_arm && vg_done_s != vg_done_last) begin
-            probe_data <= vg_data[31:16];
-            probe_arm  <= 1'b0;
-        end
-        if(vis_x[2:0]==3'd3 && pf_vaddr == 12'h410 && pf_y[2:0]==3'd0
-           && y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE)
-            probe_arm <= 1'b1;
     end
 
     // pixel extraction: chunky nibbles px0..px7 across the 32-bit row; xflip reverses
