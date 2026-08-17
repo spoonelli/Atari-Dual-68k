@@ -1497,18 +1497,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // v61 proved reads churn healthily and coin edges are clean while
         // credits appear - this catches the sub-frame phantom bytes:
         // count ~06 after boot with credits=6 = 6502 greeting leak.
-        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] :
-                           m_inprobe ? cont1_key[15:12] :
-                           m_pfprobe ? probe_code[15:12] : respstat_fr[15:12];
-        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8] :
-                           m_inprobe ? cont1_key[11:8]  :
-                           m_pfprobe ? probe_code[11:8]  : respstat_fr[11:8];
-        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4] :
-                           m_inprobe ? cont1_key[7:4]   :
-                           m_pfprobe ? probe_code[7:4]   : respstat_fr[7:4];
-        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0] :
-                           m_inprobe ? cont1_key[3:0]   :
-                           m_pfprobe ? probe_code[3:0]   : respstat_fr[3:0];
+        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : respstat_fr[15:12];
+        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : respstat_fr[11:8];
+        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : respstat_fr[7:4];
+        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : respstat_fr[3:0];
         // middle field (v65): {scrub pass count, scrub ERROR count}. The
         // roving scrubber re-reads the WHOLE image (gfx included) verifying
         // BOTH burst words against download truth. err=00 with passes
@@ -1520,14 +1512,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] :
-                           m_pfprobe ? probe_data[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = m_moprobe ? cst1_px[11:8] :
-                           m_pfprobe ? probe_data[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = m_moprobe ? cst1_px[7:4] :
-                           m_pfprobe ? probe_data[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = m_moprobe ? cst1_px[3:0] :
-                           m_pfprobe ? probe_data[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : coincred_fr[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
