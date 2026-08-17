@@ -751,6 +751,20 @@ begin
                     yscroll <= ys_pend;
                 end if;
 
+                -- LANE3l: the EXTRA CPU acks vblank too. MAME's extra_map has
+                -- video_int_ack_w at 360000 and clearing is shared: EITHER
+                -- CPU's write drops IRQ4 for both. Our decode only listened
+                -- to the video CPU; the extra's ack was swallowed by the
+                -- catch-all dtack, so once gameplay enabled its IRQ4 the
+                -- extra re-entered its ISR whenever its RTE beat the main
+                -- CPU's ack - runaway exception frames, stack death, wild PC
+                -- (the frozen mode-2 reading). Boot/self-test are IRQ-masked
+                -- which is why the handshake always worked.
+                if e_as_n='0' and e_rw_n='0'
+                   and e_addr(23 downto 16) = x"36" and e_addr(5 downto 4) = "00" then
+                    virq <= '0';                                       -- 360000 ack (extra)
+                end if;
+
                 if v_as_n='0' and v_rw_n='0' and v_sel_vctl='1' then
                     case v_addr(5 downto 4) is
                         when "00"   => virq <= '0';                    -- 360000 vblank ack
