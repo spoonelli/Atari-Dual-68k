@@ -731,6 +731,9 @@ end
     reg        armor_74     = 1'b1;   // 0xA0000080: 'Video Read Armor' (default ON)
     reg        irqstrict_74 = 1'b0;   // 0xA0000090: 'Strict IRQ Ack' (coin suspect)
     reg        inprobe_74   = 1'b0;   // 0xA00000A0: 'Input Probe' - field1 = raw cont1_key
+    reg [4:0]  vpshift_74   = 5'd16;  // 0xA00000B0: 'World X Align' - pf map lead
+    reg        invx_74      = 1'b0;   // 0xA00000C0: 'Invert Stick X'
+    reg        invy_74      = 1'b0;   // 0xA00000D0: 'Invert Stick Y'
     reg        pfmap_74     = 1'b0;   // 0xA0000050: 'PF Map Debug' - render each
                                       // playfield cell as a flat color hashed from
                                       // its TILE CODE (no gfx fetch): structured
@@ -749,12 +752,20 @@ always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000080) armor_74     <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000090) irqstrict_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA00000A0) inprobe_74   <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA00000B0) vpshift_74   <= bridge_wr_data[4:0];
+    if(bridge_wr && bridge_addr == 32'hA00000C0) invx_74      <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA00000D0) invy_74      <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000060) pfprobe_74   <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
     else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
 end
     wire soft_rst_74 = (soft_rst_ctr != 23'd0);   // ~113ms self-clearing pulse
     wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s, tone_s, pfmap_s, pfprobe_s;
+    wire invx_s, invy_s;
+    wire [4:0] vpshift_s;
+synch_3 #(.WIDTH(5)) s_vps(vpshift_74, vpshift_s, clk_sys_7159);
+synch_3 s_invx(invx_74, invx_s, clk_sys_7159);
+synch_3 s_invy(invy_74, invy_s, clk_sys_7159);
 synch_3 s_pfmap(pfmap_74, pfmap_s, clk_sys_7159);
     wire armor_s, irqstrict_s, inprobe_s;
     wire [2:0] prefd_s;
@@ -1493,7 +1504,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3041;   // lane 3o MO dual-channel - screen shows '41'
+    localparam [15:0] BUILD_ID = 16'h3042;   // lane 3p stick center + world align - screen shows '42'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1517,7 +1528,9 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire [8:0]  xscroll, yscroll;
 
     wire [8:0] pf_y   = visible_y[8:0] + yscroll;           // scrolled row (mod 512)
-    wire [8:0] pf_x2  = vis_x[8:0] + 9'd24 + xscroll;   // v72: fixed 3 ahead again -
+    // LANE3p: world X alignment - sim-proven correct at +32 (map col lookup
+    // only; fetch timing untouched). Menu slider fine-tunes: +16+vpshift.
+    wire [8:0] pf_x2  = vis_x[8:0] + 9'd16 + {4'd0, vpshift_s} + xscroll;   // v72: fixed 3 ahead again -
                                                         // the runtime depth mux sent
                                                         // the fitter into a 90-minute
                                                         // spiral twice; slider deferred
@@ -1847,6 +1860,7 @@ synch_3 s_isoal(cont1_key[10], iso_alpha_off, clk_sys_7159);   // L2: hide alpha
     // stick (dock) takes priority when deflected — see rtl/hall_stick.v
     wire [7:0] adc_p1x, adc_p1y, adc_p2x, adc_p2y;
 hall_stick hall_p1 (
+    .inv_x ( invx_s ), .inv_y ( invy_s ),
     .clk   ( clk_sys_7159 ),
     .up    ( cont1_key[0] ),   .down  ( cont1_key[1] ),
     .left  ( cont1_key[2] ),   .right ( cont1_key[3] ),
@@ -1854,6 +1868,7 @@ hall_stick hall_p1 (
     .adc_x ( adc_p1x ),        .adc_y ( adc_p1y )
 );
 hall_stick hall_p2 (
+    .inv_x ( invx_s ), .inv_y ( invy_s ),
     .clk   ( clk_sys_7159 ),
     .up    ( cont2_key[0] ),   .down  ( cont2_key[1] ),
     .left  ( cont2_key[2] ),   .right ( cont2_key[3] ),
