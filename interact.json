@@ -125,6 +125,44 @@
         "writeonly": true,
         "defaultval": 0,
         "value": 1
+      },
+      {
+        "name": "World X Align",
+        "id": 21,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA00000B0",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 16,
+        "graphical": {
+          "min": 0,
+          "max": 31,
+          "adjust_small": 1,
+          "adjust_large": 4
+        }
+      },
+      {
+        "name": "Invert Stick X",
+        "id": 22,
+        "type": "check",
+        "enabled": true,
+        "address": "0xA00000C0",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "Invert Stick Y",
+        "id": 23,
+        "type": "check",
+        "enabled": true,
+        "address": "0xA00000D0",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
       }
     ],
     "messages": []

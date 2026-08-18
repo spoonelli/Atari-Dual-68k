@@ -13,6 +13,8 @@ module hall_stick (
     input  wire       down,
     input  wire       left,
     input  wire       right,
+    input  wire       inv_x,      // config: invert axes (Interact menu)
+    input  wire       inv_y,
     input  wire [7:0] joy_x,      // APF analog stick, unsigned, 0x80 center
     input  wire [7:0] joy_y,      //   (0x00 = left/up, 0xFF = right/down)
     output reg  [7:0] adc_x = 8'h80,   // to ADC0809 IN1/IN3 (0x00 = full right)
@@ -30,20 +32,28 @@ always @(posedge clk) begin
     jy_m  <= joy_y;                    jy_s  <= jy_m;
 end
 
-// analog stick deflected? (small deadzone so a centered stick never fights
-// the d-pad); either live axis hands the whole stick to analog
-wire joy_live = (jx_s > 8'h88) || (jx_s < 8'h78)
-             || (jy_s > 8'h88) || (jy_s < 8'h78);
+// LANE3p: ANALOG PRESENCE, not just deflection. An undocked Pocket sends
+// joy = 0x00/0x00 (no stick fitted) - the old check read exact zero as a
+// full-corner deflection and JAMMED the game's stick at left+down (the
+// held directions in the self-test Control Inputs screen, and a likely
+// gameplay killer). Exact (0,0) means "absent": a real stick pinned to
+// the exact corner momentarily just falls back to the d-pad for a frame.
+wire joy_present = !(jx_s == 8'h00 && jy_s == 8'h00);
+wire joy_live = joy_present &&
+             ( (jx_s > 8'h88) || (jx_s < 8'h78)
+            || (jy_s > 8'h88) || (jy_s < 8'h78) );
 
-// target position: analog stick wins, else d-pad absolutes
-wire [7:0] tgt_x = joy_live ? ~jx_s          // reverse: right = low
+// target position: analog stick wins, else d-pad absolutes; menu inverts
+wire [7:0] tgt_x_raw = joy_live ? ~jx_s      // reverse: right = low
                  : pad_s[3] ? 8'h00          // d-pad right -> full right
                  : pad_s[2] ? 8'hFF          // d-pad left
                  : 8'h80;
-wire [7:0] tgt_y = joy_live ? jy_s
+wire [7:0] tgt_y_raw = joy_live ? jy_s
                  : pad_s[0] ? 8'h00          // d-pad up -> full up
                  : pad_s[1] ? 8'hFF          // d-pad down
                  : 8'h80;
+wire [7:0] tgt_x = inv_x ? ~tgt_x_raw : tgt_x_raw;
+wire [7:0] tgt_y = inv_y ? ~tgt_y_raw : tgt_y_raw;
 
 // subtle slew toward the target — a physical stick takes a moment to travel.
 // One step per 256 clocks = ~4.6 ms center-to-stop at 7.159 MHz, well under

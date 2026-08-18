@@ -150,7 +150,7 @@ module tb_pf_cram;
     // ---------------- pixel-domain PF pipeline (replicated from core_top)
     wire [8:0] xscroll = 9'd0, yscroll = 9'd0;
     wire [8:0] pf_y  = visible_y[8:0] + yscroll;
-    wire [8:0] pf_x2 = vis_x[8:0] + 9'd24 + xscroll;
+    wire [8:0] pf_x2 = vis_x[8:0] + 9'd32 + xscroll;
 
     // map BRAM model: registered read; synthetic distinct codes, or the
     // real MAME map dump when REAL_DATA (col-major scanned, matching LANE3j)
