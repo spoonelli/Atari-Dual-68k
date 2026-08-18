@@ -1381,6 +1381,10 @@ end
     // where it is: field1 = extra-CPU PC (frame-latched; frozen = wedged/
     // quiesced, churning = alive), field3 = last mailbox response word.
     wire m_eprobe  = (dbgmode == 3'd2);
+    // LANE3m: mode 3 = MAIN-CPU window (field1 = video-CPU PC frame-latched,
+    // field3 = last main data-write addr [23:8]) - names where the game
+    // state machine sits when the world is drawn but objects never move.
+    wire m_vprobe  = (dbgmode == 3'd3);
     wire m_pfprobe = 1'b0;
     wire m_mopri_px     = 1'b0;
     wire m_mokill       = 1'b0;
@@ -1411,7 +1415,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire [3:0] btn_probe = {cont1_key[4]|cont1_key[8], 1'b0,
                             cont1_key[5]|cont1_key[8], cont1_key[7]|cont1_key[8]};
     // per-frame display latches for fast-changing HUD values
-    reg [15:0] epc_fr, mbox_fr;
+    reg [15:0] epc_fr, mbox_fr, vpc_fr, wrhi_fr;
     reg        vb_hud_d;
     reg [15:0] jsapc_fr, jsalink_fr;
     reg [15:0] respstat_fr, coincred_fr;
@@ -1419,6 +1423,8 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         vb_hud_d <= vblank_w;
         if(vblank_w && !vb_hud_d) begin
             epc_fr    <= dbg_epc;
+            vpc_fr    <= dbg_pc;
+            wrhi_fr   <= dbg_wrhi;
             mbox_fr   <= dbg_mbox_resp;
             jsapc_fr  <= dbg_jsa_pc;
             jsalink_fr<= dbg_jsa_link;
@@ -1438,10 +1444,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // v61 proved reads churn healthily and coin edges are clean while
         // credits appear - this catches the sub-frame phantom bytes:
         // count ~06 after boot with credits=6 = 6502 greeting leak.
-        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : m_eprobe ? epc_fr[15:12] : respstat_fr[15:12];
-        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : m_eprobe ? epc_fr[11:8]  : respstat_fr[11:8];
-        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : m_eprobe ? epc_fr[7:4]   : respstat_fr[7:4];
-        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : m_eprobe ? epc_fr[3:0]   : respstat_fr[3:0];
+        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : m_eprobe ? epc_fr[15:12] : m_vprobe ? vpc_fr[15:12] : respstat_fr[15:12];
+        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : m_eprobe ? epc_fr[11:8]  : m_vprobe ? vpc_fr[11:8]  : respstat_fr[11:8];
+        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : m_eprobe ? epc_fr[7:4]   : m_vprobe ? vpc_fr[7:4]   : respstat_fr[7:4];
+        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : m_eprobe ? epc_fr[3:0]   : m_vprobe ? vpc_fr[3:0]   : respstat_fr[3:0];
         // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
@@ -1452,10 +1458,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] : m_eprobe ? mbox_fr[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? wrhi_fr[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? wrhi_fr[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? wrhi_fr[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? wrhi_fr[3:0]   : coincred_fr[3:0];
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1466,7 +1472,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h303E;   // lane 3l extra-CPU vblank ack - screen shows '3E'
+    localparam [15:0] BUILD_ID = 16'h303F;   // lane 3m main-CPU window - screen shows '3F'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
