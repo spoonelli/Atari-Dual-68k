@@ -41,28 +41,32 @@ module escape_mob (
     output wire        disp_valid
 );
 
-    // double line buffers: 512 x 9 (valid + color4 + pix4)
-    reg [8:0] buf0 [0:511];
-    reg [8:0] buf1 [0:511];
-    reg       build_sel;                // which buffer is being built
-    reg [8:0] disp_q0, disp_q1;
+    // LANE3n: TAGGED double line buffers - no clear pass at all. The old
+    // S_CLEAR wiped 512 entries per line but a line is only 456 clocks, so
+    // the build NEVER finished during active video (sim: 3 SLIP walks per
+    // FRAME instead of 240) - the MO layer has been structurally dead since
+    // v14. Each written pixel now carries the ly it was built for; the
+    // display side shows a pixel only when its tag matches the line that
+    // buffer was built for - stale pixels are invisible by construction.
+    reg [16:0] buf0 [0:511];            // {tag[8:0], color[3:0], pix[3:0]}
+    reg [16:0] buf1 [0:511];
+    reg        build_sel;               // which buffer is being built
+    reg [8:0]  built_ly0, built_ly1;    // the ly each buffer was last built for
+    reg [16:0] disp_q0, disp_q1;
     always @(posedge clk) begin
         disp_q0 <= buf0[disp_x];
         disp_q1 <= buf1[disp_x];
     end
     assign disp_pen   = build_sel ? disp_q0[7:0] : disp_q1[7:0];
-    assign disp_valid = build_sel ? disp_q0[8]   : disp_q1[8];
+    assign disp_valid = build_sel ? (disp_q0[16:8] == built_ly0)
+                                  : (disp_q1[16:8] == built_ly1);
 
-    // clear pointer + write port
-    reg  [8:0] clr_x;
-    reg        clearing;
-    reg  [8:0] wr_x;
-    reg  [8:0] wr_data;
-    reg        wr_en;
+    // write port
+    reg  [8:0]  wr_x;
+    reg  [16:0] wr_data;
+    reg         wr_en;
     always @(posedge clk) begin
-        if(clearing) begin
-            if(build_sel) buf1[clr_x] <= 9'd0; else buf0[clr_x] <= 9'd0;
-        end else if(wr_en) begin
+        if(wr_en) begin
             if(build_sel) buf1[wr_x] <= wr_data; else buf0[wr_x] <= wr_data;
         end
     end
@@ -109,12 +113,25 @@ module escape_mob (
     wire [8:0] ydiff = (ly + spr_y + {1'b0, height_t, 3'b000} + 9'd8) & 9'h1FF;
     wire       ymatch = ydiff < {height_t, 3'b000} + 9'd8;   // (height+1)*8 lines
 
+    // chunky pixel extract with hflip (declared before use for iverilog)
+    wire [2:0] pn = hflip ? (3'd7 - blit_n[2:0]) : blit_n[2:0];
+    reg  [3:0] pix_val;
+    always @(*) begin
+        case(pn)
+            3'd0: pix_val = rowdata[31:28]; 3'd1: pix_val = rowdata[27:24];
+            3'd2: pix_val = rowdata[23:20]; 3'd3: pix_val = rowdata[19:16];
+            3'd4: pix_val = rowdata[15:12]; 3'd5: pix_val = rowdata[11:8];
+            3'd6: pix_val = rowdata[7:4];   default: pix_val = rowdata[3:0];
+        endcase
+    end
+
     always @(posedge clk) begin
         if(!reset_n) begin
             state <= S_IDLE;
             gfx_req <= 0;
-            wr_en <= 0; clearing <= 0;
+            wr_en <= 0;
             build_sel <= 0;
+            built_ly0 <= 9'h1FF; built_ly1 <= 9'h1FF;
             gfx_done_last <= 0;
         end else begin
             wr_en <= 0;
@@ -128,8 +145,10 @@ module escape_mob (
                && y_count < vbporch + vactive - 10'd1) begin
                 build_sel <= ~build_sel;
                 ly <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
-                clr_x <= 9'd0;
-                clearing <= 1;
+                // tag bookkeeping: the buffer we are about to build will hold
+                // pixels for this ly (stale content mismatches by definition)
+                if(build_sel) built_ly0 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
+                else          built_ly1 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
                 wr_en <= 0;
                 // v87: RESYNC the gfx handshake on restart. An aborted
                 // build's in-flight completion otherwise flips the done
@@ -144,12 +163,9 @@ module escape_mob (
             end
 
             S_CLEAR: begin
-                clr_x <= clr_x + 9'd1;
-                if(clr_x == 9'd511) begin
-                    clearing <= 0;
-                    cfg_vaddr <= {1'b1, ly[8:3]};        // SLIP word 0x40 + band
-                    state <= S_SLIP0;
-                end
+                // no clearing needed: tags invalidate stale pixels
+                cfg_vaddr <= {1'b1, ly[8:3]};            // SLIP word 0x40 + band
+                state <= S_SLIP0;
             end
 
             S_SLIP0: state <= S_SLIP1;                    // BRAM latency
@@ -220,7 +236,7 @@ module escape_mob (
                     // last-wins here and rely on list order: acceptable v1)
                     if(pix_val != 4'd0 && blit_x < 9'd336+9'd0+9'd8) begin
                         wr_x    <= blit_x;
-                        wr_data <= {1'b1, spr_color, pix_val};
+                        wr_data <= {ly, spr_color, pix_val};
                         wr_en   <= 1;
                     end
                     blit_x <= (blit_x + 9'd1) & 9'h1FF;
@@ -249,18 +265,6 @@ module escape_mob (
             default: state <= S_IDLE;
             endcase
         end
-    end
-
-    // chunky pixel extract with hflip
-    wire [2:0] pn = hflip ? (3'd7 - blit_n[2:0]) : blit_n[2:0];
-    reg  [3:0] pix_val;
-    always @(*) begin
-        case(pn)
-            3'd0: pix_val = rowdata[31:28]; 3'd1: pix_val = rowdata[27:24];
-            3'd2: pix_val = rowdata[23:20]; 3'd3: pix_val = rowdata[19:16];
-            3'd4: pix_val = rowdata[15:12]; 3'd5: pix_val = rowdata[11:8];
-            3'd6: pix_val = rowdata[7:4];   default: pix_val = rowdata[3:0];
-        endcase
     end
 
 endmodule
