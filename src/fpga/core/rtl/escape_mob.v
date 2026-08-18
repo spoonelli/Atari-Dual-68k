@@ -29,11 +29,16 @@ module escape_mob (
     output reg  [6:0]  cfg_vaddr,
     input  wire [15:0] cfg_vdata,
 
-    // gfx fetch channel (toggle handshake, 32-bit chunky row)
-    output reg         gfx_req,
-    output reg  [23:0] gfx_addr,
-    input  wire        gfx_done,        // toggle
-    input  wire [31:0] gfx_data,
+    // gfx fetch channels (LANE3o: A/B ping-pong - two fetches in flight
+    // across the CDC so per-tile cost is blit-bound, not round-trip-bound)
+    output reg         gfx_reqA,
+    output reg         gfx_reqB,
+    output reg  [23:0] gfx_addrA,
+    output reg  [23:0] gfx_addrB,
+    input  wire        gfx_doneA,       // toggles
+    input  wire        gfx_doneB,
+    input  wire [31:0] gfx_dataA,
+    input  wire [31:0] gfx_dataB,
 
     // display-side pixel query (current line)
     input  wire [8:0]  disp_x,
@@ -85,6 +90,7 @@ module escape_mob (
     localparam S_WAIT   = 4'd10;
     localparam S_BLIT   = 4'd11;
     localparam S_NEXT   = 4'd12;
+    localparam S_PRIME  = 4'd13;
 
     reg [3:0]  state;
     reg [8:0]  ly;                      // playfield-space line being built
@@ -96,10 +102,11 @@ module escape_mob (
     reg [8:0]  spr_x;
     reg [2:0]  width_t, height_t;
     reg        hflip;
-    reg [2:0]  tx;
+    reg [2:0]  tx, tx_f;
     reg [14:0] code_row;                // code + ty*width
     reg [2:0]  row_in_tile;
-    reg        gfx_done_last;
+    reg        gfx_doneA_last, gfx_doneB_last;
+    reg        pendA, pendB;            // completion seen, not yet consumed
     reg [31:0] rowdata;
     reg [3:0]  blit_n;
     reg [8:0]  blit_x;
@@ -128,14 +135,20 @@ module escape_mob (
     always @(posedge clk) begin
         if(!reset_n) begin
             state <= S_IDLE;
-            gfx_req <= 0;
+            gfx_reqA <= 0; gfx_reqB <= 0;
+            pendA <= 0; pendB <= 0;
             wr_en <= 0;
             build_sel <= 0;
             built_ly0 <= 9'h1FF; built_ly1 <= 9'h1FF;
-            gfx_done_last <= 0;
+            gfx_doneA_last <= 0; gfx_doneB_last <= 0;
         end else begin
             wr_en <= 0;
-            gfx_done_last <= gfx_done;
+            gfx_doneA_last <= gfx_doneA;
+            gfx_doneB_last <= gfx_doneB;
+            // completions can land while blitting: LATCH them (an edge is
+            // visible for one cycle only - depth-2 lost edges without this)
+            if(gfx_doneA != gfx_doneA_last) pendA <= 1'b1;
+            if(gfx_doneB != gfx_doneB_last) pendB <= 1'b1;
 
             // v85: the line trigger fires from ANY state - a build stalled
             // by fetch starvation previously missed the restart and kept
@@ -150,12 +163,10 @@ module escape_mob (
                 if(build_sel) built_ly0 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
                 else          built_ly1 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
                 wr_en <= 0;
-                // v87: RESYNC the gfx handshake on restart. An aborted
-                // build's in-flight completion otherwise flips the done
-                // toggle unconsumed, and every later fetch pairs with the
-                // PREVIOUS fetch's data for the rest of the frame - the
-                // exact 'right art, wrong place' interior garble.
-                gfx_done_last <= gfx_done;
+                // v87: RESYNC the gfx handshakes on restart (see history)
+                gfx_doneA_last <= gfx_doneA;
+                gfx_doneB_last <= gfx_doneB;
+                pendA <= 1'b0; pendB <= 1'b0;
                 state <= S_CLEAR;
             end else
             case(state)
@@ -205,51 +216,88 @@ module escape_mob (
                     // code for this row: code + ty*width + tx  (ty = ydiff>>3)
                     code_row    <= w1[14:0] + ( (ydiff[8:3]) * ({3'b0,width_t}+4'd1) );
                     row_in_tile <= ydiff[2:0];
-                    state <= S_BLIT;   // reuse BLIT entry to issue first fetch
-                    blit_n <= 4'd15;   // marker: need fetch
+                    tx_f  <= 3'd0;                  // next tile to ISSUE
+                    tx    <= 3'd0;                  // next tile to LATCH/blit
+                    state <= S_PRIME;
+                    blit_n <= 4'd15;                // marker: nothing in flight
                 end else begin
                     state <= S_NEXT;
                 end
             end
 
-            S_BLIT: begin
+            // LANE3o: FETCH-AHEAD. The serial issue-wait-blit loop paid the
+            // full CRAM+CDC round trip (~1us) per tile-row ON TOP of the 8
+            // blit cycles - a busy line ran out of time before late links
+            // (Jake) were reached. Now the next tile's fetch is in flight
+            // WHILE the current one blits: effective cost = max(fetch, blit).
+            // LANE3o: keep BOTH channels loaded - tile parity picks the
+            // channel (even tiles on A, odd on B). Issue runs up to two
+            // ahead of latch; per-tile cost = max(8-cycle blit, service/2).
+            S_PRIME: begin
                 if(blit_n == 4'd15) begin
-                    // issue fetch for tile tx
-                    gfx_addr <= 24'h120000
-                                + { (code_row + {12'b0, tx}), 5'd0 }
+                    // sprite start: issue tile 0 (A) and, if any, tile 1 (B)
+                    gfx_addrA <= 24'h120000
+                                + { code_row, 5'd0 }
                                 + { row_in_tile, 2'd0 };
-                    gfx_req  <= ~gfx_req;
-                    fetch_budget <= fetch_budget - 6'd1;
-                    blit_n <= 4'd14;   // waiting for data
-                end else if(blit_n == 4'd14) begin
-                    if(gfx_done != gfx_done_last) begin
-                        rowdata <= gfx_data;
-                        blit_n  <= 4'd0;
-                        // screen x for pixel 0 of this tile; hflip reverses tile order
-                        blit_x <= (spr_x + (hflip ? {(width_t - tx), 3'b000}
-                                                  : {tx, 3'b000})
-                                   - {1'b0, xscroll}) & 9'h1FF;
+                    gfx_reqA  <= ~gfx_reqA;
+                    if(width_t != 3'd0 && fetch_budget > 6'd1) begin
+                        gfx_addrB <= 24'h120000
+                                    + { (code_row + 15'd1), 5'd0 }
+                                    + { row_in_tile, 2'd0 };
+                        gfx_reqB  <= ~gfx_reqB;
+                        tx_f <= 3'd2;
+                        fetch_budget <= fetch_budget - 6'd2;
+                    end else begin
+                        tx_f <= 3'd1;
+                        fetch_budget <= fetch_budget - 6'd1;
+                    end
+                    blit_n <= 4'd14;
+                end else if(tx[0] ? pendB : pendA) begin
+                    // tile tx's data has landed on its parity channel
+                    rowdata <= tx[0] ? gfx_dataB : gfx_dataA;
+                    if(tx[0]) pendB <= 1'b0; else pendA <= 1'b0;
+                    blit_x  <= (spr_x + (hflip ? {(width_t - tx), 3'b000}
+                                              : {tx, 3'b000})
+                                - {1'b0, xscroll}) & 9'h1FF;
+                    blit_n  <= 4'd0;
+                    // refill the channel just freed with tile tx_f
+                    if(tx_f <= width_t && tx_f != 3'd0 && fetch_budget != 6'd0) begin
+                        if(tx_f[0]) begin
+                            gfx_addrB <= 24'h120000
+                                        + { (code_row + {12'b0, tx_f}), 5'd0 }
+                                        + { row_in_tile, 2'd0 };
+                            gfx_reqB  <= ~gfx_reqB;
+                        end else begin
+                            gfx_addrA <= 24'h120000
+                                        + { (code_row + {12'b0, tx_f}), 5'd0 }
+                                        + { row_in_tile, 2'd0 };
+                            gfx_reqA  <= ~gfx_reqA;
+                        end
+                        fetch_budget <= fetch_budget - 6'd1;
+                        tx_f <= tx_f + 3'd1;
+                    end
+                    state <= S_BLIT;
+                end
+            end
+
+            S_BLIT: begin
+                // write pixel blit_n of the row (last-wins; list order relied on)
+                if(pix_val != 4'd0 && blit_x < 9'd336+9'd0+9'd8) begin
+                    wr_x    <= blit_x;
+                    wr_data <= {ly, spr_color, pix_val};
+                    wr_en   <= 1;
+                end
+                blit_x <= (blit_x + 9'd1) & 9'h1FF;
+                if(blit_n == 4'd7) begin
+                    if(tx == width_t) state <= S_NEXT;
+                    else if(tx_f == tx + 3'd1 && fetch_budget == 6'd0) state <= S_NEXT;
+                    else begin
+                        tx     <= tx + 3'd1;
+                        blit_n <= 4'd14;   // that tile's data is in flight
+                        state  <= S_PRIME;
                     end
                 end else begin
-                    // write pixel blit_n of the row (first-write-wins via valid bit read?
-                    // simple overwrite-if-empty needs read-modify-write; approximate with
-                    // last-wins here and rely on list order: acceptable v1)
-                    if(pix_val != 4'd0 && blit_x < 9'd336+9'd0+9'd8) begin
-                        wr_x    <= blit_x;
-                        wr_data <= {ly, spr_color, pix_val};
-                        wr_en   <= 1;
-                    end
-                    blit_x <= (blit_x + 9'd1) & 9'h1FF;
-                    if(blit_n == 4'd7) begin
-                        if(tx == width_t) state <= S_NEXT;
-                        else begin
-                            tx <= tx + 3'd1;
-                            blit_n <= 4'd15;
-                            if(fetch_budget == 0) state <= S_NEXT;
-                        end
-                    end else begin
-                        blit_n <= blit_n + 4'd1;
-                    end
+                    blit_n <= blit_n + 4'd1;
                 end
             end
 

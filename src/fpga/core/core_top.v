@@ -934,14 +934,20 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg        cpu_owner;
     reg [31:0] vg_dataA, vg_dataB;
     reg        cvg_ch;                    // channel served by the in-flight cvg op
-    reg        mg_req_last, mg_done_85;
-    reg [31:0] mg_data;
-    wire       mg_req_s;
-    wire       mo_gfx_req;
-    wire [23:0] mo_gfx_addr;
-synch_3 s_mg(mo_gfx_req, mg_req_s, clk_sdram);
-    wire mg_done_s;
-synch_3 s_mgd(mg_done_85, mg_done_s, clk_sys_7159);
+    // LANE3o: MO gets the same A/B ping-pong as PF - two fetches in flight
+    // across the CDC (the serial channel starved late links: Jake invisible)
+    reg        mgA_req_last, mgA_done_85;
+    reg        mgB_req_last, mgB_done_85;
+    reg [31:0] mg_dataA, mg_dataB;
+    reg        cmg_ch;
+    wire       mgA_req_s, mgB_req_s;
+    wire       mo_gfx_reqA, mo_gfx_reqB;
+    wire [23:0] mo_gfx_addrA, mo_gfx_addrB;
+synch_3 s_mgA(mo_gfx_reqA, mgA_req_s, clk_sdram);
+synch_3 s_mgB(mo_gfx_reqB, mgB_req_s, clk_sdram);
+    wire mgA_done_s, mgB_done_s;
+synch_3 s_mgdA(mgA_done_85, mgA_done_s, clk_sys_7159);
+synch_3 s_mgdB(mgB_done_85, mgB_done_s, clk_sys_7159);
     wire       vg_reqA_s, vg_reqB_s;
     reg        vg_reqA_px, vg_reqB_px;    // pixel-domain request toggles
     reg [23:0] vg_addrA_px, vg_addrB_px;  // stable while request in flight
@@ -1076,8 +1082,11 @@ always @(posedge clk_sdram) begin
             if(vg_reqB_s != vg_reqB_last && cvg_ph==2'd0) begin
                 vg_reqB_last <= vg_reqB_s; vg_dataB <= 32'd0; vg_doneB_85 <= ~vg_doneB_85;
             end
-            if(mg_req_s != mg_req_last && cmg_ph==2'd0) begin
-                mg_req_last <= mg_req_s; mg_data <= 32'd0; mg_done_85 <= ~mg_done_85;
+            if(mgA_req_s != mgA_req_last && cmg_ph==2'd0) begin
+                mgA_req_last <= mgA_req_s; mg_dataA <= 32'd0; mgA_done_85 <= ~mgA_done_85;
+            end
+            if(mgB_req_s != mgB_req_last && cmg_ph==2'd0) begin
+                mgB_req_last <= mgB_req_s; mg_dataB <= 32'd0; mgB_done_85 <= ~mgB_done_85;
             end
         end
         // unified CRAM read-start chain (drain owns cq_n!=0 cycles; reads
@@ -1085,7 +1094,7 @@ always @(posedge clk_sdram) begin
         if(cvg_ph==2'd0 && cmg_ph==2'd0 && cst_ph==2'd0 && cwr_ph==2'd0
            && cq_n==4'd0 && !cram_busy && !cram_read_en && !cram_write_en) begin
             if(!vidkill_sd && (vg_reqA_s != vg_reqA_last || vg_reqB_s != vg_reqB_last)
-               && !(m_mopri_sd && mg_req_s != mg_req_last)) begin
+               && !(m_mopri_sd && (mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last))) begin
                 if(vg_reqA_s != vg_reqA_last) begin
                     vg_reqA_last <= vg_reqA_s;
                     cram_addr    <= vg_addrA_px[22:1] - 22'h88000;
@@ -1097,9 +1106,16 @@ always @(posedge clk_sdram) begin
                 end
                 cram_read_en <= 1'b1;
                 cvg_ph       <= 2'd1;
-            end else if(!vidkill_sd && mg_req_s != mg_req_last) begin
-                mg_req_last  <= mg_req_s;
-                cram_addr    <= mo_gfx_addr[22:1] - 22'h88000;
+            end else if(!vidkill_sd && (mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last)) begin
+                if(mgA_req_s != mgA_req_last) begin
+                    mgA_req_last <= mgA_req_s;
+                    cram_addr    <= mo_gfx_addrA[22:1] - 22'h88000;
+                    cmg_ch       <= 1'b0;
+                end else begin
+                    mgB_req_last <= mgB_req_s;
+                    cram_addr    <= mo_gfx_addrB[22:1] - 22'h88000;
+                    cmg_ch       <= 1'b1;
+                end
                 cram_read_en <= 1'b1;
                 cmg_ph       <= 2'd1;
             end else if(cst_go && !cst_done) begin
@@ -1150,8 +1166,13 @@ always @(posedge clk_sdram) begin
         if(cmg_ph==2'd3) begin
             cram_read_en <= 1'b0;
             if(cram_avail) begin
-                mg_data    <= {cmg_hi, cram_dout};
-                mg_done_85 <= ~mg_done_85;
+                if(cmg_ch) begin
+                    mg_dataB    <= {cmg_hi, cram_dout};
+                    mgB_done_85 <= ~mgB_done_85;
+                end else begin
+                    mg_dataA    <= {cmg_hi, cram_dout};
+                    mgA_done_85 <= ~mgA_done_85;
+                end
                 cmg_ph     <= 2'd0;
             end
         end
@@ -1397,8 +1418,8 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     reg [15:0] cst0_px, cst1_px, cst0_m, cst1_m;
     reg mgreq_d2;
     always @(posedge clk_sys_7159) begin
-        mgreq_d2 <= mo_gfx_req;
-        if(mo_gfx_req != mgreq_d2) mgreq_cnt <= mgreq_cnt + 8'd1;
+        mgreq_d2 <= mo_gfx_reqA;
+        if(mo_gfx_reqA != mgreq_d2) mgreq_cnt <= mgreq_cnt + 8'd1;
         if(mo_valid && mo_pen[3:0] != 4'h0) mopen_cnt <= mopen_cnt + 8'd1;
         cst0_m <= cst_sum0; cst0_px <= cst0_m;
         cst1_m <= cst_sum1; cst1_px <= cst1_m;
@@ -1472,7 +1493,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3040;   // lane 3n MO engine alive - screen shows '40'
+    localparam [15:0] BUILD_ID = 16'h3041;   // lane 3o MO dual-channel - screen shows '41'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1669,10 +1690,14 @@ escape_mob umob (
     .mo_vdata ( mo_vdata ),
     .cfg_vaddr( cfg_vaddr ),
     .cfg_vdata( cfg_vdata ),
-    .gfx_req  ( mo_gfx_req ),
-    .gfx_addr ( mo_gfx_addr ),
-    .gfx_done ( mg_done_s ),
-    .gfx_data ( mg_data ),
+    .gfx_reqA ( mo_gfx_reqA ),
+    .gfx_reqB ( mo_gfx_reqB ),
+    .gfx_addrA( mo_gfx_addrA ),
+    .gfx_addrB( mo_gfx_addrB ),
+    .gfx_doneA( mgA_done_s ),
+    .gfx_doneB( mgB_done_s ),
+    .gfx_dataA( mg_dataA ),
+    .gfx_dataB( mg_dataB ),
     .disp_x   ( visible_x[8:0] ),
     .disp_pen ( mo_pen ),
     .disp_valid( mo_valid_raw )

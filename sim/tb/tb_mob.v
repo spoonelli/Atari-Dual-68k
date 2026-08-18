@@ -14,6 +14,7 @@
 module tb_mob;
     parameter XSCROLL = 123;
     parameter YSCROLL = 253;
+    parameter GFX_LAT = 8;   // pixel-clock cycles per fetch (device-realistic)
 
     reg clk = 0;
     always #69.84 clk = ~clk;           // 7.159MHz pixel clock
@@ -55,23 +56,30 @@ module tb_mob;
     // ---------------- gfx model: real chunky image bytes, ~4-cycle latency
     reg [7:0] gfx [0:(1<<22)-1];        // image bytes 0..0x220000
     initial $readmemh("sim/build/image_bytes.hex", gfx);
-    wire        gfx_req;
-    wire [23:0] gfx_addr;
-    reg         gfx_done = 0;
-    reg  [31:0] gfx_data;
-    reg         req_d = 0;
-    reg  [2:0]  lat = 0;
-    reg  [23:0] addr_l;
+    wire        gfx_reqA, gfx_reqB;
+    wire [23:0] gfx_addrA, gfx_addrB;
+    reg         gfx_doneA = 0, gfx_doneB = 0;
+    reg  [31:0] gfx_dataA, gfx_dataB;
+    reg         reqA_d = 0, reqB_d = 0;
+    reg  [4:0]  latA = 0, latB = 0;
+    reg  [23:0] addrA_l, addrB_l;
     always @(posedge clk) begin
-        if(gfx_req != req_d && lat == 0) begin
-            req_d  <= gfx_req;
-            addr_l <= gfx_addr;
-            lat    <= 3'd4;
-        end else if(lat != 0) begin
-            lat <= lat - 3'd1;
-            if(lat == 3'd1) begin
-                gfx_data <= {gfx[addr_l], gfx[addr_l+1], gfx[addr_l+2], gfx[addr_l+3]};
-                gfx_done <= ~gfx_done;
+        if(gfx_reqA != reqA_d && latA == 0) begin
+            reqA_d <= gfx_reqA; addrA_l <= gfx_addrA; latA <= GFX_LAT[4:0];
+        end else if(latA != 0) begin
+            latA <= latA - 5'd1;
+            if(latA == 5'd1) begin
+                gfx_dataA <= {gfx[addrA_l], gfx[addrA_l+1], gfx[addrA_l+2], gfx[addrA_l+3]};
+                gfx_doneA <= ~gfx_doneA;
+            end
+        end
+        if(gfx_reqB != reqB_d && latB == 0) begin
+            reqB_d <= gfx_reqB; addrB_l <= gfx_addrB; latB <= GFX_LAT[4:0];
+        end else if(latB != 0) begin
+            latB <= latB - 5'd1;
+            if(latB == 5'd1) begin
+                gfx_dataB <= {gfx[addrB_l], gfx[addrB_l+1], gfx[addrB_l+2], gfx[addrB_l+3]};
+                gfx_doneB <= ~gfx_doneB;
             end
         end
     end
@@ -95,10 +103,14 @@ module tb_mob;
         .mo_vdata ( mo_vdata ),
         .cfg_vaddr( cfg_vaddr ),
         .cfg_vdata( cfg_vdata ),
-        .gfx_req  ( gfx_req ),
-        .gfx_addr ( gfx_addr ),
-        .gfx_done ( gfx_done ),
-        .gfx_data ( gfx_data ),
+        .gfx_reqA ( gfx_reqA ),
+        .gfx_reqB ( gfx_reqB ),
+        .gfx_addrA( gfx_addrA ),
+        .gfx_addrB( gfx_addrB ),
+        .gfx_doneA( gfx_doneA ),
+        .gfx_doneB( gfx_doneB ),
+        .gfx_dataA( gfx_dataA ),
+        .gfx_dataB( gfx_dataB ),
         .disp_x   ( visible_x[8:0] ),
         .disp_pen ( disp_pen ),
         .disp_valid( disp_valid )
@@ -124,7 +136,8 @@ module tb_mob;
 
     // ---------------- frame dump
     integer fd, px_seen, reqs;
-    always @(gfx_req) reqs = reqs + 1;
+    always @(gfx_reqA) reqs = reqs + 1;
+    always @(gfx_reqB) reqs = reqs + 1;
     initial begin
         fd = $fopen("sim/build/mob_pixels.txt", "w");
         px_seen = 0; reqs = 0;
