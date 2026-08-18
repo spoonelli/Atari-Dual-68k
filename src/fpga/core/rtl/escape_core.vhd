@@ -191,7 +191,7 @@ architecture rtl of escape_core is
     signal v_sel_rom, v_sel_eeprom, v_sel_unlk, v_sel_ram, v_sel_io, v_sel_wdog,
            v_sel_vctl, v_sel_color, v_sel_pf, v_sel_mo, v_sel_alpha, v_sel_mobc,
            v_sel_slip, v_sel_work, v_sel_pfpal : std_logic;
-    signal e_sel_rom, e_sel_ram : std_logic;
+    signal e_sel_rom, e_sel_ram, e_sel_io : std_logic;
     signal e_unused : std_logic_vector(12 downto 0);
 
     signal extra_release, video_off : std_logic;
@@ -956,10 +956,26 @@ begin
             x"0000" when v_sel_io='1' else
             (others => '0');
 
+    -- LANE3q: the EXTRA CPU's IO reads were never decoded - every read of
+    -- 260000/260010/ADC/SCOM returned 0x0000 (MAME's extra_map maps them
+    -- all). Zeros meant: service lever ON, all buttons PRESSED (active
+    -- low), ADC never done, JSA never ready. The extra's self-test made
+    -- its skip/config decisions on that garbage, posted its handshake with
+    -- no checksum results, and the main CPU painted 'Rom at 000000 error
+    -- U L 0000' and flagged the second processor bad - the suspected
+    -- game-start gate. Serve the extra the same port values as the main.
     e_di <= eshad_q    when e_sel_shad='1' else
             e_rom_hold when e_sel_rom='1' else
             shr_qb   when e_sel_ram='1' else
+            (x"F" & not p1_buttons & "1111111" & not step_btn)
+                     when e_sel_io='1' and e_addr(5 downto 4)="00" else
+            (x"F" & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
+             & svc_n & not vblank_in)
+                     when e_sel_io='1' and e_addr(5 downto 4)="01" else
+            (x"00" & adc_data) when e_sel_io='1' and e_addr(5 downto 4)="10" else
+            (x"00" & jsa_resp) when e_sel_io='1' and e_addr(5 downto 4)="11" else
             (others => '0');
+    e_sel_io <= '1' when e_as_n='0' and e_addr(23 downto 16) = x"26" else '0';
 
     ---------------------------------------------------------------- DTACK
     dtack_gen : process(clk)
