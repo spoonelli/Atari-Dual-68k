@@ -1478,6 +1478,9 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             coincred_fr <= dbg_coin_cred;
         end
     end
+    // LANE4a page-2 forensics fields (see mux comment below)
+    wire [15:0] pg2_f1 = (crash_pc != 16'd0) ? crash_pc : vpc_fr;
+    wire [15:0] pg2_f3 = {dbg_vec[7:0], wdog_rst_cnt};
     reg  [3:0] hex_digit;
     always @(*) begin
         // HUD: PC | WRHI | BOOT(flag.reboots)
@@ -1490,24 +1493,33 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // v61 proved reads churn healthily and coin edges are clean while
         // credits appear - this catches the sub-frame phantom bytes:
         // count ~06 after boot with credits=6 = 6502 greeting leak.
-        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : m_eprobe ? epc_fr[15:12] : m_vprobe ? vpc_fr[15:12] : m_gprobe ? engine_fr[15:12] : respstat_fr[15:12];
-        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : m_eprobe ? epc_fr[11:8]  : m_vprobe ? vpc_fr[11:8]  : m_gprobe ? engine_fr[11:8]  : respstat_fr[11:8];
-        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : m_eprobe ? epc_fr[7:4]   : m_vprobe ? vpc_fr[7:4]   : m_gprobe ? engine_fr[7:4]   : respstat_fr[7:4];
-        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : m_eprobe ? epc_fr[3:0]   : m_vprobe ? vpc_fr[3:0]   : m_gprobe ? engine_fr[3:0]   : respstat_fr[3:0];
+        // LANE4a page 2 = main-CPU FORENSICS: field1 shows the live PC until
+        // the first fault, then locks the faulting address (survives watchdog
+        // resets); field2 = the opcode word the CPU received at the fault;
+        // field3 = {vector offset, watchdog reset count}. MAME truth: real
+        // attract NEVER resets after boot (extra released once at T=11s,
+        // runs forever) - our ~35s reboot loop = a main-CPU death, and this
+        // page names it.
+        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : m_eprobe ? epc_fr[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : respstat_fr[15:12];
+        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : m_eprobe ? epc_fr[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : respstat_fr[11:8];
+        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : m_eprobe ? epc_fr[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : respstat_fr[7:4];
+        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : m_eprobe ? epc_fr[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : respstat_fr[3:0];
         // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
         // corruption is in what the CPUs WRITE (game logic / extra CPU);
         // err climbing = the read path is still lying to us.
-        4'd5:  hex_digit = 4'h0;   4'd6:  hex_digit = 4'h0;
-        4'd7:  hex_digit = 4'h0;   4'd8:  hex_digit = 4'h0;
+        4'd5:  hex_digit = m_vprobe ? crash_data[15:12] : 4'h0;
+        4'd6:  hex_digit = m_vprobe ? crash_data[11:8]  : 4'h0;
+        4'd7:  hex_digit = m_vprobe ? crash_data[7:4]   : 4'h0;
+        4'd8:  hex_digit = m_vprobe ? crash_data[3:0]   : 4'h0;
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? wrhi_fr[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? wrhi_fr[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? wrhi_fr[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? wrhi_fr[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? pg2_f3[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? pg2_f3[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? pg2_f3[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? pg2_f3[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
         4'd15: hex_digit = {2'b00, dbgmode};
         default: hex_digit = 4'h0;
         endcase
@@ -1523,7 +1535,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h304C;   // lane 3z TMS lattice wrap fix - screen shows '4C'
+    localparam [15:0] BUILD_ID = 16'h304D;   // lane 4a L-macro fix + crash forensics page 2 - screen shows '4D'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1922,7 +1934,11 @@ escape_core ecore (
     // MAME eprom: D9 = button 1 fire, D8 = button 2 jump, D11 = button 3 duck)
     // QoL layout: Jump on the left (Y), Fire in the middle (B), Duck on the right (A);
     // X (top, otherwise unused) = all three at once = the in-game BOMB
-    .p1_buttons ( {cont1_key[4]|cont1_key[8], 1'b0, cont1_key[5]|cont1_key[8], cont1_key[7]|cont1_key[8]} ),
+    // LANE4a: cont1_key[8] (L) removed - the v74 macro-test OR made every
+    // L press hit three game buttons at once; since L became the overlay
+    // toggle ('4A') every HUD toggle fed phantom Jump+Fire+Duck into the
+    // game (advanced error screens, joined games mid-attract).
+    .p1_buttons ( {cont1_key[4], 1'b0, cont1_key[5], cont1_key[7]} ),
     .svc_n      ( ~svc_mode_s ),
     .coin1      ( coin1_s ),
     .coin2      ( coin2_s ),
