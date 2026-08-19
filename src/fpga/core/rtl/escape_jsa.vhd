@@ -352,7 +352,6 @@ begin
                                 -- byte was dropped: instant 'done', silent
                                 -- announcer, speech test skipped.
                                 tms_data <= cpu_do;
-                                tms_ws_pulse <= "111111";
                             when "01" =>                            -- /WRP response
                                 resp_latch  <= cpu_do;
                                 resp_full_i <= '1';
@@ -475,6 +474,9 @@ begin
         if rising_edge(clk) then
             if reset_n = '0' then
                 tms_ws_pulse <= (others => '0');
+            elsif cpu_ena = '1' and cpu_rw_n = '0' and sel_w2a = '1'
+                  and a16(2 downto 1) = "00" then
+                tms_ws_pulse <= "111111";        -- 2A00 write: start WS pulse
             elsif tms_ws_pulse /= 0 then
                 tms_ws_pulse <= tms_ws_pulse - 1;
             end if;
