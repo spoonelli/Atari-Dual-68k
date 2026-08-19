@@ -1522,7 +1522,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3049;   // lane 3w TMS power-on reset - screen shows '49'
+    localparam [15:0] BUILD_ID = 16'h304A;   // lane 3x L-toggle + speech round 3 - screen shows '4A'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1854,8 +1854,15 @@ escape_mob umob (
     wire [15:0] dbg_jsa_link, dbg_jsa_pc;
     wire [15:0] dbg_resp_stat, dbg_coin_cred;
     wire        wdog_expired;
-    wire diag_on;
-synch_3 s_diag(cont1_key[8], diag_on, clk_sys_7159);
+    // LANE3x: L1 TOGGLES the debug overlay (was hold-to-show). Starts ON.
+    wire l1_s;
+synch_3 s_diag(cont1_key[8], l1_s, clk_sys_7159);
+    reg  diag_on = 1'b1;
+    reg  l1_d = 1'b0;
+    always @(posedge clk_sys_7159) begin
+        l1_d <= l1_s;
+        if(l1_s & ~l1_d) diag_on <= ~diag_on;
+    end
     wire coin1_s, coin2_s;
 synch_3 s_coin(cont1_key[14], coin1_s, clk_sys_7159);   // Select = coin 1 (JSA)
 synch_3 s_coin2(cont2_key[14], coin2_s, clk_sys_7159);  // P2 Select = coin 2

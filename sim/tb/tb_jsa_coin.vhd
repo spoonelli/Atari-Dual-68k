@@ -167,6 +167,29 @@ begin
         end if;
     end process;
 
+    tmsprobe : process
+        alias xDDIS is << signal .tb_jsa_coin.dut.u_tms.m_DDIS : std_logic >>;
+        alias xSPEN is << signal .tb_jsa_coin.dut.u_tms.m_SPEN : std_logic >>;
+        alias xTALK is << signal .tb_jsa_coin.dut.u_tms.m_TALK : std_logic >>;
+        alias xPTR  is << signal .tb_jsa_coin.dut.u_tms.m_FIFO_ptr : integer range 0 to 128 >>;
+        alias xWSn  is << signal .tb_jsa_coin.dut.u_tms.m_WSn : std_logic >>;
+        alias xRSn  is << signal .tb_jsa_coin.dut.u_tms.m_RSn : std_logic >>;
+    begin
+        wait for 100 us;
+        report "TMSP early: WSn=" & std_logic'image(xWSn) & " RSn=" & std_logic'image(xRSn)
+             & " ptr=" & integer'image(xPTR);
+        wait for 200 us;
+        report "TMSP postrst: WSn=" & std_logic'image(xWSn) & " RSn=" & std_logic'image(xRSn)
+             & " DDIS=" & std_logic'image(xDDIS) & " ptr=" & integer'image(xPTR);
+        for i in 1 to 28 loop
+            wait for 1 ms;
+            report "TMSP t=" & integer'image(i) & "ms DDIS=" & std_logic'image(xDDIS)
+                 & " SPEN=" & std_logic'image(xSPEN) & " TALK=" & std_logic'image(xTALK)
+                 & " ptr=" & integer'image(xPTR);
+        end loop;
+        wait;
+    end process;
+
     check : process
     begin
         wait for 118 ms;
