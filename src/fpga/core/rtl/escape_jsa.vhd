@@ -135,7 +135,18 @@ architecture rtl of escape_jsa is
     signal tms_ws_n, tms_rs_n : std_logic := '0';
     signal tms_squeak : std_logic := '0';
     signal tms_ctr   : unsigned(3 downto 0) := (others => '0');
-    signal tms_ws_pulse : unsigned(5 downto 0) := (others => '0');
+    -- LANE3y: WS handshake FSM (replaces the fixed 64-clk pulse). The chip
+    -- samples WSn only on OSC enables (~1.54us); the old 8.9us low pulse was
+    -- LONGER than the firmware's store spacing, so back-to-back speech bytes
+    -- merged into one WS edge = dropped bytes = the garbled announcer.
+    -- 0 idle | 1 WS low (3 OSC ticks) | 2 WS high re-arm gap (3 OSC ticks);
+    -- rdio D4 reports busy while the FSM is mid-byte so the firmware's
+    -- ready poll self-paces (the real READY line covers this same window).
+    signal tms_ws_st    : unsigned(1 downto 0) := "00";
+    signal tms_ws_tick  : unsigned(1 downto 0) := "00";
+    signal tms_wr_pend  : std_logic := '0';
+    signal tms_pend_dat : std_logic_vector(7 downto 0) := (others => '0');
+    signal tms_ws_rdy   : std_logic := '1';
     signal tms_ws_idle  : std_logic := '1';
     -- LANE3w: power-on/sound-reset chip reset - the core's FIFO reads FULL
     -- until the WS+RS combo initializes it (bench-proven: without it the
@@ -324,7 +335,6 @@ begin
                 if reset_n = '0' then
                     bank <= "00"; wrio_reg <= (others => '0');
                     mix_reg <= (others => '0');
-                    tms_data <= (others => '0');
                     tms_ws_n <= '0'; tms_rs_n <= '0'; tms_squeak <= '0';
                     cmd_latch <= (others => '0'); resp_latch <= (others => '0');
                 end if;
@@ -356,12 +366,10 @@ begin
                             when "00" =>                            -- /VOICE
                                 -- LANE3v: a 2A00 write IS a complete TMS
                                 -- byte transfer (MAME data_w semantics).
-                                -- Latch the byte and auto-pulse WS - the
-                                -- firmware never wiggles the WRIO WS latch
-                                -- per byte, so without this every speech
-                                -- byte was dropped: instant 'done', silent
-                                -- announcer, speech test skipped.
-                                tms_data <= cpu_do;
+                                -- LANE3y: byte capture + WS handshake FSM
+                                -- both live in the ws_pulse process below
+                                -- (single driver for tms_data).
+                                null;
                             when "01" =>                            -- /WRP response
                                 resp_latch  <= cpu_do;
                                 resp_full_i <= '1';
@@ -403,7 +411,9 @@ begin
             -- LANE3u: D4 = the REAL TMS5220 ready (v71's irqctr toggle was a
             -- stand-in; the real readyq transitions as the chip accepts data
             -- - the same behavior the 6502 boot poll expects on hardware)
-            & (not tms_rdy_n)        -- D4 ready (set when chip can accept)
+            -- LANE3y: ready also drops while the WS FSM is mid-byte, so the
+            -- firmware's poll can never outrun the WS edge spacing
+            & ((not tms_rdy_n) and tms_ws_rdy)   -- D4 ready (chip + FSM idle)
             -- D3:2 idle LOW. The schematic doc calls these "+5V", but the
             -- JSA harness wires 0x04 as a third coin input (MAME JSAI port:
             -- Coin 3, IP_ACTIVE_HIGH; measured idle 2804 = 0x50/0x40, D3:2
@@ -476,21 +486,55 @@ begin
     end process;
     tms_en <= '1' when tms_ctr = "1111" else '0';
 
-    -- WS auto-pulse countdown (held low ~64 clk = several OSC enables, so
-    -- the chip's WS edge detector sees a clean write cycle per 2A00 store)
-    -- tms_ws_idle = '1' when no pulse pending
+    -- LANE3y WS handshake FSM: each 2A00 byte gets WS low for 3 OSC enables
+    -- then high for 3 more before the next byte may start; a 1-deep pending
+    -- latch absorbs a racing write. rdio D4 shows busy while non-idle, so
+    -- the firmware's ready poll paces itself (authentic READY semantics).
+    -- tms_ws_idle = '0' only while the FSM holds WS low.
     ws_pulse : process(clk)
     begin
         if rising_edge(clk) then
             if reset_n = '0' then
-                tms_ws_pulse <= (others => '0');
+                tms_data    <= (others => '0');
+                tms_pend_dat<= (others => '0');
+                tms_wr_pend <= '0';
+                tms_ws_st   <= "00";
+                tms_ws_tick <= "00";
             elsif cpu_ena = '1' and cpu_rw_n = '0' and sel_w2a = '1'
                   and a16(2 downto 1) = "00" then
-                tms_ws_pulse <= "111111";        -- 2A00 write: start WS pulse
-            elsif tms_ws_pulse /= 0 then
-                tms_ws_pulse <= tms_ws_pulse - 1;
+                if tms_ws_st = "00" and tms_wr_pend = '0' then
+                    tms_data    <= cpu_do;
+                    tms_ws_st   <= "01";
+                    tms_ws_tick <= "10";
+                else
+                    tms_pend_dat <= cpu_do;
+                    tms_wr_pend  <= '1';
+                end if;
+            elsif tms_en = '1' then
+                case tms_ws_st is
+                    when "01" =>                     -- WS low phase
+                        if tms_ws_tick /= 0 then
+                            tms_ws_tick <= tms_ws_tick - 1;
+                        else
+                            tms_ws_st   <= "10";
+                            tms_ws_tick <= "10";
+                        end if;
+                    when "10" =>                     -- WS high re-arm gap
+                        if tms_ws_tick /= 0 then
+                            tms_ws_tick <= tms_ws_tick - 1;
+                        elsif tms_wr_pend = '1' then
+                            tms_data    <= tms_pend_dat;
+                            tms_wr_pend <= '0';
+                            tms_ws_st   <= "01";
+                            tms_ws_tick <= "10";
+                        else
+                            tms_ws_st <= "00";
+                        end if;
+                    when others => tms_ws_st <= "00";
+                end case;
             end if;
-            if tms_ws_pulse = 0 then tms_ws_idle <= '1'; else tms_ws_idle <= '0'; end if;
+            if tms_ws_st = "01" then tms_ws_idle <= '0'; else tms_ws_idle <= '1'; end if;
+            if tms_ws_st = "00" and tms_wr_pend = '0' then tms_ws_rdy <= '1'; else tms_ws_rdy <= '0'; end if;
             -- chip-reset combo generator: full countdown (~143us, several
             -- OSC enables) after any reset source releases
             if reset_n = '0' or sres_cnt /= 0 then
