@@ -125,6 +125,8 @@ entity escape_core is
         -- targeted probe for the deterministic glyph corruption: alpha word 0x42
         -- (byte addr 0x3F4084, the 'e' of "Testing Ram." printed by ROM 0x342-0x356;
         -- expected word 0x0065). wr = last CPU-written value, rd = last scanout value.
+        dbg_engine    : out std_logic_vector(15 downto 0);   -- actor-table head word
+        dbg_mode      : out std_logic_vector(15 downto 0);   -- {3F7F16, 3F7F23}
         dbg_a84_wr    : out std_logic_vector(15 downto 0);
         dbg_a84_rd    : out std_logic_vector(15 downto 0);
         -- live wedge-locator: last video-CPU instruction-fetch address (low 16,
@@ -265,6 +267,8 @@ architecture rtl of escape_core is
     signal resp_reads : unsigned(7 downto 0) := (others => '0');
     signal resp_last  : std_logic_vector(7 downto 0) := (others => '0');
     signal coin1_d, coin2_d : std_logic := '0';
+    signal actorhead_sn : std_logic_vector(15 downto 0) := (others=>'0');
+    signal mode16_sn, mode23_sn : std_logic_vector(7 downto 0) := (others=>'0');
     signal coin_edges : unsigned(7 downto 0) := (others => '0');
     signal credits_sn : std_logic_vector(7 downto 0) := (others => '0');
     signal wdog_ctr : unsigned(5 downto 0);
@@ -899,8 +903,26 @@ begin
                and v_addr(15 downto 1)&'0' = x"7F54" then
                 credits_sn <= v_do(7 downto 0);
             end if;
+            -- LANE3r engine-state probes (MAME attract study): the actor
+            -- table head word 3F5000 is 0x12xx-patterned when the demo/game
+            -- engine has spawned actors, 0000 on art pages; mode bytes
+            -- 3F7F16 (60 art / 54 demo) and 3F7F23 (18 art / 2a demo).
+            if v_as_n='0' and v_rw_n='0' and v_sel_work='1'
+               and v_addr(15 downto 1)&'0' = x"5000" then
+                actorhead_sn <= v_do;
+            end if;
+            if v_as_n='0' and v_rw_n='0' and v_sel_work='1'
+               and v_addr(15 downto 1)&'0' = x"7F16" and v_uds_n='0' then
+                mode16_sn <= v_do(15 downto 8);
+            end if;
+            if v_as_n='0' and v_rw_n='0' and v_sel_work='1'
+               and v_addr(15 downto 1)&'0' = x"7F22" and v_lds_n='0' then
+                mode23_sn <= v_do(7 downto 0);
+            end if;
         end if;
     end process;
+    dbg_engine <= actorhead_sn;
+    dbg_mode   <= mode16_sn & mode23_sn;
     dbg_resp_stat <= std_logic_vector(resp_reads) & resp_last;
     dbg_coin_cred <= std_logic_vector(coin_edges) & credits_sn;
 
