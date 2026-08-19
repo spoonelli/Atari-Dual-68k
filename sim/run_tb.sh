@@ -19,7 +19,9 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work -w /work "$IMA
   RTL=third_party/Arcade-Atari-system1_MiSTer/rtl
   SIMLIB=\$(find sim/lib -iname '*.vhd' | sort)
   OURS=\$(find src/fpga/core/rtl -iname '*.vhd' 2>/dev/null | sort)
-  FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd)\"
+  # TMS5220.vhd excluded from the submodule tree: our patched copy lives in
+  # src/fpga/core/rtl/ (LANE3z lattice wrap fix) and would collide with it
+  FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' ! -iname 'TMS5220.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd)\"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W $TB >/dev/null
   ghdl -r \$STD --workdir=\$W $TB --ieee-asserts=disable --stop-time=$STOPTIME
