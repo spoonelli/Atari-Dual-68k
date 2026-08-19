@@ -195,13 +195,23 @@ begin
     -- written as integers for offline spectral A/B against device recordings
     audiodump : process
         alias xSAMP is << signal .tb_jsa_coin.dut.u_tms.this_sample : integer range -8192 to 8191 >>;
+        alias xEXC  is << signal .tb_jsa_coin.dut.u_tms.m_excitation_data : integer range -8192 to 8191 >>;
+        alias xNRG  is << signal .tb_jsa_coin.dut.u_tms.m_current_energy : integer range -8192 to 8191 >>;
+        alias xPIT  is << signal .tb_jsa_coin.dut.u_tms.m_current_pitch : integer range -8192 to 8191 >>;
+        alias xPCT  is << signal .tb_jsa_coin.dut.u_tms.m_pitch_count : integer range 0 to 511 >>;
+        alias xOLDP is << signal .tb_jsa_coin.dut.u_tms.m_OLDP : std_logic >>;
         file f : text open write_mode is "sim/build/tms_audio.txt";
         variable l : line;
     begin
         loop
             wait for 20833 ns;   -- 48 kHz
             write(l, integer'image(xSAMP) & " " &
-                     integer'image(to_integer(signed(audio_l))));
+                     integer'image(to_integer(signed(audio_l))) & " " &
+                     integer'image(xEXC) & " " &
+                     integer'image(xNRG) & " " &
+                     integer'image(xPIT) & " " &
+                     integer'image(xPCT) & " " &
+                     std_logic'image(xOLDP));
             writeline(f, l);
         end loop;
     end process;
