@@ -130,6 +130,8 @@ architecture rtl of escape_jsa is
     signal tms_data : std_logic_vector(7 downto 0) := (others => '0');
     signal tms_ws_n, tms_rs_n, tms_squeak : std_logic := '1';
     signal tms_ctr   : unsigned(3 downto 0) := (others => '0');
+    signal tms_ws_pulse : unsigned(5 downto 0) := (others => '0');
+    signal tms_ws_idle  : std_logic := '1';
     signal tms_en    : std_logic;
     signal tms_rdy_n : std_logic;
     signal tms_int_n : std_logic;
@@ -342,7 +344,15 @@ begin
                     if cpu_rw_n = '0' and sel_w2a = '1' then
                         case a16(2 downto 1) is
                             when "00" =>                            -- /VOICE
+                                -- LANE3v: a 2A00 write IS a complete TMS
+                                -- byte transfer (MAME data_w semantics).
+                                -- Latch the byte and auto-pulse WS - the
+                                -- firmware never wiggles the WRIO WS latch
+                                -- per byte, so without this every speech
+                                -- byte was dropped: instant 'done', silent
+                                -- announcer, speech test skipped.
                                 tms_data <= cpu_do;
+                                tms_ws_pulse <= "111111";
                             when "01" =>                            -- /WRP response
                                 resp_latch  <= cpu_do;
                                 resp_full_i <= '1';
@@ -457,11 +467,26 @@ begin
     end process;
     tms_en <= '1' when tms_ctr = "1111" else '0';
 
+    -- WS auto-pulse countdown (held low ~64 clk = several OSC enables, so
+    -- the chip's WS edge detector sees a clean write cycle per 2A00 store)
+    -- tms_ws_idle = '1' when no pulse pending
+    ws_pulse : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n = '0' then
+                tms_ws_pulse <= (others => '0');
+            elsif tms_ws_pulse /= 0 then
+                tms_ws_pulse <= tms_ws_pulse - 1;
+            end if;
+            if tms_ws_pulse = 0 then tms_ws_idle <= '1'; else tms_ws_idle <= '0'; end if;
+        end if;
+    end process;
+
     u_tms : entity work.TMS5220
     port map (
         I_OSC    => clk,
         I_ENA    => tms_en,
-        I_WSn    => tms_ws_n,
+        I_WSn    => tms_ws_n and tms_ws_idle,
         I_RSn    => tms_rs_n,
         I_DATA   => '1',
         I_TEST   => '1',
