@@ -117,14 +117,24 @@ architecture rtl of escape_jsa is
 
     -- control registers
     signal bank      : std_logic_vector(1 downto 0) := "00";   -- WRIO D7:6
+    type t_tmsgain is array (0 to 3) of unsigned(7 downto 0);
+    constant TMS_GAIN : t_tmsgain := (x"00", x"55", x"AA", x"FF");
     signal wrio_reg  : std_logic_vector(7 downto 0) := (others => '0');
     signal mix_reg   : std_logic_vector(7 downto 0) := (others => '0');
     signal timed_int : std_logic := '0';
     signal irqctr    : unsigned(12 downto 0) := (others => '0'); -- /7168 @1.79MHz
 
-    -- TMS5220 stub latches (wiring point; see docs/JSA.md)
+    -- TMS5220 (LANE3u: the real chip - d18c7db's MAME-faithful core from
+    -- the System 1 tree; Speak External mode is exactly what JSA firmware
+    -- uses). Strobes/data ride the same LS273 latch bits as before.
     signal tms_data : std_logic_vector(7 downto 0) := (others => '0');
     signal tms_ws_n, tms_rs_n, tms_squeak : std_logic := '1';
+    signal tms_ctr   : unsigned(3 downto 0) := (others => '0');
+    signal tms_en    : std_logic;
+    signal tms_rdy_n : std_logic;
+    signal tms_int_n : std_logic;
+    signal tms_do    : std_logic_vector(7 downto 0);
+    signal tms_spkr  : signed(13 downto 0);
 
     -- YM2151
     signal ym_rst    : std_logic;
@@ -371,11 +381,10 @@ begin
     rdio <= test_mode                -- D7 self-test (MAME nets 0 in normal play)
             & (not cmd_full_i)       -- D6 /input-buffer-full (0 = command pending)
             & resp_full_i            -- D5 output-buffer-full (active high)
-            -- v71: D4 /SPHRDY must TOGGLE like the real TMS5220 readyq (MAME
-            -- measures 0x50<->0x40). Held constant, the 6502 boot init spins
-            -- forever polling 280C for a transition (sim: 86K polls/4ms at
-            -- $42F4, IRQs still masked) - killing coins, commands, sound.
-            & irqctr(9)              -- ~1.7 kHz idle toggle stand-in
+            -- LANE3u: D4 = the REAL TMS5220 ready (v71's irqctr toggle was a
+            -- stand-in; the real readyq transitions as the chip accepts data
+            -- - the same behavior the 6502 boot poll expects on hardware)
+            & (not tms_rdy_n)        -- D4 ready (set when chip can accept)
             -- D3:2 idle LOW. The schematic doc calls these "+5V", but the
             -- JSA harness wires 0x04 as a third coin input (MAME JSAI port:
             -- Coin 3, IP_ACTIVE_HIGH; measured idle 2804 = 0x50/0x40, D3:2
@@ -433,19 +442,65 @@ begin
               rom_byte   when sel_rom = '1' else
               x"FF";
 
+    ---------------------------------------------------------------- TMS5220
+    -- clock enable: 7.159MHz / (16 - preset); preset 5 (squeak=0) = /11 =
+    -- 650.8kHz, preset 7 (squeak=1) = /9 = 795.4kHz (System 1 14S law)
+    tms_clk : process(clk)
+    begin
+        if rising_edge(clk) then
+            if tms_ctr = "1111" or reset_n = '0' then
+                tms_ctr <= unsigned'("01") & tms_squeak & '1';
+            else
+                tms_ctr <= tms_ctr + 1;
+            end if;
+        end if;
+    end process;
+    tms_en <= '1' when tms_ctr = "1111" else '0';
+
+    u_tms : entity work.TMS5220
+    port map (
+        I_OSC    => clk,
+        I_ENA    => tms_en,
+        I_WSn    => tms_ws_n,
+        I_RSn    => tms_rs_n,
+        I_DATA   => '1',
+        I_TEST   => '1',
+        I_DBUS   => tms_data,
+        O_DBUS   => tms_do,
+        O_RDYn   => tms_rdy_n,
+        O_INTn   => tms_int_n,
+        O_M0     => open, O_M1 => open,
+        O_ADD8   => open, O_ADD4 => open, O_ADD2 => open, O_ADD1 => open,
+        O_ROMCLK => open, O_T11 => open, O_IO => open, O_PRMOUT => open,
+        O_SPKR   => tms_spkr
+    );
+
     ---------------------------------------------------------------- mixer
     -- YM xleft/xright * (0.60 * mixvol/7) in Q8; TMS stub contributes silence.
     -- |coef| <= 154/256 < 1 so the scaled product needs no saturation.
     mixer : process(clk)
-        variable coef : unsigned(7 downto 0);
-        variable pl, pr : signed(24 downto 0);
+        variable coef  : unsigned(7 downto 0);
+        variable tcoef : unsigned(7 downto 0);
+        variable pl, pr, tv : signed(24 downto 0);
+        variable suml, sumr : signed(17 downto 0);
     begin
         if rising_edge(clk) then
             coef := YM_GAIN(to_integer(unsigned(mix_reg(3 downto 1))));
+            -- TMS vol 0-3 -> {0, 85, 170, 255}/256 (vol/3 x route gain 1.0).
+            -- CT1 gating deliberately NOT applied yet (polarity unverified;
+            -- ungated proves the speech engine - revisit after device test).
+            tcoef := TMS_GAIN(to_integer(unsigned(mix_reg(7 downto 6))));
             pl := signed(ym_xl) * signed('0' & coef);
             pr := signed(ym_xr) * signed('0' & coef);
-            audio_l <= std_logic_vector(pl(23 downto 8));
-            audio_r <= std_logic_vector(pr(23 downto 8));
+            tv := (signed(tms_spkr) & "00") * signed('0' & tcoef);
+            suml := resize(pl(23 downto 8), 18) + resize(tv(23 downto 8), 18);
+            sumr := resize(pr(23 downto 8), 18) + resize(tv(23 downto 8), 18);
+            if    suml > 32767  then audio_l <= x"7FFF";
+            elsif suml < -32768 then audio_l <= x"8000";
+            else  audio_l <= std_logic_vector(suml(15 downto 0)); end if;
+            if    sumr > 32767  then audio_r <= x"7FFF";
+            elsif sumr < -32768 then audio_r <= x"8000";
+            else  audio_r <= std_logic_vector(sumr(15 downto 0)); end if;
         end if;
     end process;
 end rtl;
