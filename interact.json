@@ -163,6 +163,33 @@
         "writeonly": true,
         "defaultval": 0,
         "value": 1
+      },
+      {
+        "name": "Swap Stick Axes",
+        "id": 24,
+        "type": "check",
+        "enabled": true,
+        "address": "0xA00000E0",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 1
+      },
+      {
+        "name": "Analog Deadzone",
+        "id": 25,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA00000F0",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 8,
+        "graphical": {
+          "min": 2,
+          "max": 31,
+          "adjust_small": 1,
+          "adjust_large": 4
+        }
       }
     ],
     "messages": []
