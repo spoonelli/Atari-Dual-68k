@@ -1507,17 +1507,20 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? wrhi_fr[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
         4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? wrhi_fr[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
         4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? wrhi_fr[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
+        4'd15: hex_digit = {1'b0, dbgmode};
         default: hex_digit = 4'h0;
         endcase
     end
-    wire hex_slot_on = (slot!=4'd4 && slot!=4'd9 && slot<4'd14);
+    // LANE3t: slot 15 = the DEBUG MODE digit, always shown at the row's
+    // right end so photos are self-labeling (slot 14 stays blank as a gap)
+    wire hex_slot_on = (slot!=4'd4 && slot!=4'd9 && slot!=4'd14 && slot<4'd16);
     wire [3:0] hex_row = hexfont(hex_digit, gy);
     wire hex_px = hex_slot_on && hex_row[2'd3 - gx];
 
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3045;   // lane 3s dock analog prep - screen shows '45'
+    localparam [15:0] BUILD_ID = 16'h3046;   // lane 3t mode designator - screen shows '46'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1530,7 +1533,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire [2:0] ver_gy  = visible_y[2:0] - 3'd4;      // y228..233 -> rows 0..5
     wire [3:0] ver_row = hexfont(ver_digit, ver_gy);
     wire       ver_px  = (vx0[3]==1'b0) && ver_row[2'd3 - vx0[2:1]];
-    wire in_hexrow = (visible_y >= 'd100) && (visible_y < 'd124) && (visible_x >= 'd44) && (visible_x < 'd268);
+    wire in_hexrow = (visible_y >= 'd100) && (visible_y < 'd124) && (visible_x >= 'd44) && (visible_x < 'd300);
 
     // ---------------- playfield pipeline (pixel domain)
     // Prefetch 2 cells ahead: map lookup at phase 0, SDRAM gfx request at phase 3
