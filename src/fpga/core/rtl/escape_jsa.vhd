@@ -132,6 +132,11 @@ architecture rtl of escape_jsa is
     signal tms_ctr   : unsigned(3 downto 0) := (others => '0');
     signal tms_ws_pulse : unsigned(5 downto 0) := (others => '0');
     signal tms_ws_idle  : std_logic := '1';
+    -- LANE3w: power-on/sound-reset chip reset - the core's FIFO reads FULL
+    -- until the WS+RS combo initializes it (bench-proven: without it the
+    -- first command wedges ready busy forever = the frozen mission text).
+    signal tms_rst_cnt  : unsigned(9 downto 0) := (others => '1');
+    signal tms_rst_idle : std_logic := '0';
     signal tms_en    : std_logic;
     signal tms_rdy_n : std_logic;
     signal tms_int_n : std_logic;
@@ -481,6 +486,14 @@ begin
                 tms_ws_pulse <= tms_ws_pulse - 1;
             end if;
             if tms_ws_pulse = 0 then tms_ws_idle <= '1'; else tms_ws_idle <= '0'; end if;
+            -- chip-reset combo generator: full countdown (~143us, several
+            -- OSC enables) after any reset source releases
+            if reset_n = '0' or sres_cnt /= 0 then
+                tms_rst_cnt <= (others => '1');
+            elsif tms_rst_cnt /= 0 then
+                tms_rst_cnt <= tms_rst_cnt - 1;
+            end if;
+            if tms_rst_cnt = 0 then tms_rst_idle <= '1'; else tms_rst_idle <= '0'; end if;
         end if;
     end process;
 
@@ -488,8 +501,8 @@ begin
     port map (
         I_OSC    => clk,
         I_ENA    => tms_en,
-        I_WSn    => tms_ws_n and tms_ws_idle,
-        I_RSn    => tms_rs_n,
+        I_WSn    => tms_ws_n and tms_ws_idle and tms_rst_idle,
+        I_RSn    => tms_rs_n and tms_rst_idle,
         I_DATA   => '1',
         I_TEST   => '1',
         I_DBUS   => tms_data,
