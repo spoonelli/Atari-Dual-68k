@@ -15,6 +15,10 @@ module hall_stick (
     input  wire       right,
     input  wire       inv_x,      // config: invert axes (Interact menu)
     input  wire       inv_y,
+    input  wire       swap_xy,    // config: swap analog axes (dock variance)
+    input  wire [4:0] deadzone,   // config: analog deadzone, counts from center
+    input  wire       has_analog, // documented APF type field says a docked
+                                  // controller (type >= 2) is connected
     input  wire [7:0] joy_x,      // APF analog stick, unsigned, 0x80 center
     input  wire [7:0] joy_y,      //   (0x00 = left/up, 0xFF = right/down)
     output reg  [7:0] adc_x = 8'h80,   // to ADC0809 IN1/IN3 (0x00 = full right)
@@ -28,8 +32,8 @@ reg [7:0] jx_m = 8'h80, jx_s = 8'h80;
 reg [7:0] jy_m = 8'h80, jy_s = 8'h80;
 always @(posedge clk) begin
     pad_m <= {right, left, down, up};  pad_s <= pad_m;
-    jx_m  <= joy_x;                    jx_s  <= jx_m;
-    jy_m  <= joy_y;                    jy_s  <= jy_m;
+    jx_m  <= swap_xy ? joy_y : joy_x;  jx_s  <= jx_m;
+    jy_m  <= swap_xy ? joy_x : joy_y;  jy_s  <= jy_m;
 end
 
 // LANE3p: ANALOG PRESENCE, not just deflection. An undocked Pocket sends
@@ -38,10 +42,14 @@ end
 // held directions in the self-test Control Inputs screen, and a likely
 // gameplay killer). Exact (0,0) means "absent": a real stick pinned to
 // the exact corner momentarily just falls back to the d-pad for a frame.
-wire joy_present = !(jx_s == 8'h00 && jy_s == 8'h00);
+// presence: the documented cont_key[31:28] type field (>=2 = docked pad
+// with possible analog) gated by the exact-zero guard (absent stick data)
+wire joy_present = has_analog && !(jx_s == 8'h00 && jy_s == 8'h00);
+wire [7:0] dz_hi = 8'h80 + {3'b000, deadzone};
+wire [7:0] dz_lo = 8'h80 - {3'b000, deadzone};
 wire joy_live = joy_present &&
-             ( (jx_s > 8'h88) || (jx_s < 8'h78)
-            || (jy_s > 8'h88) || (jy_s < 8'h78) );
+             ( (jx_s > dz_hi) || (jx_s < dz_lo)
+            || (jy_s > dz_hi) || (jy_s < dz_lo) );
 
 // target position: analog stick wins, else d-pad absolutes; menu inverts
 wire [7:0] tgt_x_raw = joy_live ? ~jx_s      // reverse: right = low

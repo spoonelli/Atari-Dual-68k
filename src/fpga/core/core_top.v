@@ -734,6 +734,8 @@ end
     reg [4:0]  vpshift_74   = 5'd16;  // 0xA00000B0: 'World X Align' - pf map lead
     reg        invx_74      = 1'b0;   // 0xA00000C0: 'Invert Stick X'
     reg        invy_74      = 1'b0;   // 0xA00000D0: 'Invert Stick Y'
+    reg        swapxy_74    = 1'b0;   // 0xA00000E0: 'Swap Stick Axes'
+    reg [4:0]  deadzn_74    = 5'd8;   // 0xA00000F0: 'Analog Deadzone'
     reg        pfmap_74     = 1'b0;   // 0xA0000050: 'PF Map Debug' - render each
                                       // playfield cell as a flat color hashed from
                                       // its TILE CODE (no gfx fetch): structured
@@ -755,14 +757,18 @@ always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA00000B0) vpshift_74   <= bridge_wr_data[4:0];
     if(bridge_wr && bridge_addr == 32'hA00000C0) invx_74      <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA00000D0) invy_74      <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA00000E0) swapxy_74    <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA00000F0) deadzn_74    <= bridge_wr_data[4:0];
     if(bridge_wr && bridge_addr == 32'hA0000060) pfprobe_74   <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
     else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
 end
     wire soft_rst_74 = (soft_rst_ctr != 23'd0);   // ~113ms self-clearing pulse
     wire svc_mode_s, soft_rst_s, skip_test_s, wdis_s, tone_s, pfmap_s, pfprobe_s;
-    wire invx_s, invy_s;
-    wire [4:0] vpshift_s;
+    wire invx_s, invy_s, swapxy_s;
+    wire [4:0] vpshift_s, deadzn_s;
+synch_3 #(.WIDTH(5)) s_dzn(deadzn_74, deadzn_s, clk_sys_7159);
+synch_3 s_swx(swapxy_74, swapxy_s, clk_sys_7159);
 synch_3 #(.WIDTH(5)) s_vps(vpshift_74, vpshift_s, clk_sys_7159);
 synch_3 s_invx(invx_74, invx_s, clk_sys_7159);
 synch_3 s_invy(invy_74, invy_s, clk_sys_7159);
@@ -1511,7 +1517,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3044;   // lane 3r engine window - screen shows '44'
+    localparam [15:0] BUILD_ID = 16'h3045;   // lane 3s dock analog prep - screen shows '45'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1868,6 +1874,8 @@ synch_3 s_isoal(cont1_key[10], iso_alpha_off, clk_sys_7159);   // L2: hide alpha
     wire [7:0] adc_p1x, adc_p1y, adc_p2x, adc_p2y;
 hall_stick hall_p1 (
     .inv_x ( invx_s ), .inv_y ( invy_s ),
+    .swap_xy ( swapxy_s ), .deadzone ( deadzn_s ),
+    .has_analog ( cont1_key[31:28] >= 4'd2 ),
     .clk   ( clk_sys_7159 ),
     .up    ( cont1_key[0] ),   .down  ( cont1_key[1] ),
     .left  ( cont1_key[2] ),   .right ( cont1_key[3] ),
@@ -1876,6 +1884,8 @@ hall_stick hall_p1 (
 );
 hall_stick hall_p2 (
     .inv_x ( invx_s ), .inv_y ( invy_s ),
+    .swap_xy ( swapxy_s ), .deadzone ( deadzn_s ),
+    .has_analog ( cont2_key[31:28] >= 4'd2 ),
     .clk   ( clk_sys_7159 ),
     .up    ( cont2_key[0] ),   .down  ( cont2_key[1] ),
     .left  ( cont2_key[2] ),   .right ( cont2_key[3] ),
