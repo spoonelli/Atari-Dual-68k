@@ -8,6 +8,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use std.textio.all;
 
 entity tb_jsa_coin is end tb_jsa_coin;
 
@@ -188,6 +189,21 @@ begin
                  & " ptr=" & integer'image(xPTR);
         end loop;
         wait;
+    end process;
+
+    -- LANE4a: audio dump - chip sample + mixer output at 48kHz-equivalent,
+    -- written as integers for offline spectral A/B against device recordings
+    audiodump : process
+        alias xSAMP is << signal .tb_jsa_coin.dut.u_tms.this_sample : integer range -8192 to 8191 >>;
+        file f : text open write_mode is "sim/build/tms_audio.txt";
+        variable l : line;
+    begin
+        loop
+            wait for 20833 ns;   -- 48 kHz
+            write(l, integer'image(xSAMP) & " " &
+                     integer'image(to_integer(signed(audio_l))));
+            writeline(f, l);
+        end loop;
     end process;
 
     check : process
