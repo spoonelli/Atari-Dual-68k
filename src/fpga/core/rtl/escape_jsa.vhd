@@ -128,7 +128,12 @@ architecture rtl of escape_jsa is
     -- the System 1 tree; Speak External mode is exactly what JSA firmware
     -- uses). Strobes/data ride the same LS273 latch bits as before.
     signal tms_data : std_logic_vector(7 downto 0) := (others => '0');
-    signal tms_ws_n, tms_rs_n, tms_squeak : std_logic := '1';
+    -- LANE3x: LS273s clear at POR on the real board - strobes power up
+    -- ASSERTED (both low = TMS reset held) until the firmware's first WRIO
+    -- write releases them. This is the authentic chip-reset mechanism; the
+    -- timed combo below remains as belt-and-suspenders.
+    signal tms_ws_n, tms_rs_n : std_logic := '0';
+    signal tms_squeak : std_logic := '0';
     signal tms_ctr   : unsigned(3 downto 0) := (others => '0');
     signal tms_ws_pulse : unsigned(5 downto 0) := (others => '0');
     signal tms_ws_idle  : std_logic := '1';
@@ -320,7 +325,7 @@ begin
                     bank <= "00"; wrio_reg <= (others => '0');
                     mix_reg <= (others => '0');
                     tms_data <= (others => '0');
-                    tms_ws_n <= '1'; tms_rs_n <= '1'; tms_squeak <= '0';
+                    tms_ws_n <= '0'; tms_rs_n <= '0'; tms_squeak <= '0';
                     cmd_latch <= (others => '0'); resp_latch <= (others => '0');
                 end if;
             else
