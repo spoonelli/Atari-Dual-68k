@@ -1396,16 +1396,17 @@ end
     wire [2:0] gy   = (visible_y - 'd100) >> 2;      // glyph row
     always @(posedge clk_sys_7159) begin
     end
-    // v54 live button probe: the exact nibble the game scanner reads
-    // v75: R button (bit 9) cycles an on-device debug mode 0-7, shown as
-    // the first digit of the on-screen build ID:
-    //   0 normal | 1 PF map debug | 2 input probe | 3 PF fetch probe
-    //   4 video armor OFF | 5 strict IRQ ack | 6 vidkill | 7 reserved
-    reg [2:0] dbgmode = 3'd0;
+    // LANE3y: R cycles FOUR debug pages, every click meaningful (the old
+    // 0-7 counter had two dead duplicates and put destructive vidkill in
+    // the walk path - it faked a broken floor on the 2026-08-19 video):
+    //   0 JSA (resp/coin+credits) | 1 extra-CPU (PC/mbox)
+    //   2 main-CPU (PC/wr-region) | 3 engine (actor head/mode bytes)
+    // vidkill stays on R2 HOLD only; CRAM sums retired (sim benches cover).
+    reg [1:0] dbgmode = 2'd0;
     reg       rbtn_d  = 1'b0;
     always @(posedge clk_sys_7159) begin
         rbtn_d <= cont1_key[9];
-        if(cont1_key[9] & ~rbtn_d) dbgmode <= dbgmode + 3'd1;
+        if(cont1_key[9] & ~rbtn_d) dbgmode <= dbgmode + 2'd1;
     end
     // LANE3h3: modes 1-5 RETIRED (answered questions - PF map, input probe,
     // fetch probe, MO-kill, MO-priority). The design sits at the routing
@@ -1418,23 +1419,23 @@ end
     // draws the in-game world; when gameplay fails to populate, this names
     // where it is: field1 = extra-CPU PC (frame-latched; frozen = wedged/
     // quiesced, churning = alive), field3 = last mailbox response word.
-    wire m_eprobe  = (dbgmode == 3'd2);
+    wire m_eprobe  = (dbgmode == 2'd1);
     // LANE3m: mode 3 = MAIN-CPU window (field1 = video-CPU PC frame-latched,
     // field3 = last main data-write addr [23:8]) - names where the game
     // state machine sits when the world is drawn but objects never move.
-    wire m_vprobe  = (dbgmode == 3'd3);
+    wire m_vprobe  = (dbgmode == 2'd2);
     // LANE3r: mode 4 = ENGINE window. field1 = actor-table head word 3F5000
     // (MAME truth: 0000 on attract art pages, 0x12xx when the demo/game has
     // spawned actors); field3 = {mode byte 3F7F16, mode byte 3F7F23} (MAME:
     // 60/18 on art pages, 54/2a during demo play).
-    wire m_gprobe  = (dbgmode == 3'd4);
+    wire m_gprobe  = (dbgmode == 2'd3);
     wire m_pfprobe = 1'b0;
     wire m_mopri_px     = 1'b0;
     wire m_mokill       = 1'b0;
     wire m_mopri_sd;
 synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
-    wire m_vidkill_px   = (dbgmode == 3'd6);
-    wire m_moprobe      = (dbgmode == 3'd7);
+    wire m_vidkill_px   = 1'b0;   // LANE3y: cycle slot removed; R2 hold remains
+    wire m_moprobe      = 1'b0;   // LANE3y: CRAM sums retired (muxes prune)
     reg [7:0] mgreq_cnt, mopen_cnt;
     reg [15:0] moprobe_fr;
     reg [15:0] cst0_px, cst1_px, cst0_m, cst1_m;
@@ -1507,7 +1508,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? wrhi_fr[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
         4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? wrhi_fr[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
         4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? wrhi_fr[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
-        4'd15: hex_digit = {1'b0, dbgmode};
+        4'd15: hex_digit = {2'b00, dbgmode};
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1522,14 +1523,14 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h304A;   // lane 3x L-toggle + speech round 3 - screen shows '4A'
+    localparam [15:0] BUILD_ID = 16'h304B;   // lane 3y WS handshake + 4-mode HUD - screen shows '4B'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
     wire [1:0] ver_slot = vx0[5:4];
     reg  [3:0] ver_digit;
     always @(*) case(ver_slot)
-        2'd0: ver_digit = {1'b0, dbgmode};  2'd1: ver_digit = BUILD_ID[15:12];
+        2'd0: ver_digit = {2'b00, dbgmode}; 2'd1: ver_digit = BUILD_ID[15:12];
         2'd2: ver_digit = BUILD_ID[7:4];   default: ver_digit = BUILD_ID[3:0];
     endcase
     wire [2:0] ver_gy  = visible_y[2:0] - 3'd4;      // y228..233 -> rows 0..5
