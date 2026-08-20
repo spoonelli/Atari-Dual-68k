@@ -1478,6 +1478,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // per-frame display latches for fast-changing HUD values
     reg [15:0] epc_fr, mbox_fr, vpc_fr, wrhi_fr, engine_fr, gmode_fr;
     reg [15:0] mcmd_fr;   // LANE4f: last mailbox COMMAND word (16FFE0)
+    reg [15:0] estall_fr; // LANE4l: longest extra bus cycle (clk counts)
     reg        vb_hud_d;
     reg [15:0] jsapc_fr, jsalink_fr;
     reg [15:0] respstat_fr, coincred_fr;
@@ -1489,6 +1490,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             wrhi_fr   <= dbg_wrhi;
             mbox_fr   <= dbg_mbox_resp;
             mcmd_fr   <= dbg_mbox_cmd;
+            estall_fr <= dbg_estall;
             engine_fr <= dbg_engine;
             gmode_fr  <= dbg_mode;
             jsapc_fr  <= dbg_jsa_pc;
@@ -1549,10 +1551,13 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // showed the extra CPU derailed into its 0xB00 march band mid-game;
         // this names the command that sent it); page 2 = fault opcode;
         // page 3 = FRAME COUNTER (LANE4c)
-        4'd5:  hex_digit = m_vprobe ? crash_data[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : 4'h0;
-        4'd6:  hex_digit = m_vprobe ? crash_data[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : 4'h0;
-        4'd7:  hex_digit = m_vprobe ? crash_data[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : 4'h0;
-        4'd8:  hex_digit = m_vprobe ? crash_data[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : 4'h0;
+        // page 0 field2 = LANE4l max extra bus-cycle length: normal cycles
+        // are tiny (< 0x0040); a stuck write shows FFFF = the invisible
+        // freeze mode (bus active, rescue can't see it)
+        4'd5:  hex_digit = m_vprobe ? crash_data[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : estall_fr[15:12];
+        4'd6:  hex_digit = m_vprobe ? crash_data[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : estall_fr[11:8];
+        4'd7:  hex_digit = m_vprobe ? crash_data[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : estall_fr[7:4];
+        4'd8:  hex_digit = m_vprobe ? crash_data[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : estall_fr[3:0];
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
@@ -1579,7 +1584,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3060;   // 60 = 59 (restart fix + mixer) + mo-fair merge - screen shows '60'
+    localparam [15:0] BUILD_ID = 16'h3061;   // lane 4l e-side stall probe (page 0 field2) - screen shows '61'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1906,6 +1911,7 @@ escape_mob umob (
     wire [15:0] dbg_ecrash_pc, dbg_ecrash_data;   // LANE4f e-side first fault
     wire [7:0]  dbg_erestart;                     // LANE4h restart counter
     wire        e_dead;                           // LANE4i freeze rescue
+    wire [15:0] dbg_estall;                       // LANE4l stall probe
     wire [15:0] dbg_vec;
     wire        dbg_fault;
     wire [15:0] dbg_fdata;
@@ -2023,6 +2029,7 @@ escape_core ecore (
     .dbg_ecrash_pc  ( dbg_ecrash_pc ),
     .dbg_erestart   ( dbg_erestart ),
     .e_dead         ( e_dead ),
+    .dbg_estall     ( dbg_estall ),
     .dbg_ecrash_data( dbg_ecrash_data ),
     .dbg_mbox_cmd   ( dbg_mbox_cmd ),
     .dbg_mbox_resp  ( dbg_mbox_resp ),
