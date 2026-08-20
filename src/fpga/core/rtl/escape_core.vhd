@@ -739,7 +739,8 @@ begin
                 if v_as_n='0' and v_rw_n='1' and v_fc="101"
                    and v_addr(23 downto 10)="00000000000000" then
                     vec_i <= "000000" & v_addr(9 downto 0);
-                    if unsigned(v_addr(9 downto 0)) < 96 and vec_seen='0' then
+                    if unsigned(v_addr(9 downto 0)) >= 8
+                       and unsigned(v_addr(9 downto 0)) < 96 and vec_seen='0' then
                         fault_p <= '1'; vec_seen <= '1';  -- once per bus cycle pair
                     end if;
                 elsif v_as_n='1' then
@@ -754,7 +755,12 @@ begin
                 -- one HUD photo, like the main CPU's 0B2C case.
                 if e_as_n='0' and e_rw_n='1' and e_fc="101"
                    and e_addr(23 downto 10)="00000000000000" then
-                    if unsigned(e_addr(9 downto 0)) < 96 and e_vec_seen='0'
+                    -- '55' device lesson: vectors 0-7 are the RESET vector,
+                    -- fetched at every boot-time stop/re-release of the extra
+                    -- CPU - the trap latched stale boot PCs before gameplay.
+                    -- Genuine faults start at bus error 0x08.
+                    if unsigned(e_addr(9 downto 0)) >= 8
+                       and unsigned(e_addr(9 downto 0)) < 96 and e_vec_seen='0'
                        and ecrash_pc_i = x"0000" then
                         ecrash_pc_i   <= epc_i;
                         ecrash_data_i <= e_fdata_i;
