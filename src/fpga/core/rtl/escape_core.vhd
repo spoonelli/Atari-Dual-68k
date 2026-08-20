@@ -288,9 +288,9 @@ architecture rtl of escape_core is
     -- gameplay slowdown (audio at 100% proved the JSA-shadowed CPU keeps
     -- real time). Shadow2: main 0x48000-0x4FFFF (57% of gameplay fetches),
     -- extra 0xF000-0xFFFF. Funded by the EEPROM shrink (16KB -> real 1KB).
-    signal vshad2_q, eshad2_q : std_logic_vector(15 downto 0);
-    signal v_sel_shad1, v_sel_shad2, e_sel_shad1, e_sel_shad2 : std_logic;
-    signal vshad2_we, eshad2_we : std_logic;
+    signal vshad2_q, eshad2_q, vshad3_q : std_logic_vector(15 downto 0);
+    signal v_sel_shad1, v_sel_shad2, v_sel_shad3, e_sel_shad1, e_sel_shad2 : std_logic;
+    signal vshad2_we, eshad2_we, vshad3_we : std_logic;
     -- v63: JSA 6502 BRAM shadow (whole 64KB sound ROM, image 100000-10FFFF).
     -- The 6502 fetched every opcode over the marginal SDRAM path (the 68ks
     -- got shadows in v58, the 6502 never did) - one corrupt fetch derails
@@ -683,7 +683,9 @@ begin
                             and v_addr(23 downto 15) = "000000000" else '0';
     v_sel_shad2 <= '1' when SHAD_EN=1 and v_sel_rom='1'
                             and v_addr(23 downto 15) = "000001001" else '0';
-    v_sel_shad <= v_sel_shad1 or v_sel_shad2;
+    v_sel_shad3 <= '1' when SHAD_EN=1 and v_sel_rom='1'
+                            and v_addr(23 downto 15) = "000001010" else '0';
+    v_sel_shad <= v_sel_shad1 or v_sel_shad2 or v_sel_shad3;
     e_sel_shad1 <= '1' when SHAD_EN=1 and e_sel_rom='1'
                             and e_addr(23 downto 15) = "000000000" else '0';
     e_sel_shad2 <= '1' when SHAD_EN=1 and e_sel_rom='1'
@@ -691,6 +693,7 @@ begin
     e_sel_shad <= e_sel_shad1 or e_sel_shad2;
     vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000000000" else '0';
     vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001001" else '0';
+    vshad3_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001010" else '0';
     eshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000010000" else '0';
     eshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 12) = x"08F" else '0';
     jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
@@ -707,6 +710,10 @@ begin
         port map ( wrclk=>shad_wclk, we=>vshad2_we,
                    waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad2_q );
+    vshad3 : entity work.dpram_dc generic map ( awidth => 14 )
+        port map ( wrclk=>shad_wclk, we=>vshad3_we,
+                   waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad3_q );
     eshad2 : entity work.dpram_dc generic map ( awidth => 11 )
         port map ( wrclk=>shad_wclk, we=>eshad2_we,
                    waddr=>shad_waddr(11 downto 1), wdata=>shad_wdata,
@@ -1183,7 +1190,8 @@ begin
 
     ---------------------------------------------------------------- read muxes
     -- I/O: 260000 P1 (D11-D8), 260010 status+P2, 260020-2E ADC0809, 260030 SCOM
-    v_di <= vshad2_q   when v_sel_shad2='1' else
+    v_di <= vshad3_q   when v_sel_shad3='1' else
+            vshad2_q   when v_sel_shad2='1' else
             vshad_q    when v_sel_shad1='1' else
             v_rom_hold when v_sel_rom='1' else
             shr_qa   when v_sel_ram='1' else

@@ -184,7 +184,10 @@ module escape_mob (
                 link       <= cfg_vdata[9:0];
                 first_link <= cfg_vdata[9:0];
                 ent_count  <= 0;
-                fetch_budget <= 6'd48;
+                // LANE4o: 48 starved dense crowds (whole clusters shredding
+                // while lone sprites render clean) - raise toward the 6-bit
+                // ceiling; the tagged line buffers still bound overruns
+                fetch_budget <= 6'd62;
                 state <= S_E0;
             end
 
