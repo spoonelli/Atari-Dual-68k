@@ -135,6 +135,8 @@ entity escape_core is
         dbg_ecrash_data : out std_logic_vector(15 downto 0);
         -- LANE4h: extra-CPU reset-vector fetch count (restart detector)
         dbg_erestart    : out std_logic_vector(7 downto 0);
+        -- LANE4l: longest bus cycle since last read of this register
+        dbg_estall      : out std_logic_vector(15 downto 0);
         -- LANE4i: extra CPU has executed no bus cycle for ~0.59s post-boot
         -- (the stop #\$2700 die state) - core_top treats it like a watchdog
         -- timeout so a frozen world reboots instead of hanging forever
@@ -260,6 +262,10 @@ architecture rtl of escape_core is
     -- LANE4i freeze rescue: extra-CPU bus-idle detector (STOP state)
     signal e_idle_cnt : unsigned(22 downto 0) := (others=>'0');
     signal e_dead_i   : std_logic := '0';
+    -- LANE4l stall probe: longest extra-CPU bus cycle (clk counts). A cycle
+    -- stuck waiting for dtack (write-path stall) shows as a huge value -
+    -- the freeze mode the idle detector CANNOT see (bus stays active).
+    signal e_cyc_cur, e_cyc_max : unsigned(15 downto 0) := (others=>'0');
     -- JSA sound board link
     signal jsa_rom_addr : std_logic_vector(23 downto 0);
     signal jsa_rom_req : std_logic;
@@ -738,6 +744,26 @@ begin
     dbg_ecrash_data <= ecrash_data_i;
     dbg_erestart    <= std_logic_vector(e_restart_cnt);
     e_dead          <= e_dead_i;
+    dbg_estall      <= std_logic_vector(e_cyc_max);
+
+    -- LANE4l: bus-cycle duration tracker (saturating max)
+    e_stall_watch : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                e_cyc_cur <= (others=>'0'); e_cyc_max <= (others=>'0');
+            elsif e_as_n='0' then
+                if e_cyc_cur /= x"FFFF" then
+                    e_cyc_cur <= e_cyc_cur + 1;
+                end if;
+                if e_cyc_cur > e_cyc_max then
+                    e_cyc_max <= e_cyc_cur;
+                end if;
+            else
+                e_cyc_cur <= (others=>'0');
+            end if;
+        end if;
+    end process;
 
     -- LANE4i: freeze-rescue detector. A live world engine fetches
     -- constantly; STOP produces zero bus cycles (IRQs masked at 2700, so
