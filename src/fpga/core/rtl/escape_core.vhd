@@ -167,7 +167,7 @@ entity escape_core is
         -- - edges ticking with no Select presses = the input line itself
         -- glitches; credits climbing while edges hold = downstream bug.
         dbg_coin_cred : out std_logic_vector(15 downto 0);
-        -- watchdog: game strobes 380000 during self-test; if no strobe for 64
+        -- watchdog: game strobes 2E0000 (MAME eprom.cpp truth); if no strobe for 64
         -- vblanks (~1.07s, authentic recover-by-reboot) this pulses high once
         wdog_expired  : out std_logic
     );
