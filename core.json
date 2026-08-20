@@ -2,7 +2,7 @@
     "core": {
         "magic": "APF_VER_1",
         "metadata": {
-            "platform_ids": ["atari_escape"],
+            "platform_ids": ["eprom"],
             "shortname": "ataridual68k",
             "description": "Atari 'Escape' hardware (dual 68000). Escape from the Planet of the Robot Monsters, Klax (proto), Guts n' Glory (proto).",
             "author": "spoonelli",
