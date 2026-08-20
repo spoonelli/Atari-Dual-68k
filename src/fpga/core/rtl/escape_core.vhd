@@ -132,6 +132,10 @@ entity escape_core is
         dbg_ecrash_data : out std_logic_vector(15 downto 0);
         -- LANE4h: extra-CPU reset-vector fetch count (restart detector)
         dbg_erestart    : out std_logic_vector(7 downto 0);
+        -- LANE4i: extra CPU has executed no bus cycle for ~0.59s post-boot
+        -- (the stop #\$2700 die state) - core_top treats it like a watchdog
+        -- timeout so a frozen world reboots instead of hanging forever
+        e_dead          : out std_logic;
         dbg_a84_wr    : out std_logic_vector(15 downto 0);
         dbg_a84_rd    : out std_logic_vector(15 downto 0);
         -- live wedge-locator: last video-CPU instruction-fetch address (low 16,
@@ -250,6 +254,9 @@ architecture rtl of escape_core is
         := (others=>'0');
     signal e_vec_seen : std_logic := '0';
     signal e_restart_cnt : unsigned(7 downto 0) := (others=>'0');
+    -- LANE4i freeze rescue: extra-CPU bus-idle detector (STOP state)
+    signal e_idle_cnt : unsigned(22 downto 0) := (others=>'0');
+    signal e_dead_i   : std_logic := '0';
     -- JSA sound board link
     signal jsa_rom_addr : std_logic_vector(23 downto 0);
     signal jsa_rom_req : std_logic;
@@ -727,6 +734,32 @@ begin
     dbg_ecrash_pc   <= ecrash_pc_i;
     dbg_ecrash_data <= ecrash_data_i;
     dbg_erestart    <= std_logic_vector(e_restart_cnt);
+    e_dead          <= e_dead_i;
+
+    -- LANE4i: freeze-rescue detector. A live world engine fetches
+    -- constantly; STOP produces zero bus cycles (IRQs masked at 2700, so
+    -- no acks either). Gated on released + boot complete so the boot-time
+    -- quiesce windows cannot trip it.
+    e_dead_watch : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                e_idle_cnt <= (others=>'0'); e_dead_i <= '0';
+            elsif boot_flag = x"01" and extra_release = '1' then
+                if e_as_n = '1' then
+                    if e_idle_cnt(22) = '1' then
+                        e_dead_i <= '1';
+                    else
+                        e_idle_cnt <= e_idle_cnt + 1;
+                    end if;
+                else
+                    e_idle_cnt <= (others=>'0');
+                end if;
+            else
+                e_idle_cnt <= (others=>'0');
+            end if;
+        end if;
+    end process;
 
     -- exception-vector probe + authentic watchdog timeout
     vec_wdog : process(clk)
