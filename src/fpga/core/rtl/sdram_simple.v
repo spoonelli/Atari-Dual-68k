@@ -47,6 +47,14 @@ module sdram_simple (
     reg         dq_oe;
     assign dram_dq = dq_oe ? dq_out : 16'hZZZZ;
 
+    // word1-capture EXPERIMENT (branch only): burst word 1 has been marginal
+    // on posedge capture at the 90deg chip phase since v45 (word 0 solid) -
+    // sample DQ on the NEGEDGE too (half a period = ~14ns earlier) and serve
+    // word 1 from that register. If the prefetch canary runs clean, word-1
+    // timing was a capture-window problem and prefetch/speed comes back.
+    reg  [15:0] dq_neg;
+    always @(negedge clk) dq_neg <= dram_dq;
+
     // address split: {ba[1:0], row[12:0], col[8:0]} from word address [23:0]
     wire [23:0] wr_word = wr_addr[24:1];
     wire [23:0] rd_word = rd_addr[24:1];
@@ -221,7 +229,7 @@ module sdram_simple (
             end
 
             S_DATA1: begin
-                rd_data[15:0] <= dram_dq;                    // data1
+                rd_data[15:0] <= dq_neg;                     // data1 (negedge-captured)
                 rd_ack  <= 1'b1;
                 wait_ctr <= 4'd2;                            // tRP after auto-precharge
                 state <= S_PRECHG;

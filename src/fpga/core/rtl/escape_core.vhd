@@ -427,14 +427,13 @@ begin
                             v_pref_data  <= rom_data(15 downto 0);
                             v_pref_addr  <= std_logic_vector(
                                 unsigned(v_addr(19 downto 1) & '0') + 2);
-                            -- v52: prefetch OFF again - the stable config.
-                            -- Word-1 capture stayed marginal through both the
-                            -- v50 spread and v51 no-AP experiments; word-0-only
-                            -- serving is the configuration proven from boot to
-                            -- mission briefing. Investigation plan for re-enable
-                            -- lives in the project notes (swap-order experiment,
-                            -- negedge DQ capture).
-                            v_pref_valid <= '0';
+                            -- word1-capture branch: prefetch RE-ENABLED as the
+                            -- canary for the negedge data1 capture in
+                            -- sdram_simple. v15 guard kept: burst serves col,
+                            -- col|1, so the prefetch is only valid when the
+                            -- fetched word was EVEN (odd fetch returns the same
+                            -- word twice).
+                            v_pref_valid <= not v_addr(1);
                             v_last_data  <= rom_data(31 downto 16);   -- cache this word
                             v_last_addr  <= v_addr(19 downto 1) & '0';
                             v_last_valid <= '1';
@@ -454,8 +453,8 @@ begin
                             e_pref_data  <= rom_data(15 downto 0);
                             e_pref_addr  <= std_logic_vector(
                                 unsigned(e_addr(19 downto 1) & '0') + 2);
-                            -- v52: off, same as the video CPU path
-                            e_pref_valid <= '0';
+                            -- word1-capture branch: canary on (even-word guard)
+                            e_pref_valid <= not e_addr(1);
                             e_last_data  <= rom_data(31 downto 16);
                             e_last_addr  <= e_addr(19 downto 1) & '0';
                             e_last_valid <= '1';
