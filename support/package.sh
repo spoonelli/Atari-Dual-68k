@@ -17,7 +17,7 @@ OUT="${2:-$REPO/output/AtariDual68k-pocket.zip}"
 case "$OUT" in /*) ;; *) OUT="$PWD/$OUT";; esac
 
 AUTHOR="spoonelli"
-SHORT="Atari Dual 68k"           # must match core.json metadata.shortname
+SHORT="ataridual68k"             # dev identity; release profile will ship spoonelli.eprom
 PLATFORM="atari_escape"          # must match core.json platform_ids[0]
 CORE_DIR="Cores/${AUTHOR}.${SHORT}"
 
