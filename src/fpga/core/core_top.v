@@ -736,6 +736,8 @@ end
     reg        invy_74      = 1'b0;   // 0xA00000D0: 'Invert Stick Y'
     reg        swapxy_74    = 1'b0;   // 0xA00000E0: 'Swap Stick Axes'
     reg [4:0]  deadzn_74    = 5'd8;   // 0xA00000F0: 'Analog Deadzone'
+    reg [2:0]  uvolym_74    = 3'd7;   // 0xA0000100: 'Music Volume' (0=mute,7=unity)
+    reg [2:0]  uvoltms_74   = 3'd7;   // 0xA0000110: 'Speech Volume'
     reg        pfmap_74     = 1'b0;   // 0xA0000050: 'PF Map Debug' - render each
                                       // playfield cell as a flat color hashed from
                                       // its TILE CODE (no gfx fetch): structured
@@ -760,6 +762,8 @@ always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA00000E0) swapxy_74    <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA00000F0) deadzn_74    <= bridge_wr_data[4:0];
     if(bridge_wr && bridge_addr == 32'hA0000060) pfprobe_74   <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000100) uvolym_74    <= bridge_wr_data[2:0];
+    if(bridge_wr && bridge_addr == 32'hA0000110) uvoltms_74   <= bridge_wr_data[2:0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
     else if(soft_rst_ctr != 23'd0)               soft_rst_ctr <= soft_rst_ctr + 23'd1;
 end
@@ -768,6 +772,9 @@ end
     wire invx_s, invy_s, swapxy_s;
     wire [4:0] vpshift_s, deadzn_s;
 synch_3 #(.WIDTH(5)) s_dzn(deadzn_74, deadzn_s, clk_sys_7159);
+    wire [2:0] uvolym_s, uvoltms_s;
+synch_3 #(.WIDTH(3)) s_uvy(uvolym_74, uvolym_s, clk_sys_7159);
+synch_3 #(.WIDTH(3)) s_uvt(uvoltms_74, uvoltms_s, clk_sys_7159);
 synch_3 s_swx(swapxy_74, swapxy_s, clk_sys_7159);
 synch_3 #(.WIDTH(5)) s_vps(vpshift_74, vpshift_s, clk_sys_7159);
 synch_3 s_invx(invx_74, invx_s, clk_sys_7159);
@@ -1564,7 +1571,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3058;   // lane 4i freeze-rescue reset - screen shows '58'
+    localparam [15:0] BUILD_ID = 16'h3059;   // lane 4j EXACT 36xxxx decode (the mid-game restart bug) - screen shows '59'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1971,6 +1978,8 @@ escape_core ecore (
     // toggle ('4A') every HUD toggle fed phantom Jump+Fire+Duck into the
     // game (advanced error screens, joined games mid-attract).
     .p1_buttons ( {cont1_key[4], 1'b0, cont1_key[5], cont1_key[7]} ),
+    .uvol_ym    ( uvolym_s ),
+    .uvol_tms   ( uvoltms_s ),
     .svc_n      ( ~svc_mode_s ),
     .coin1      ( coin1_s ),
     .coin2      ( coin2_s ),

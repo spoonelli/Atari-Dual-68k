@@ -71,6 +71,9 @@ entity escape_core is
         -- so the boot takes its already-passed branch (Interact "Skip Self-Test")
         skip_test  : in  std_logic := '0';
         irq_strict : in  std_logic := '0';   -- v71: JSA timed-IRQ ack strictness
+        -- LANE4k user audio mixer (Interact): 0=mute .. 7=unity
+        uvol_ym    : in  std_logic_vector(2 downto 0) := "111";
+        uvol_tms   : in  std_logic_vector(2 downto 0) := "111";
 
         -- JSA-I audio out (signed 16-bit)
         audio_l    : out std_logic_vector(15 downto 0);
@@ -860,21 +863,35 @@ begin
                 -- (the frozen mode-2 reading). Boot/self-test are IRQ-masked
                 -- which is why the handshake always worked.
                 if e_as_n='0' and e_rw_n='0'
-                   and e_addr(23 downto 16) = x"36" and e_addr(5 downto 4) = "00" then
+                   and e_addr(23 downto 16) = x"36" and e_addr(5 downto 4) = "00"
+                   and e_addr(3 downto 1) = "000" then                 -- LANE4j: exact
                     virq <= '0';                                       -- 360000 ack (extra)
                 end if;
 
                 if v_as_n='0' and v_rw_n='0' and v_sel_vctl='1' then
+                    -- LANE4j: EXACT register widths (MAME eprom.cpp truth).
+                    -- The old 16-byte-wide windows were THE mid-game restart
+                    -- bug: MAME maps the run latch at the single byte 360011;
+                    -- our whole-window decode let game writes to unmapped
+                    -- 360012-1F stop the extra CPU (restart count 16 by
+                    -- mid-game on '58' vs MAME's 2-at-boot; each stray stop =
+                    -- self-test re-run = mid-game slow draws; one raced
+                    -- handshake = THE FREEZE).
                     case v_addr(5 downto 4) is
-                        when "00"   => virq <= '0';                    -- 360000 vblank ack
-                        when "01"   => extra_release <= v_do(0);       -- 360010 latch
-                                       -- count soft reboots: release latch cleared
-                                       -- while set = boot code re-ran (0x6CC)
-                                       if extra_release='1' and v_do(0)='0' then
-                                           reboot_cnt <= reboot_cnt + 1;
-                                       end if;
-                                       intensity     <= v_do(4 downto 1);
-                                       video_off     <= v_do(5);
+                        when "00"   =>                                 -- 360000-01 only
+                            if v_addr(3 downto 1)="000" then
+                                virq <= '0';                           -- vblank ack
+                            end if;
+                        when "01"   =>                                 -- 360011 byte only
+                            if v_addr(3 downto 1)="000" and v_lds_n='0' then
+                                extra_release <= v_do(0);
+                                -- count soft reboots: release cleared while set
+                                if extra_release='1' and v_do(0)='0' then
+                                    reboot_cnt <= reboot_cnt + 1;
+                                end if;
+                                intensity     <= v_do(4 downto 1);
+                                video_off     <= v_do(5);
+                            end if;
                         when "10"   => null;                           -- 360020: sound reset (pulse below)
                         when others => null;                           -- 360030: sound cmd (latched below)
                     end case;
@@ -949,12 +966,16 @@ begin
     ---------------------------------------------------------------- JSA-I sound board
     -- link strobes: level-per-bus-cycle is safe (data stable across the cycle;
     -- escape_jsa's full/NMI logic is edge-derived internally)
+    -- LANE4j: exact widths here too (MAME: 360031 byte, 360020-21, 260031 byte)
     snd_cmd_we  <= '1' when v_as_n='0' and v_rw_n='0' and v_sel_vctl='1'
-                            and v_addr(5 downto 4)="11" else '0';
+                            and v_addr(5 downto 4)="11"
+                            and v_addr(3 downto 1)="000" and v_lds_n='0' else '0';
     snd_res_p   <= '1' when v_as_n='0' and v_rw_n='0' and v_sel_vctl='1'
-                            and v_addr(5 downto 4)="10" else '0';
+                            and v_addr(5 downto 4)="10"
+                            and v_addr(3 downto 1)="000" else '0';
     snd_resp_rd <= '1' when v_as_n='0' and v_rw_n='1' and v_sel_io='1'
-                            and v_addr(5 downto 4)="11" else '0';
+                            and v_addr(5 downto 4)="11"
+                            and v_addr(3 downto 1)="000" and v_lds_n='0' else '0';
 
     jsa : entity work.escape_jsa
         generic map ( YM_ENABLE => (YM_ENABLE = 1) )
@@ -967,6 +988,7 @@ begin
                    snd_irq=>jsa_snd_irq,
                    coin1=>coin1, coin2=>coin2, test_mode=>not svc_n,
                    irq_strict=>irq_strict,
+                   uvol_ym=>uvol_ym, uvol_tms=>uvol_tms,
                    audio_l=>audio_l, audio_r=>audio_r,
                    dbg_cpu_addr=>jsa_cpu_addr, dbg_cpu_sync=>open );
 
