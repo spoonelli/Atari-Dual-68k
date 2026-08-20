@@ -229,7 +229,11 @@ module sdram_simple (
             end
 
             S_DATA1: begin
-                rd_data[15:0] <= dq_neg;                     // data1 (negedge-captured)
+                // 51 verdict: negedge (-14ns) capture REFUTED on device (extra
+                // CPU checksum died = word1 worse). Back to posedge; this round
+                // moves the CHIP phase 90->45deg instead (data launches earlier,
+                // word1 gains setup at the normal capture point).
+                rd_data[15:0] <= dram_dq;                    // data1
                 rd_ack  <= 1'b1;
                 wait_ctr <= 4'd2;                            // tRP after auto-precharge
                 state <= S_PRECHG;
