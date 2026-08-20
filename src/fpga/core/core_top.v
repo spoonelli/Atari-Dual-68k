@@ -923,6 +923,7 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg  [8:0]  cst_i = 0;
     reg  [15:0] cst_sum0 = 0, cst_sum1 = 0;
     reg         cst_go = 0, cst_done = 0;
+    reg         vb_cst_d = 0;   // LANE4m re-arm edge
 
     // ---------------- escape_core ROM fetch (7.159 domain) -> SDRAM (85.9 domain)
     wire [23:0] core_rom_addr;
@@ -1151,8 +1152,14 @@ always @(posedge clk_sdram) begin
                 cmg_ph       <= 2'd1;
                 vgmg_last_mo <= 1'b1;
             end else if(cst_go && !cst_done) begin
-                cram_addr    <= (cst_i < 9'd256) ? {13'd0, cst_i[8:0]}
-                                                 : (22'h8000 + {14'd0, cst_i[7:0]});
+                // LANE4m CRAM forensics: window A = the confetti STAIRS-sign
+                // tiles (image 0x182E80+ = words 0x39740+), window B = a
+                // known-good robot sprite (code 0x502A = words 0x582A0+).
+                // Sums re-run every 64 frames: STABLE-WRONG sum A = written
+                // wrong at download; CHURNING sum A = read instability.
+                cram_addr    <= (cst_i < 9'd256)
+                                ? (22'h39740 + {13'd0, cst_i})
+                                : (22'h582A0 + {14'd0, cst_i[7:0]});
                 cram_read_en <= 1'b1;
                 cst_ph       <= 2'd1;
             end
@@ -1221,6 +1228,12 @@ always @(posedge clk_sdram) begin
         end
         // trigger once the machine reaches steady state (download over)
         if(chk_state == 4'd10) cst_go <= 1'b1;
+        // LANE4m: continuous re-sum every 64 frames
+        if(cst_done && vblank_w && !vb_cst_d && frame_ctr[5:0] == 6'd0) begin
+            cst_done <= 1'b0; cst_i <= 9'd0;
+            cst_sum0 <= 16'd0; cst_sum1 <= 16'd0;
+        end
+        vb_cst_d <= vblank_w;
         // CPU fetch service. MUST also yield to a PENDING MO request
         // (mg_req_s != mg_req_last), not just an in-flight one: without that
         // check both gates fire on the same edge, one read goes out with the
@@ -1501,7 +1514,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     end
     // LANE4a page-2 forensics fields (see mux comment below)
     wire [15:0] pg2_f1 = (crash_pc != 16'd0) ? crash_pc : vpc_fr;
-    wire [15:0] pg2_f3 = {dbg_vec[7:0], wdog_rst_cnt};
+    // LANE4m: page-2 idle fields become CRAM sums (sign / robot) until a fault
+    wire [15:0] pg2_f2 = (crash_pc != 16'd0) ? crash_data : cst0_px;
+    wire [15:0] pg2_f3 = (crash_pc != 16'd0) ? {dbg_vec[7:0], wdog_rst_cnt} : cst1_px;
+
     // LANE4f page-1 forensics: live extra-CPU PC until its first genuine
     // exception, then LOCK the faulting PC; field2 shows the last mailbox
     // command until a fault, then the opcode word the extra CPU received
@@ -1554,10 +1570,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // page 0 field2 = LANE4l max extra bus-cycle length: normal cycles
         // are tiny (< 0x0040); a stuck write shows FFFF = the invisible
         // freeze mode (bus active, rescue can't see it)
-        4'd5:  hex_digit = m_vprobe ? crash_data[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : estall_fr[15:12];
-        4'd6:  hex_digit = m_vprobe ? crash_data[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : estall_fr[11:8];
-        4'd7:  hex_digit = m_vprobe ? crash_data[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : estall_fr[7:4];
-        4'd8:  hex_digit = m_vprobe ? crash_data[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : estall_fr[3:0];
+        4'd5:  hex_digit = m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : estall_fr[15:12];
+        4'd6:  hex_digit = m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : estall_fr[11:8];
+        4'd7:  hex_digit = m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : estall_fr[7:4];
+        4'd8:  hex_digit = m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : estall_fr[3:0];
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
@@ -1584,7 +1600,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3061;   // lane 4l e-side stall probe (page 0 field2) - screen shows '61'
+    localparam [15:0] BUILD_ID = 16'h3063;   // lane 4m CRAM forensics + speed2 merge - screen shows '63'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
