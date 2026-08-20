@@ -679,33 +679,37 @@ begin
     -- disassembled sits below 0x8000 on both CPUs: vectors, jump table $106,
     -- boot $694-$88A, IRQ6 $134C, dequeue $14A4, start-accept $39EE, input
     -- scan $F7E; extra-CPU reset/march/quiesce ($40586 = offset $586).
+    -- LANE4o2: shadow1s narrowed 32KB -> 16KB to fund vshad3 (fitter hit
+    -- the 308-M10K ceiling). Profile truth: gameplay uses 0x1000-0x2FFF
+    -- (main) and page 0 (extra); all boot/ISR/march code sits below 0x4000
+    -- on both CPUs (v58 hot-address inventory concurs).
     v_sel_shad1 <= '1' when SHAD_EN=1 and v_sel_rom='1'
-                            and v_addr(23 downto 15) = "000000000" else '0';
+                            and v_addr(23 downto 14) = "0000000000" else '0';
     v_sel_shad2 <= '1' when SHAD_EN=1 and v_sel_rom='1'
                             and v_addr(23 downto 15) = "000001001" else '0';
     v_sel_shad3 <= '1' when SHAD_EN=1 and v_sel_rom='1'
                             and v_addr(23 downto 15) = "000001010" else '0';
     v_sel_shad <= v_sel_shad1 or v_sel_shad2 or v_sel_shad3;
     e_sel_shad1 <= '1' when SHAD_EN=1 and e_sel_rom='1'
-                            and e_addr(23 downto 15) = "000000000" else '0';
+                            and e_addr(23 downto 14) = "0000000000" else '0';
     e_sel_shad2 <= '1' when SHAD_EN=1 and e_sel_rom='1'
                             and e_addr(23 downto 12) = x"00F" else '0';
     e_sel_shad <= e_sel_shad1 or e_sel_shad2;
-    vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000000000" else '0';
+    vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000000000" else '0';
     vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001001" else '0';
     vshad3_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001010" else '0';
-    eshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000010000" else '0';
+    eshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000100000" else '0';
     eshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 12) = x"08F" else '0';
     jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
 
-    vshad : entity work.dpram_dc generic map ( awidth => 14 )
+    vshad : entity work.dpram_dc generic map ( awidth => 13 )
         port map ( wrclk=>shad_wclk, we=>vshad_we,
-                   waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
-                   rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad_q );
-    eshad : entity work.dpram_dc generic map ( awidth => 14 )
+                   waddr=>shad_waddr(13 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>v_addr(13 downto 1), q=>vshad_q );
+    eshad : entity work.dpram_dc generic map ( awidth => 13 )
         port map ( wrclk=>shad_wclk, we=>eshad_we,
-                   waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
-                   rdclk=>clk, raddr=>e_addr(14 downto 1), q=>eshad_q );
+                   waddr=>shad_waddr(13 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>e_addr(13 downto 1), q=>eshad_q );
     vshad2 : entity work.dpram_dc generic map ( awidth => 14 )
         port map ( wrclk=>shad_wclk, we=>vshad2_we,
                    waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
