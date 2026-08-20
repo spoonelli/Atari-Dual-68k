@@ -817,8 +817,17 @@ begin
     -- upward mirrors at +8. Conversion runs 64 ADC clocks at 14.318MHz/16 =
     -- 512 core clocks (~71.5 us); 260010 D4 (ADEOC) drops while busy. A start
     -- during a conversion restarts it on the new channel, data reg untouched.
-    adc_rd <= '1' when v_as_n='0' and v_rw_n='1' and v_sel_io='1'
-                       and v_addr(5 downto 4)="10" else '0';
+    -- LANE4e: the ADC start strobe fires on EITHER CPU's read. The gameplay
+    -- engine runs on the EXTRA 68k and polls the stick itself; with a v-side
+    -- -only strobe the extra CPU read frozen adc_data (0x80 from boot) =
+    -- buttons worked but Jake never moved, while the test-mode Control
+    -- Inputs screen (main-CPU polled) showed live directions. On the real
+    -- board the '0809 START/ALE strobes on any bus access - both CPUs share
+    -- the bus through the arbiter.
+    adc_rd <= '1' when (v_as_n='0' and v_rw_n='1' and v_sel_io='1'
+                        and v_addr(5 downto 4)="10")
+                    or (e_as_n='0' and e_rw_n='1' and e_sel_io='1'
+                        and e_addr(5 downto 4)="10") else '0';
 
     adc_model : process(clk)
     begin
@@ -829,7 +838,13 @@ begin
             else
                 adc_rd_d <= adc_rd;
                 if adc_rd='1' and adc_rd_d='0' then          -- once per bus cycle
-                    adc_chan <= v_addr(2 downto 1);
+                    -- channel from whichever CPU is reading (e-side wins a tie)
+                    if e_as_n='0' and e_rw_n='1' and e_sel_io='1'
+                       and e_addr(5 downto 4)="10" then
+                        adc_chan <= e_addr(2 downto 1);
+                    else
+                        adc_chan <= v_addr(2 downto 1);
+                    end if;
                     adc_busy <= to_unsigned(512, adc_busy'length);
                 elsif adc_busy /= 0 then
                     if adc_busy = 1 then                     -- conversion complete
