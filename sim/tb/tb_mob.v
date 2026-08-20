@@ -41,8 +41,8 @@ module tb_mob;
     reg [15:0] momem [0:4095];
     reg [15:0] cfgmem [0:127];
     initial begin
-        $readmemh("sim/build/game_mo.hex", momem);
-        $readmemh("sim/build/game_cfg.hex", cfgmem);
+        $readmemh("sim/work/game_mo.hex", momem);
+        $readmemh("sim/work/game_cfg.hex", cfgmem);
     end
     wire [11:0] mo_vaddr;
     reg  [15:0] mo_vdata;
@@ -55,7 +55,7 @@ module tb_mob;
 
     // ---------------- gfx model: real chunky image bytes, ~4-cycle latency
     reg [7:0] gfx [0:(1<<22)-1];        // image bytes 0..0x220000
-    initial $readmemh("sim/build/image_bytes.hex", gfx);
+    initial $readmemh("sim/work/image_bytes.hex", gfx);
     wire        gfx_reqA, gfx_reqB;
     wire [23:0] gfx_addrA, gfx_addrB;
     reg         gfx_doneA = 0, gfx_doneB = 0;
@@ -119,7 +119,8 @@ module tb_mob;
     // ---------------- debug: what does the engine actually do per line?
     reg dumping = 0;
     integer n_slip, n_entries, n_ymatch, n_fetch, n_wren, n_wren_off;
-    initial begin n_slip=0; n_entries=0; n_ymatch=0; n_fetch=0; n_wren=0; n_wren_off=0; end
+    integer n_pend, n_done, n_blitst; reg pendA_d = 0, doneA_d = 0;
+    initial begin n_slip=0; n_entries=0; n_ymatch=0; n_fetch=0; n_wren=0; n_wren_off=0; n_pend=0; n_done=0; n_blitst=0; end
     reg [3:0] state_d = 0;
     always @(posedge clk) begin
         state_d <= dut.state;
@@ -127,6 +128,13 @@ module tb_mob;
         if(dut.state == 4'd8 && state_d != 4'd8) n_entries = n_entries + 1;    // S_MATCH
         if(dut.state == 4'd10 && state_d != 4'd10 && dut.ymatch) n_ymatch = n_ymatch + 1;
         if(dut.state == 4'd11 && dut.blit_n == 4'd15) n_fetch = n_fetch + 1;
+        if(dut.pendA && !pendA_d) n_pend = n_pend + 1;
+        pendA_d = dut.pendA;
+        if(gfx_doneA != doneA_d) n_done = n_done + 1;
+        if(gfx_doneA != doneA_d && n_done < 25)
+            $display("FETCH addr=%06x data=%08x", addrA_l, {gfx[addrA_l], gfx[addrA_l+1], gfx[addrA_l+2], gfx[addrA_l+3]});
+        doneA_d = gfx_doneA;
+        if(dut.state == 4'd12 && state_d != 4'd12) n_blitst = n_blitst + 1;
         if(dut.wr_en) n_wren = n_wren + 1;
         if(dut.state == 4'd11 && dut.blit_n < 4'd8 && dut.pix_val != 0 && dut.blit_x >= 9'd344)
             n_wren_off = n_wren_off + 1;
@@ -149,6 +157,7 @@ module tb_mob;
         $display("TB_MOB DONE: %0d pixels, %0d gfx reqs", px_seen, reqs);
         $display("DBG slips=%0d entries=%0d ymatch=%0d fetch=%0d wren=%0d offscreen_px=%0d",
                  n_slip, n_entries, n_ymatch, n_fetch, n_wren, n_wren_off);
+        $display("DBG2 done=%0d pend=%0d blitstate=%0d", n_done, n_pend, n_blitst);
         $finish;
     end
     always @(posedge clk) begin
