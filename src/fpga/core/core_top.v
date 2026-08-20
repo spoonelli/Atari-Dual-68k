@@ -1488,7 +1488,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // command until a fault, then the opcode word the extra CPU received
     wire        e_faulted = (dbg_ecrash_pc != 16'd0);
     wire [15:0] pg1_f1 = e_faulted ? dbg_ecrash_pc   : epc_fr;
-    wire [15:0] pg1_f2 = e_faulted ? dbg_ecrash_data : mcmd_fr;
+    // field2 pre-fault: {extra restart count, last mbox cmd low byte} -
+    // boot leaves a small known restart count; +1 at the freeze moment
+    // confirms the mid-game-restart hypothesis in one photo
+    wire [15:0] pg1_f2 = e_faulted ? dbg_ecrash_data : {dbg_erestart, mcmd_fr[7:0]};
     // LANE4c: free-running FRAME COUNTER (vblank edges since APF reset;
     // deliberately NOT cleared by watchdog/core resets so reboot loops can
     // be timed off video frames). Shown as page-3 field2.
@@ -1559,7 +1562,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3056;   // lane 4g fault trap gated past reset vector - screen shows '56'
+    localparam [15:0] BUILD_ID = 16'h3057;   // lane 4h restart counter + boot-armed traps - screen shows '57'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1884,6 +1887,7 @@ escape_mob umob (
     wire [15:0] dbg_a84_wr, dbg_a84_rd;
     wire [15:0] dbg_pc, dbg_wrhi, dbg_engine, dbg_mode;
     wire [15:0] dbg_ecrash_pc, dbg_ecrash_data;   // LANE4f e-side first fault
+    wire [7:0]  dbg_erestart;                     // LANE4h restart counter
     wire [15:0] dbg_vec;
     wire        dbg_fault;
     wire [15:0] dbg_fdata;
@@ -1997,6 +2001,7 @@ escape_core ecore (
     .dbg_e_running  ( dbg_e_running ),
     .dbg_alpha_wr   ( dbg_alpha_wr ),
     .dbg_ecrash_pc  ( dbg_ecrash_pc ),
+    .dbg_erestart   ( dbg_erestart ),
     .dbg_ecrash_data( dbg_ecrash_data ),
     .dbg_mbox_cmd   ( dbg_mbox_cmd ),
     .dbg_mbox_resp  ( dbg_mbox_resp ),

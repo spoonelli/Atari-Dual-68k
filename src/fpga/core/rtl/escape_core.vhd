@@ -130,6 +130,8 @@ entity escape_core is
         -- LANE4f: extra-CPU first-fault latch (0000 until a genuine exception)
         dbg_ecrash_pc   : out std_logic_vector(15 downto 0);
         dbg_ecrash_data : out std_logic_vector(15 downto 0);
+        -- LANE4h: extra-CPU reset-vector fetch count (restart detector)
+        dbg_erestart    : out std_logic_vector(7 downto 0);
         dbg_a84_wr    : out std_logic_vector(15 downto 0);
         dbg_a84_rd    : out std_logic_vector(15 downto 0);
         -- live wedge-locator: last video-CPU instruction-fetch address (low 16,
@@ -247,6 +249,7 @@ architecture rtl of escape_core is
     signal e_fdata_i, ecrash_pc_i, ecrash_data_i : std_logic_vector(15 downto 0)
         := (others=>'0');
     signal e_vec_seen : std_logic := '0';
+    signal e_restart_cnt : unsigned(7 downto 0) := (others=>'0');
     -- JSA sound board link
     signal jsa_rom_addr : std_logic_vector(23 downto 0);
     signal jsa_rom_req : std_logic;
@@ -723,6 +726,7 @@ begin
     dbg_wrhi <= wrhi_i;
     dbg_ecrash_pc   <= ecrash_pc_i;
     dbg_ecrash_data <= ecrash_data_i;
+    dbg_erestart    <= std_logic_vector(e_restart_cnt);
 
     -- exception-vector probe + authentic watchdog timeout
     vec_wdog : process(clk)
@@ -732,36 +736,45 @@ begin
                 vec_i <= (others=>'0'); wdog_ctr <= (others=>'0');
                 wdog_expired_i <= '0'; fault_p <= '0'; vec_seen <= '0';
                 ecrash_pc_i <= (others=>'0'); ecrash_data_i <= (others=>'0');
-                e_vec_seen <= '0';
+                e_vec_seen <= '0'; e_restart_cnt <= (others=>'0');
             else
                 -- vector fetch = supervisor-data read (FC=101) below 0x400
                 fault_p <= '0';
                 if v_as_n='0' and v_rw_n='1' and v_fc="101"
                    and v_addr(23 downto 10)="00000000000000" then
                     vec_i <= "000000" & v_addr(9 downto 0);
+                    -- LANE4h: armed only post-boot (checksum reads this region
+                    -- as data during boot - see e-side comment)
                     if unsigned(v_addr(9 downto 0)) >= 8
-                       and unsigned(v_addr(9 downto 0)) < 96 and vec_seen='0' then
+                       and unsigned(v_addr(9 downto 0)) < 96 and vec_seen='0'
+                       and boot_flag = x"01" then
                         fault_p <= '1'; vec_seen <= '1';  -- once per bus cycle pair
                     end if;
                 elsif v_as_n='1' then
                     vec_seen <= '0';
                 end if;
-                -- LANE4f: EXTRA-CPU first-fault latch. The IMG_4432 freeze
-                -- showed the extra CPU executing a DATA table at its 0xB00
-                -- band = dispatch derail; this captures the PC + the opcode
-                -- word it received at its first genuine exception (vector
-                -- < 0x60: bus/addr/illegal, not autovectors), surviving
-                -- until the next core reset. Silent world-freezes become
-                -- one HUD photo, like the main CPU's 0B2C case.
+                -- LANE4h REWRITE. '56' device lesson: on a 68000 bus, vector
+                -- fetches are indistinguishable from supervisor DATA reads of
+                -- low memory - and the boot ROM CHECKSUM legitimately reads
+                -- 0x008-0x05F as data on both CPUs, so the '4f/'4g trap
+                -- latched checksum noise (the deterministic 0B8A/0044). Two
+                -- fixes: (1) traps ARM only after the tests-done flag is set
+                -- (boot_flag = 01: checksum long finished; runtime code has
+                -- no business data-reading the vector region); (2) a RESTART
+                -- COUNTER on the extra's reset-vector reads (0-7) - the new
+                -- freeze front-runner is the extra RESTARTING mid-game
+                -- (0xB00 churn = its march/checksum re-running, world state
+                -- lost). Boot gives a small known count; an increment at the
+                -- freeze moment confirms the restart in one photo.
                 if e_as_n='0' and e_rw_n='1' and e_fc="101"
                    and e_addr(23 downto 10)="00000000000000" then
-                    -- '55' device lesson: vectors 0-7 are the RESET vector,
-                    -- fetched at every boot-time stop/re-release of the extra
-                    -- CPU - the trap latched stale boot PCs before gameplay.
-                    -- Genuine faults start at bus error 0x08.
-                    if unsigned(e_addr(9 downto 0)) >= 8
-                       and unsigned(e_addr(9 downto 0)) < 96 and e_vec_seen='0'
-                       and ecrash_pc_i = x"0000" then
+                    if unsigned(e_addr(9 downto 0)) < 8 then
+                        if e_vec_seen='0' then
+                            e_restart_cnt <= e_restart_cnt + 1;
+                            e_vec_seen <= '1';
+                        end if;
+                    elsif unsigned(e_addr(9 downto 0)) < 96 and e_vec_seen='0'
+                       and ecrash_pc_i = x"0000" and boot_flag = x"01" then
                         ecrash_pc_i   <= epc_i;
                         ecrash_data_i <= e_fdata_i;
                         e_vec_seen    <= '1';
