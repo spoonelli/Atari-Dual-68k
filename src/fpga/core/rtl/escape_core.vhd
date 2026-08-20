@@ -282,6 +282,15 @@ architecture rtl of escape_core is
     signal vshad_q, eshad_q : std_logic_vector(15 downto 0);
     signal v_sel_shad, e_sel_shad : std_logic;
     signal vshad_we, eshad_we : std_logic;
+    -- LANE4n gameplay shadows: MAME PC profile of demo gameplay showed 85%
+    -- of MAIN-CPU time at 0x40000-0x57FFF (page 0x4E000 alone = 51%) and
+    -- 21% of EXTRA time at 0xF000 - all outside the v58 shadows = the
+    -- gameplay slowdown (audio at 100% proved the JSA-shadowed CPU keeps
+    -- real time). Shadow2: main 0x48000-0x4FFFF (57% of gameplay fetches),
+    -- extra 0xF000-0xFFFF. Funded by the EEPROM shrink (16KB -> real 1KB).
+    signal vshad2_q, eshad2_q : std_logic_vector(15 downto 0);
+    signal v_sel_shad1, v_sel_shad2, e_sel_shad1, e_sel_shad2 : std_logic;
+    signal vshad2_we, eshad2_we : std_logic;
     -- v63: JSA 6502 BRAM shadow (whole 64KB sound ROM, image 100000-10FFFF).
     -- The 6502 fetched every opcode over the marginal SDRAM path (the 68ks
     -- got shadows in v58, the 6502 never did) - one corrupt fetch derails
@@ -658,8 +667,8 @@ begin
                    addr_b=>cfg_vaddr, din_b=>(others=>'0'),
                    we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>cfg_vdata );
     ee_ram    : entity work.spram_bytelane
-        generic map ( awidth=>13, initbyte=>x"FF" )   -- virgin-EEPROM erased state
-        port map ( clk=>clk, addr=>v_addr(13 downto 1), din=>v_do, we=>we_ee,
+        generic map ( awidth=>9, initbyte=>x"FF" )    -- real 2804 = 512 bytes
+        port map ( clk=>clk, addr=>v_addr(9 downto 1), din=>v_do, we=>we_ee,
                    uds_n=>v_uds_n, lds_n=>v_lds_n, q=>ee_q );
 
     -- v58 hot-code shadows: 32K x 16 dpram each; port A = CPU fetch (read),
@@ -670,12 +679,20 @@ begin
     -- disassembled sits below 0x8000 on both CPUs: vectors, jump table $106,
     -- boot $694-$88A, IRQ6 $134C, dequeue $14A4, start-accept $39EE, input
     -- scan $F7E; extra-CPU reset/march/quiesce ($40586 = offset $586).
-    v_sel_shad <= '1' when SHAD_EN=1 and v_sel_rom='1'
+    v_sel_shad1 <= '1' when SHAD_EN=1 and v_sel_rom='1'
                             and v_addr(23 downto 15) = "000000000" else '0';
-    e_sel_shad <= '1' when SHAD_EN=1 and e_sel_rom='1'
+    v_sel_shad2 <= '1' when SHAD_EN=1 and v_sel_rom='1'
+                            and v_addr(23 downto 15) = "000001001" else '0';
+    v_sel_shad <= v_sel_shad1 or v_sel_shad2;
+    e_sel_shad1 <= '1' when SHAD_EN=1 and e_sel_rom='1'
                             and e_addr(23 downto 15) = "000000000" else '0';
-    vshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000000000" else '0';
-    eshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000010000" else '0';
+    e_sel_shad2 <= '1' when SHAD_EN=1 and e_sel_rom='1'
+                            and e_addr(23 downto 12) = x"00F" else '0';
+    e_sel_shad <= e_sel_shad1 or e_sel_shad2;
+    vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000000000" else '0';
+    vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001001" else '0';
+    eshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000010000" else '0';
+    eshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 12) = x"08F" else '0';
     jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
 
     vshad : entity work.dpram_dc generic map ( awidth => 14 )
@@ -686,6 +703,14 @@ begin
         port map ( wrclk=>shad_wclk, we=>eshad_we,
                    waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>e_addr(14 downto 1), q=>eshad_q );
+    vshad2 : entity work.dpram_dc generic map ( awidth => 14 )
+        port map ( wrclk=>shad_wclk, we=>vshad2_we,
+                   waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad2_q );
+    eshad2 : entity work.dpram_dc generic map ( awidth => 11 )
+        port map ( wrclk=>shad_wclk, we=>eshad2_we,
+                   waddr=>shad_waddr(11 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>e_addr(11 downto 1), q=>eshad2_q );
 
     -- v63: JSA shadow serves the whole 64KB sound ROM from BRAM.
     jshad : entity work.dpram_dc generic map ( awidth => 15 )
@@ -1158,7 +1183,8 @@ begin
 
     ---------------------------------------------------------------- read muxes
     -- I/O: 260000 P1 (D11-D8), 260010 status+P2, 260020-2E ADC0809, 260030 SCOM
-    v_di <= vshad_q    when v_sel_shad='1' else
+    v_di <= vshad2_q   when v_sel_shad2='1' else
+            vshad_q    when v_sel_shad1='1' else
             v_rom_hold when v_sel_rom='1' else
             shr_qa   when v_sel_ram='1' else
             pf_q     when v_sel_pf='1' else
@@ -1196,7 +1222,8 @@ begin
     -- no checksum results, and the main CPU painted 'Rom at 000000 error
     -- U L 0000' and flagged the second processor bad - the suspected
     -- game-start gate. Serve the extra the same port values as the main.
-    e_di <= eshad_q    when e_sel_shad='1' else
+    e_di <= eshad2_q   when e_sel_shad2='1' else
+            eshad_q    when e_sel_shad1='1' else
             e_rom_hold when e_sel_rom='1' else
             shr_qb   when e_sel_ram='1' else
             (x"F" & not p1_buttons & "1111111" & not step_btn)
