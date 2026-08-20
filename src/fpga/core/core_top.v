@@ -910,6 +910,7 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg  [1:0]  cwr_ph = 0;
     // video fetch service from CRAM: two words per 32-bit request
     reg  [1:0]  cvg_ph = 0, cmg_ph = 0;
+    reg         vgmg_last_mo = 1'b0;   // mo-fair: round-robin PF/MO state
     reg  [15:0] cvg_hi, cmg_hi;
     reg         cwr_snoop_d = 0;
     wire        cq_bp_ok = (cq_n <= 4'd2);
@@ -1117,8 +1118,13 @@ always @(posedge clk_sdram) begin
         // require cq_n==0 - write vs read starts are exclusive on cq_n)
         if(cvg_ph==2'd0 && cmg_ph==2'd0 && cst_ph==2'd0 && cwr_ph==2'd0
            && cq_n==4'd0 && !cram_busy && !cram_read_en && !cram_write_en) begin
+            // mo-fair branch: ROUND-ROBIN between PF and MO when both pend.
+            // PF always won before; tb_mob latency sweep proved MO starvation
+            // (pixel writes 47490 @lat8 -> 35382 @lat31 = the sprite striping
+            // seen in gameplay). PF tolerates sharing: it prefetches 2-4
+            // cells ahead (prefd slider), MO has hard line deadlines.
             if(!vidkill_sd && (vg_reqA_s != vg_reqA_last || vg_reqB_s != vg_reqB_last)
-               && !(m_mopri_sd && (mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last))) begin
+               && !((mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last) && vgmg_last_mo == 1'b0)) begin
                 if(vg_reqA_s != vg_reqA_last) begin
                     vg_reqA_last <= vg_reqA_s;
                     cram_addr    <= vg_addrA_px[22:1] - 22'h88000;
@@ -1130,6 +1136,7 @@ always @(posedge clk_sdram) begin
                 end
                 cram_read_en <= 1'b1;
                 cvg_ph       <= 2'd1;
+                vgmg_last_mo <= 1'b0;
             end else if(!vidkill_sd && (mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last)) begin
                 if(mgA_req_s != mgA_req_last) begin
                     mgA_req_last <= mgA_req_s;
@@ -1142,6 +1149,7 @@ always @(posedge clk_sdram) begin
                 end
                 cram_read_en <= 1'b1;
                 cmg_ph       <= 2'd1;
+                vgmg_last_mo <= 1'b1;
             end else if(cst_go && !cst_done) begin
                 cram_addr    <= (cst_i < 9'd256) ? {13'd0, cst_i[8:0]}
                                                  : (22'h8000 + {14'd0, cst_i[7:0]});
@@ -1571,7 +1579,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3059;   // lane 4j EXACT 36xxxx decode (the mid-game restart bug) - screen shows '59'
+    localparam [15:0] BUILD_ID = 16'h3060;   // 60 = 59 (restart fix + mixer) + mo-fair merge - screen shows '60'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
