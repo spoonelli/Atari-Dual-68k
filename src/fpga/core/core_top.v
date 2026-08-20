@@ -1297,13 +1297,15 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
     reg [7:0]  wdog_rst_cnt = 8'd0;
     reg        wdog_exp_d   = 1'b0;
     always @(posedge clk_sys_7159) begin
-        wdog_exp_d <= wdog_expired;
+        wdog_exp_d <= wdog_expired | e_dead;
         if(!reset_n) begin
             wdog_rst_ctr <= 23'd0; wdog_rst_cnt <= 8'd0;
         end else begin
             // WDIS: authentic watchdog-disable (debug). If expiry latches
             // while disabled, re-enable takes effect after the next core reset.
-            if(wdog_expired && !wdog_exp_d && !wdis_s) begin
+            // LANE4i: a dead extra CPU (frozen world) reboots the core the
+            // same way a watchdog timeout does - counted in wdog_rst_cnt
+            if((wdog_expired || e_dead) && !wdog_exp_d && !wdis_s) begin
                 wdog_rst_ctr <= 23'd1;
                 wdog_rst_cnt <= wdog_rst_cnt + 8'd1;
             end else if(wdog_rst_ctr != 23'd0)
@@ -1562,7 +1564,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3057;   // lane 4h restart counter + boot-armed traps - screen shows '57'
+    localparam [15:0] BUILD_ID = 16'h3058;   // lane 4i freeze-rescue reset - screen shows '58'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1888,6 +1890,7 @@ escape_mob umob (
     wire [15:0] dbg_pc, dbg_wrhi, dbg_engine, dbg_mode;
     wire [15:0] dbg_ecrash_pc, dbg_ecrash_data;   // LANE4f e-side first fault
     wire [7:0]  dbg_erestart;                     // LANE4h restart counter
+    wire        e_dead;                           // LANE4i freeze rescue
     wire [15:0] dbg_vec;
     wire        dbg_fault;
     wire [15:0] dbg_fdata;
@@ -2002,6 +2005,7 @@ escape_core ecore (
     .dbg_alpha_wr   ( dbg_alpha_wr ),
     .dbg_ecrash_pc  ( dbg_ecrash_pc ),
     .dbg_erestart   ( dbg_erestart ),
+    .e_dead         ( e_dead ),
     .dbg_ecrash_data( dbg_ecrash_data ),
     .dbg_mbox_cmd   ( dbg_mbox_cmd ),
     .dbg_mbox_resp  ( dbg_mbox_resp ),
