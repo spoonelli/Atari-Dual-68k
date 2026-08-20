@@ -127,6 +127,9 @@ entity escape_core is
         -- expected word 0x0065). wr = last CPU-written value, rd = last scanout value.
         dbg_engine    : out std_logic_vector(15 downto 0);   -- actor-table head word
         dbg_mode      : out std_logic_vector(15 downto 0);   -- {3F7F16, 3F7F23}
+        -- LANE4f: extra-CPU first-fault latch (0000 until a genuine exception)
+        dbg_ecrash_pc   : out std_logic_vector(15 downto 0);
+        dbg_ecrash_data : out std_logic_vector(15 downto 0);
         dbg_a84_wr    : out std_logic_vector(15 downto 0);
         dbg_a84_rd    : out std_logic_vector(15 downto 0);
         -- live wedge-locator: last video-CPU instruction-fetch address (low 16,
@@ -240,6 +243,10 @@ architecture rtl of escape_core is
     signal a84_wr_i, a84_rd_i : std_logic_vector(15 downto 0);
     signal pc_i, wrhi_i, epc_i : std_logic_vector(15 downto 0);
     signal vec_i : std_logic_vector(15 downto 0);
+    -- LANE4f: extra-CPU first-fault forensics
+    signal e_fdata_i, ecrash_pc_i, ecrash_data_i : std_logic_vector(15 downto 0)
+        := (others=>'0');
+    signal e_vec_seen : std_logic := '0';
     -- JSA sound board link
     signal jsa_rom_addr : std_logic_vector(23 downto 0);
     signal jsa_rom_req : std_logic;
@@ -693,6 +700,9 @@ begin
             else
                 if e_as_n='0' and e_rw_n='1' and e_fc(1)='1' and e_fc(0)='0' then
                     epc_i <= e_addr(15 downto 0);
+                    if e_dtack_n='0' then                  -- completing: capture data
+                        e_fdata_i <= e_di;
+                    end if;
                 end if;
                 if v_as_n='0' and v_rw_n='1' and v_fc(1)='1' and v_fc(0)='0' then
                     pc_i <= v_addr(15 downto 0);
@@ -711,6 +721,8 @@ begin
     dbg_pc   <= pc_i;
     dbg_epc  <= epc_i;
     dbg_wrhi <= wrhi_i;
+    dbg_ecrash_pc   <= ecrash_pc_i;
+    dbg_ecrash_data <= ecrash_data_i;
 
     -- exception-vector probe + authentic watchdog timeout
     vec_wdog : process(clk)
@@ -719,6 +731,8 @@ begin
             if reset_n='0' then
                 vec_i <= (others=>'0'); wdog_ctr <= (others=>'0');
                 wdog_expired_i <= '0'; fault_p <= '0'; vec_seen <= '0';
+                ecrash_pc_i <= (others=>'0'); ecrash_data_i <= (others=>'0');
+                e_vec_seen <= '0';
             else
                 -- vector fetch = supervisor-data read (FC=101) below 0x400
                 fault_p <= '0';
@@ -730,6 +744,24 @@ begin
                     end if;
                 elsif v_as_n='1' then
                     vec_seen <= '0';
+                end if;
+                -- LANE4f: EXTRA-CPU first-fault latch. The IMG_4432 freeze
+                -- showed the extra CPU executing a DATA table at its 0xB00
+                -- band = dispatch derail; this captures the PC + the opcode
+                -- word it received at its first genuine exception (vector
+                -- < 0x60: bus/addr/illegal, not autovectors), surviving
+                -- until the next core reset. Silent world-freezes become
+                -- one HUD photo, like the main CPU's 0B2C case.
+                if e_as_n='0' and e_rw_n='1' and e_fc="101"
+                   and e_addr(23 downto 10)="00000000000000" then
+                    if unsigned(e_addr(9 downto 0)) < 96 and e_vec_seen='0'
+                       and ecrash_pc_i = x"0000" then
+                        ecrash_pc_i   <= epc_i;
+                        ecrash_data_i <= e_fdata_i;
+                        e_vec_seen    <= '1';
+                    end if;
+                elsif e_as_n='1' then
+                    e_vec_seen <= '0';
                 end if;
                 if v_sel_wdog='1' and v_as_n='0' and v_rw_n='0' then
                     wdog_ctr <= (others=>'0');
