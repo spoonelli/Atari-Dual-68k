@@ -190,6 +190,38 @@
           "adjust_small": 1,
           "adjust_large": 4
         }
+      },
+      {
+        "name": "Music Volume",
+        "id": 26,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA0000100",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
+      },
+      {
+        "name": "Speech Volume",
+        "id": 27,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA0000110",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
       }
     ],
     "messages": []

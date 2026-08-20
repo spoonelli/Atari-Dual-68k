@@ -49,6 +49,9 @@ entity escape_jsa is
         -- of every a(2:1)="11" alias across 2800-29FF - if main-loop code
         -- touches an alias, the coin-scan IRQ is swallowed before it is taken
         irq_strict : in std_logic := '0';
+        -- LANE4k user audio mixer: 0 = mute, 7 = unity (x(n+1)/8)
+        uvol_ym    : in  std_logic_vector(2 downto 0) := "111";
+        uvol_tms   : in  std_logic_vector(2 downto 0) := "111";
 
         -- audio out, signed
         audio_l   : out std_logic_vector(15 downto 0);
@@ -528,10 +531,21 @@ begin
     begin
         if rising_edge(clk) then
             coef := YM_GAIN(to_integer(unsigned(mix_reg(3 downto 1))));
+            -- LANE4k: user volume (Interact slider) - 0 mutes, else x(n+1)/8
+            if uvol_ym = "000" then
+                coef := (others=>'0');
+            else
+                coef := resize(shift_right(coef * (unsigned('0' & uvol_ym) + 1), 3), 8);
+            end if;
             -- TMS vol 0-3 -> {0, 85, 170, 255}/256 (vol/3 x route gain 1.0).
             -- CT1 gating deliberately NOT applied yet (polarity unverified;
             -- ungated proves the speech engine - revisit after device test).
             tcoef := TMS_GAIN(to_integer(unsigned(mix_reg(7 downto 6))));
+            if uvol_tms = "000" then
+                tcoef := (others=>'0');
+            else
+                tcoef := resize(shift_right(tcoef * (unsigned('0' & uvol_tms) + 1), 3), 8);
+            end if;
             pl := signed(ym_xl) * signed('0' & coef);
             pr := signed(ym_xr) * signed('0' & coef);
             tv := (signed(tms_spkr) & "00") * signed('0' & tcoef);
