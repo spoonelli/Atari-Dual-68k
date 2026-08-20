@@ -909,7 +909,8 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg  [3:0]  cq_n = 0;
     reg  [1:0]  cwr_ph = 0;
     // video fetch service from CRAM: two words per 32-bit request
-    reg  [1:0]  cvg_ph = 0, cmg_ph = 0;
+    reg  [1:0]  cvg_ph = 0;
+    reg  [2:0]  cmg_ph = 0;
     reg         vgmg_last_mo = 1'b0;   // mo-fair: round-robin PF/MO state
     reg  [15:0] cvg_hi, cmg_hi;
     reg         cwr_snoop_d = 0;
@@ -1011,7 +1012,7 @@ always @(posedge clk_sdram) begin
             cq_wr <= cq_wr + 3'd2;
         end
         // download-mirror drain (idle slots only)
-        if(cq_n != 4'd0 && cvg_ph==2'd0 && cmg_ph==2'd0 && cst_ph==2'd0
+        if(cq_n != 4'd0 && cvg_ph==2'd0 && cmg_ph==3'd0 && cst_ph==2'd0
            && !cram_busy && !cram_read_en && cwr_ph==2'd0) begin
             cram_addr     <= cq_addr[cq_rd];
             cram_din      <= cq_data[cq_rd];
@@ -1108,16 +1109,16 @@ always @(posedge clk_sdram) begin
             if(vg_reqB_s != vg_reqB_last && cvg_ph==2'd0) begin
                 vg_reqB_last <= vg_reqB_s; vg_dataB <= 32'd0; vg_doneB_85 <= ~vg_doneB_85;
             end
-            if(mgA_req_s != mgA_req_last && cmg_ph==2'd0) begin
+            if(mgA_req_s != mgA_req_last && cmg_ph==3'd0) begin
                 mgA_req_last <= mgA_req_s; mg_dataA <= 32'd0; mgA_done_85 <= ~mgA_done_85;
             end
-            if(mgB_req_s != mgB_req_last && cmg_ph==2'd0) begin
+            if(mgB_req_s != mgB_req_last && cmg_ph==3'd0) begin
                 mgB_req_last <= mgB_req_s; mg_dataB <= 32'd0; mgB_done_85 <= ~mgB_done_85;
             end
         end
         // unified CRAM read-start chain (drain owns cq_n!=0 cycles; reads
         // require cq_n==0 - write vs read starts are exclusive on cq_n)
-        if(cvg_ph==2'd0 && cmg_ph==2'd0 && cst_ph==2'd0 && cwr_ph==2'd0
+        if(cvg_ph==2'd0 && cmg_ph==3'd0 && cst_ph==2'd0 && cwr_ph==2'd0
            && cq_n==4'd0 && !cram_busy && !cram_read_en && !cram_write_en) begin
             // mo-fair branch: ROUND-ROBIN between PF and MO when both pend.
             // PF always won before; tb_mob latency sweep proved MO starvation
@@ -1149,7 +1150,7 @@ always @(posedge clk_sdram) begin
                     cmg_ch       <= 1'b1;
                 end
                 cram_read_en <= 1'b1;
-                cmg_ph       <= 2'd1;
+                cmg_ph       <= 3'd1;
                 vgmg_last_mo <= 1'b1;
             end else if(cst_go && !cst_done) begin
                 // LANE4m CRAM forensics: window A = the confetti STAIRS-sign
@@ -1193,16 +1194,16 @@ always @(posedge clk_sdram) begin
             end
         end
         // MO gfx from CRAM: same two-read shape
-        if(cmg_ph==2'd1) begin
+        if(cmg_ph==3'd1) begin
             cram_read_en <= 1'b0;
-            if(cram_avail) begin cmg_hi <= cram_dout; cmg_ph <= 2'd2; end
+            if(cram_avail) begin cmg_hi <= cram_dout; cmg_ph <= 3'd2; end
         end
-        if(cmg_ph==2'd2 && !cram_busy && !cram_read_en) begin
+        if(cmg_ph==3'd2 && !cram_busy && !cram_read_en) begin
             cram_addr    <= cram_addr | 22'd1;
             cram_read_en <= 1'b1;
-            cmg_ph       <= 2'd3;
+            cmg_ph       <= 3'd3;
         end
-        if(cmg_ph==2'd3) begin
+        if(cmg_ph==3'd3) begin
             cram_read_en <= 1'b0;
             if(cram_avail) begin
                 if(cmg_ch) begin
@@ -1212,8 +1213,30 @@ always @(posedge clk_sdram) begin
                     mg_dataA    <= {cmg_hi, cram_dout};
                     mgA_done_85 <= ~mgA_done_85;
                 end
-                cmg_ph     <= 2'd0;
+                // LANE4p: BACK-TO-BACK serve - chain straight into the other
+                // channel's pending fetch, skipping a full re-arbitration.
+                // Latency sweep on the scene replay: halving fetch service
+                // recovers most dropped sprite lines; issue-ahead makes A/B
+                // pend together, so this is ~2x MO throughput in crowds. PF
+                // keeps its turn via the round-robin on the next idle grant.
+                if(!cmg_ch && (mgB_req_s != mgB_req_last)) begin
+                    mgB_req_last <= mgB_req_s;
+                    cram_addr    <= mo_gfx_addrB[22:1] - 22'h88000;
+                    cmg_ch       <= 1'b1;
+                    cmg_ph       <= 3'd4;
+                end else if(cmg_ch && (mgA_req_s != mgA_req_last)) begin
+                    mgA_req_last <= mgA_req_s;
+                    cram_addr    <= mo_gfx_addrA[22:1] - 22'h88000;
+                    cmg_ch       <= 1'b0;
+                    cmg_ph       <= 3'd4;
+                end else begin
+                    cmg_ph     <= 3'd0;
+                end
             end
+        end
+        if(cmg_ph==3'd4 && !cram_busy && !cram_read_en) begin
+            cram_read_en <= 1'b1;
+            cmg_ph       <= 3'd1;
         end
         // CRAM self-test reader (lowest priority; permanent regression fixture)
         if(cst_ph==2'd1) begin
@@ -1600,7 +1623,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3066;   // lane 4o2 shadow rebalance (16+32+32) - screen shows '66'
+    localparam [15:0] BUILD_ID = 16'h3067;   // lane 4p back-to-back MO fetch serve - screen shows '67'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
