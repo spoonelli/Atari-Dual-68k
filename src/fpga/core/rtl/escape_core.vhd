@@ -233,6 +233,8 @@ architecture rtl of escape_core is
     signal v_last_data, e_last_data : std_logic_vector(15 downto 0);
     signal v_last_addr, e_last_addr : std_logic_vector(19 downto 0);
     signal v_last_valid, e_last_valid : std_logic;
+    -- LANE4d A/B: cache serves gated off (see arbiter comment)
+    constant LW_CACHE_EN : std_logic := '0';
 
     signal alpha_vq : std_logic_vector(15 downto 0);
     signal a84_wr_i, a84_rd_i : std_logic_vector(15 downto 0);
@@ -383,13 +385,22 @@ begin
                             e_last_data  <= e_pref_data;
                             e_last_addr  <= e_pref_addr;
                             e_last_valid <= '1';
-                        -- last-word cache hits (repeat read of same ROM word: no SDRAM txn)
-                        elsif v_rom_pend='1' and v_rom_dtack='0' and v_last_valid='1'
+                        -- LANE4d: last-word cache DISABLED (A/B experiment). '4F'
+                        -- device forensics: crash at 0B2C served 0218 (ROM truth
+                        -- 65F2) with src=2 = THIS cache. A hit requires a repeat
+                        -- fetch, so either the fill raced (tag/data from different
+                        -- transactions) or it faithfully cached an earlier rare
+                        -- SDRAM wrong-word serve - both amplified into a
+                        -- deterministic crash by the replay. Cache off: if loops
+                        -- vanish, the fill race was the liar (fix properly and
+                        -- re-enable); if they persist, the rare SDRAM serve lies
+                        -- and the capture-phase trim branch (45deg=3492ps) is next.
+                        elsif LW_CACHE_EN='1' and v_rom_pend='1' and v_rom_dtack='0' and v_last_valid='1'
                               and (v_addr(19 downto 1) & '0') = v_last_addr then
                             v_rom_hold  <= v_last_data;
                             v_rom_dtack <= '1';
                             v_rom_src   <= "10";           -- last-word cache hit
-                        elsif e_rom_pend='1' and e_rom_dtack='0' and e_last_valid='1'
+                        elsif LW_CACHE_EN='1' and e_rom_pend='1' and e_rom_dtack='0' and e_last_valid='1'
                               and (e_addr(19 downto 1) & '0') = e_last_addr then
                             e_rom_hold  <= e_last_data;
                             e_rom_dtack <= '1';
