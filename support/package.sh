@@ -18,7 +18,7 @@ case "$OUT" in /*) ;; *) OUT="$PWD/$OUT";; esac
 
 AUTHOR="spoonelli"
 SHORT="ataridual68k"             # dev identity; release profile will ship spoonelli.eprom
-PLATFORM="atari_escape"          # must match core.json platform_ids[0]
+PLATFORM="eprom"                 # must match core.json platform_ids[0]
 CORE_DIR="Cores/${AUTHOR}.${SHORT}"
 
 test -f "$RBF" || { echo "!! bitstream not found: $RBF" >&2; exit 1; }
