@@ -53,22 +53,30 @@ module escape_mob (
     // v14. Each written pixel now carries the ly it was built for; the
     // display side shows a pixel only when its tag matches the line that
     // buffer was built for - stale pixels are invisible by construction.
-    reg [16:0] buf0 [0:511];            // {tag[8:0], color[3:0], pix[3:0]}
-    reg [16:0] buf1 [0:511];
+    // LANE4q: tags carry FRAME PARITY. ly repeats every frame, so a
+    // ly-only tag let LAST frame's pixels stay 'valid' wherever this
+    // frame wrote nothing - moving sprites shed trailing ghost fringes
+    // and floor debris (the real MOHLB self-clears on readout instead).
+    reg [17:0] buf0 [0:511];            // {fpar, tag[8:0], color[3:0], pix[3:0]}
+    reg [17:0] buf1 [0:511];
+    reg        fpar = 1'b0;
+    reg        built_fp0 = 1'b0, built_fp1 = 1'b0;
+    always @(posedge clk)
+        if(y_count == 10'd0 && x_count == 10'd0) fpar <= ~fpar;
     reg        build_sel;               // which buffer is being built
     reg [8:0]  built_ly0, built_ly1;    // the ly each buffer was last built for
-    reg [16:0] disp_q0, disp_q1;
+    reg [17:0] disp_q0, disp_q1;
     always @(posedge clk) begin
         disp_q0 <= buf0[disp_x];
         disp_q1 <= buf1[disp_x];
     end
     assign disp_pen   = build_sel ? disp_q0[7:0] : disp_q1[7:0];
-    assign disp_valid = build_sel ? (disp_q0[16:8] == built_ly0)
-                                  : (disp_q1[16:8] == built_ly1);
+    assign disp_valid = build_sel ? (disp_q0[17:8] == {built_fp0, built_ly0})
+                                  : (disp_q1[17:8] == {built_fp1, built_ly1});
 
     // write port
     reg  [8:0]  wr_x;
-    reg  [16:0] wr_data;
+    reg  [17:0] wr_data;
     reg         wr_en;
     always @(posedge clk) begin
         if(wr_en) begin
@@ -160,8 +168,13 @@ module escape_mob (
                 ly <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
                 // tag bookkeeping: the buffer we are about to build will hold
                 // pixels for this ly (stale content mismatches by definition)
-                if(build_sel) built_ly0 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
-                else          built_ly1 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
+                if(build_sel) begin
+                    built_ly0 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
+                    built_fp0 <= fpar;
+                end else begin
+                    built_ly1 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
+                    built_fp1 <= fpar;
+                end
                 wr_en <= 0;
                 // v87: RESYNC the gfx handshakes on restart (see history)
                 gfx_doneA_last <= gfx_doneA;
@@ -287,7 +300,7 @@ module escape_mob (
                 // write pixel blit_n of the row (last-wins; list order relied on)
                 if(pix_val != 4'd0 && blit_x < 9'd336+9'd0+9'd8) begin
                     wr_x    <= blit_x;
-                    wr_data <= {ly, spr_color, pix_val};
+                    wr_data <= {fpar, ly, spr_color, pix_val};
                     wr_en   <= 1;
                 end
                 blit_x <= (blit_x + 9'd1) & 9'h1FF;
