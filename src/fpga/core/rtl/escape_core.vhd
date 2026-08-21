@@ -306,6 +306,7 @@ architecture rtl of escape_core is
     -- real time). Shadow2: main 0x48000-0x4FFFF (57% of gameplay fetches),
     -- extra 0xF000-0xFFFF. Funded by the EEPROM shrink (16KB -> real 1KB).
     signal vshad2_q, eshad2_q, vshad3_q : std_logic_vector(15 downto 0);
+
     signal v_sel_shad1, v_sel_shad2, v_sel_shad3, e_sel_shad1, e_sel_shad2 : std_logic;
     signal vshad2_we, eshad2_we, vshad3_we : std_logic;
     -- v63: JSA 6502 BRAM shadow (whole 64KB sound ROM, image 100000-10FFFF).
@@ -783,11 +784,17 @@ begin
                             and v_addr(23 downto 15) = "000001001" else '0';
     v_sel_shad3 <= '1' when SHAD_EN=1 and v_sel_rom='1'
                             and v_addr(23 downto 15) = "000001010" else '0';
+    -- MOSDRAM-72: MAME miss-profiles (attract incl. demo gameplay) put 77%
+    -- of the extra's SDRAM reads in 0xA000-0xBFFF - eshad3 shadows it.
+    -- (A matching main-CPU 0x46xxx shadow overflowed the 308-M10K ceiling;
+    -- the extra is the starved CPU, so it kept the blocks.)
     v_sel_shad <= v_sel_shad1 or v_sel_shad2 or v_sel_shad3;
     e_sel_shad1 <= '1' when SHAD_EN=1 and e_sel_rom='1'
                             and e_addr(23 downto 14) = "0000000000" else '0';
     e_sel_shad2 <= '1' when SHAD_EN=1 and e_sel_rom='1'
                             and e_addr(23 downto 12) = x"00F" else '0';
+    -- sdram-sched: no eshad3 here - this branch buys speed with the
+    -- synchronizer cut instead of BRAM (the 308-M10K ceiling is spent).
     e_sel_shad <= e_sel_shad1 or e_sel_shad2;
     vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000000000" else '0';
     vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001001" else '0';

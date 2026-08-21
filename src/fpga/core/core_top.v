@@ -939,8 +939,17 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg  [24:0] rd_addr_q;   // per-grant latched read address (v39)
     reg         rd_pre_q;    // v42: armor CPU reads only
     wire        sd_rd_ack;
-synch_3 s_rr(core_rom_req, core_rom_req_s, clk_sdram);
-synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
+    // sdram-sched: 7.159 and 85.909 are same-PLL siblings (12:1) and the
+    // SDC now groups them synchronous, so a single capture FF is a TIMED
+    // path - not a metastability risk. The 3-stage ack-return chain alone
+    // cost ~2 CPU clocks on every SDRAM access; this is the tier-2 fast
+    // path, first stage (scheduled TDM service comes next if this proves).
+    reg core_rom_req_s_q;
+    always @(posedge clk_sdram)    core_rom_req_s_q <= core_rom_req;
+    assign core_rom_req_s = core_rom_req_s_q;
+    reg core_rom_ack_s_q;
+    always @(posedge clk_sys_7159) core_rom_ack_s_q <= core_rom_ack_85;
+    assign core_rom_ack_s = core_rom_ack_s_q;
 
     // SDRAM self-check: after init + full ROM download, read word 0 and compare with
     // the known first ROM word (0x003F = high word of the reset SP). Proves the
@@ -959,6 +968,8 @@ synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
     reg        vg_reqA_last, vg_doneA_85;
     reg        vg_reqB_last, vg_doneB_85;
     reg        cpu_owner;
+    reg        mo_owner = 1'b0;           // MO-SDRAM read in flight
+    reg        mo_sd_ch = 1'b0;           // which MO channel it serves
     reg [31:0] vg_dataA, vg_dataB;
     reg        cvg_ch;                    // channel served by the in-flight cvg op
     // LANE3o: MO gets the same A/B ping-pong as PF - two fetches in flight
@@ -1125,8 +1136,9 @@ always @(posedge clk_sdram) begin
             // (pixel writes 47490 @lat8 -> 35382 @lat31 = the sprite striping
             // seen in gameplay). PF tolerates sharing: it prefetches 2-4
             // cells ahead (prefd slider), MO has hard line deadlines.
-            if(!vidkill_sd && (vg_reqA_s != vg_reqA_last || vg_reqB_s != vg_reqB_last)
-               && !((mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last) && vgmg_last_mo == 1'b0)) begin
+            // MO-SDRAM branch: MO fetches moved to SDRAM (see chk_state 10);
+            // CRAM now serves the playfield alone - no round-robin needed.
+            if(!vidkill_sd && (vg_reqA_s != vg_reqA_last || vg_reqB_s != vg_reqB_last)) begin
                 if(vg_reqA_s != vg_reqA_last) begin
                     vg_reqA_last <= vg_reqA_s;
                     cram_addr    <= vg_addrA_px[22:1] - 22'h88000;
@@ -1139,19 +1151,6 @@ always @(posedge clk_sdram) begin
                 cram_read_en <= 1'b1;
                 cvg_ph       <= 2'd1;
                 vgmg_last_mo <= 1'b0;
-            end else if(!vidkill_sd && (mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last)) begin
-                if(mgA_req_s != mgA_req_last) begin
-                    mgA_req_last <= mgA_req_s;
-                    cram_addr    <= mo_gfx_addrA[22:1] - 22'h88000;
-                    cmg_ch       <= 1'b0;
-                end else begin
-                    mgB_req_last <= mgB_req_s;
-                    cram_addr    <= mo_gfx_addrB[22:1] - 22'h88000;
-                    cmg_ch       <= 1'b1;
-                end
-                cram_read_en <= 1'b1;
-                cmg_ph       <= 3'd1;
-                vgmg_last_mo <= 1'b1;
             end else if(cst_go && !cst_done) begin
                 // LANE4m CRAM forensics: window A = the confetti STAIRS-sign
                 // tiles (image 0x182E80+ = words 0x39740+), window B = a
@@ -1193,51 +1192,8 @@ always @(posedge clk_sdram) begin
                 cvg_ph     <= 2'd0;
             end
         end
-        // MO gfx from CRAM: same two-read shape
-        if(cmg_ph==3'd1) begin
-            cram_read_en <= 1'b0;
-            if(cram_avail) begin cmg_hi <= cram_dout; cmg_ph <= 3'd2; end
-        end
-        if(cmg_ph==3'd2 && !cram_busy && !cram_read_en) begin
-            cram_addr    <= cram_addr | 22'd1;
-            cram_read_en <= 1'b1;
-            cmg_ph       <= 3'd3;
-        end
-        if(cmg_ph==3'd3) begin
-            cram_read_en <= 1'b0;
-            if(cram_avail) begin
-                if(cmg_ch) begin
-                    mg_dataB    <= {cmg_hi, cram_dout};
-                    mgB_done_85 <= ~mgB_done_85;
-                end else begin
-                    mg_dataA    <= {cmg_hi, cram_dout};
-                    mgA_done_85 <= ~mgA_done_85;
-                end
-                // LANE4p: BACK-TO-BACK serve - chain straight into the other
-                // channel's pending fetch, skipping a full re-arbitration.
-                // Latency sweep on the scene replay: halving fetch service
-                // recovers most dropped sprite lines; issue-ahead makes A/B
-                // pend together, so this is ~2x MO throughput in crowds. PF
-                // keeps its turn via the round-robin on the next idle grant.
-                if(!cmg_ch && (mgB_req_s != mgB_req_last)) begin
-                    mgB_req_last <= mgB_req_s;
-                    cram_addr    <= mo_gfx_addrB[22:1] - 22'h88000;
-                    cmg_ch       <= 1'b1;
-                    cmg_ph       <= 3'd4;
-                end else if(cmg_ch && (mgA_req_s != mgA_req_last)) begin
-                    mgA_req_last <= mgA_req_s;
-                    cram_addr    <= mo_gfx_addrA[22:1] - 22'h88000;
-                    cmg_ch       <= 1'b0;
-                    cmg_ph       <= 3'd4;
-                end else begin
-                    cmg_ph     <= 3'd0;
-                end
-            end
-        end
-        if(cmg_ph==3'd4 && !cram_busy && !cram_read_en) begin
-            cram_read_en <= 1'b1;
-            cmg_ph       <= 3'd1;
-        end
+        // MO gfx CRAM FSM removed - MO is served from SDRAM (mo-sdram
+        // branch). cmg_ph is held at 0; CRAM belongs to PF + forensics.
         // CRAM self-test reader (lowest priority; permanent regression fixture)
         if(cst_ph==2'd1) begin
             cram_read_en <= 1'b0;
@@ -1282,6 +1238,40 @@ always @(posedge clk_sdram) begin
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
+        // MO-SDRAM: sprite tile-row fetches served here. The graphics live
+        // in the loaded image (0x120000+) so the request address IS the
+        // SDRAM byte address; one burst-of-2 = the {even,odd} word pair the
+        // CRAM path used to deliver. CPUs always outrank MO: an MO grant
+        // requires no pending/in-flight CPU work, and one MO read (~10 clks
+        // @85.9MHz) is far shorter than a CPU bus cycle, so worst-case CPU
+        // latency grows by well under one 7.16MHz cycle.
+        if(!vidkill_sd && (mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last)
+           && !(core_rom_req_s && !core_rom_ack_85)
+           && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner) begin
+            if(mgA_req_s != mgA_req_last) begin
+                mgA_req_last <= mgA_req_s;
+                rd_addr_q    <= {1'b0, mo_gfx_addrA};
+                mo_sd_ch     <= 1'b0;
+            end else begin
+                mgB_req_last <= mgB_req_s;
+                rd_addr_q    <= {1'b0, mo_gfx_addrB};
+                mo_sd_ch     <= 1'b1;
+            end
+            rd_pre_q  <= 1;                     // same armor as CPU reads
+            sd_rd_req <= 1;
+            mo_owner  <= 1;
+        end
+        if(mo_owner && sd_rd_req && sd_rd_ack) begin
+            sd_rd_req <= 0;
+            mo_owner  <= 0;
+            if(mo_sd_ch) begin
+                mg_dataB    <= sd_rd_data;
+                mgB_done_85 <= ~mgB_done_85;
+            end else begin
+                mg_dataA    <= sd_rd_data;
+                mgA_done_85 <= ~mgA_done_85;
+            end
+        end
         // LANE3i2: the READ-INTEGRITY SCRUBBER is RETIRED. It answered its
         // questions (v23-v29 exoneration arc; final verdict 0100 = full pass,
         // zero errors during LANE3g) and the routing ceiling now blocks the
@@ -1507,12 +1497,6 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             mopen_cnt  <= 8'd0;
         end
     end
-    // v74: user-decoded probe truth: Y+B+A(+X held) = 0x01B0 - so A=4,
-    // B=5, Y=7 are the DOCUMENTED bits after all; the only deviation is
-    // X = bit 8 (not 6). The lone 0x0100 presses were X itself (macro
-    // tests). v73's wholesale shift reverted; macro source moved to [8].
-    wire [3:0] btn_probe = {cont1_key[4]|cont1_key[8], 1'b0,
-                            cont1_key[5]|cont1_key[8], cont1_key[7]|cont1_key[8]};
     // per-frame display latches for fast-changing HUD values
     reg [15:0] epc_fr, mbox_fr, vpc_fr, wrhi_fr, engine_fr, gmode_fr;
     reg [15:0] vcyc_fr, ecyc_fr; // LANE4s: bus cycles/frame per CPU (speed meter)
@@ -1628,7 +1612,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3070;   // lane 4s wild-jump locator + speed meters - screen shows '70'
+    localparam [15:0] BUILD_ID = 16'h3073;   // sdram-sched: phase-aligned CPU<->SDRAM handshake - screen shows '73'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2036,11 +2020,14 @@ escape_core ecore (
     // MAME eprom: D9 = button 1 fire, D8 = button 2 jump, D11 = button 3 duck)
     // QoL layout: Jump on the left (Y), Fire in the middle (B), Duck on the right (A);
     // X (top, otherwise unused) = all three at once = the in-game BOMB
-    // LANE4a: cont1_key[8] (L) removed - the v74 macro-test OR made every
-    // L press hit three game buttons at once; since L became the overlay
-    // toggle ('4A') every HUD toggle fed phantom Jump+Fire+Duck into the
-    // game (advanced error screens, joined games mid-attract).
-    .p1_buttons ( {cont1_key[4], 1'b0, cont1_key[5], cont1_key[7]} ),
+    // MOSDRAM-72: BOMB macro restored on X = bit 6 (APF spec). History:
+    // v74 concluded 'X=bit8' from a probe, but bit 8 is L1 - the 0x0100
+    // presses in that test were the L button, mislabeled. The L-macro then
+    // had to be removed when L became the overlay toggle ('4A': every HUD
+    // toggle fed phantom Jump+Fire+Duck), orphaning X entirely - the
+    // 'bomb does nothing' report. Bit 6 has no other binding, no conflict.
+    .p1_buttons ( {cont1_key[4]|cont1_key[6], 1'b0,
+                   cont1_key[5]|cont1_key[6], cont1_key[7]|cont1_key[6]} ),
     .uvol_ym    ( uvolym_s ),
     .uvol_tms   ( uvoltms_s ),
     .svc_n      ( ~svc_mode_s ),
