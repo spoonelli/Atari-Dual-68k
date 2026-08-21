@@ -116,6 +116,12 @@ entity escape_core is
         dbg_mbox_resp : out std_logic_vector(15 downto 0);
         dbg_mbox_ramr : out std_logic_vector(15 downto 0);
         dbg_mbox_sum  : out std_logic_vector(15 downto 0);
+        -- LANE4r: {video 5A5A commands, extra 4321 acks} since power-on. The
+        -- '68 freeze: both CPUs alive, 16 extra restarts, game logic waiting
+        -- on this exchange forever. Equal counts = video missed the ack;
+        -- commands ahead = extra never answered. One photo decides.
+        dbg_mbox_cnts : out std_logic_vector(15 downto 0);
+        mbox_dead     : out std_logic;   -- 5A5A unanswered ~4.7s post-boot
         -- playfield-write activity: is the game drawing a picture at all?
         dbg_pf_wcnt   : out std_logic_vector(15 downto 0);  -- nonzero PF-RAM writes
         dbg_pf_last   : out std_logic_vector(15 downto 0);  -- last nonzero PF word
@@ -329,6 +335,12 @@ architecture rtl of escape_core is
     signal shr_a_din  : std_logic_vector(15 downto 0);
     signal shr_a_uds, shr_a_lds : std_logic;
     signal mbox_cmd, mbox_resp, mbox_ramr, mbox_sum : std_logic_vector(15 downto 0) := (others=>'0');
+    -- LANE4r mailbox forensics + deadlock rescue
+    signal cmd5a_cnt, ack_cnt : unsigned(7 downto 0) := (others=>'0');
+    signal mb_cmd_we_d, mb_ack_we_d : std_logic := '0';
+    signal mb_wait     : std_logic := '0';
+    signal mb_timer    : unsigned(25 downto 0) := (others=>'0');
+    signal mbox_dead_i : std_logic := '0';
     signal pf_wcnt, pf_last, col_wcnt : std_logic_vector(15 downto 0) := (others=>'0');
     signal boot_flag  : std_logic_vector(7 downto 0) := (others=>'0');
     signal reboot_cnt : unsigned(7 downto 0) := (others=>'0');
@@ -594,6 +606,49 @@ begin
     dbg_mbox_resp <= mbox_resp;
     dbg_mbox_ramr <= mbox_ramr;
     dbg_mbox_sum  <= mbox_sum;
+
+    -- LANE4r: handshake ledger + deadlock watch. Counts one per bus write
+    -- (strobes span many clks; addr/data are stable, so edge-detect on the
+    -- fully-qualified condition is exact). The watch arms on each video-CPU
+    -- 5A5A command post-boot and clears on the extra's 4321 ack; ~4.7s
+    -- unanswered (MAME warm ack: instant; 10x margin) latches mbox_dead.
+    mbox_ledger : process(clk)
+        variable cmd_we, ack_we : std_logic;
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                cmd5a_cnt <= (others=>'0'); ack_cnt <= (others=>'0');
+                mb_cmd_we_d <= '0'; mb_ack_we_d <= '0';
+                mb_wait <= '0'; mb_timer <= (others=>'0'); mbox_dead_i <= '0';
+            else
+                cmd_we := '0'; ack_we := '0';
+                if we_shr_a='1' and shr_a_addr = "111111111110000"
+                   and shr_a_din = x"5A5A" then cmd_we := '1'; end if;
+                if we_shr_b='1' and e_addr(15 downto 1) = "111111111110001"
+                   and e_do = x"4321" then ack_we := '1'; end if;
+                if cmd_we='1' and mb_cmd_we_d='0' then
+                    cmd5a_cnt <= cmd5a_cnt + 1;
+                    if boot_flag = x"01" then
+                        mb_wait <= '1'; mb_timer <= (others=>'0');
+                    end if;
+                end if;
+                if ack_we='1' and mb_ack_we_d='0' then
+                    ack_cnt <= ack_cnt + 1;
+                    mb_wait <= '0';
+                end if;
+                if mb_wait='1' then
+                    if mb_timer(25)='1' then
+                        mbox_dead_i <= '1';   -- latched until the reset it causes
+                    else
+                        mb_timer <= mb_timer + 1;
+                    end if;
+                end if;
+                mb_cmd_we_d <= cmd_we; mb_ack_we_d <= ack_we;
+            end if;
+        end if;
+    end process;
+    dbg_mbox_cnts <= std_logic_vector(cmd5a_cnt) & std_logic_vector(ack_cnt);
+    mbox_dead     <= mbox_dead_i;
 
     -- playfield / palette write activity probes (per bus write, not per cycle:
     -- count on the DTACK'd first cycle only via write-edge detect)

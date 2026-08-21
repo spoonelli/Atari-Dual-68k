@@ -1348,7 +1348,7 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
     reg [7:0]  wdog_rst_cnt = 8'd0;
     reg        wdog_exp_d   = 1'b0;
     always @(posedge clk_sys_7159) begin
-        wdog_exp_d <= wdog_expired | e_dead;
+        wdog_exp_d <= wdog_expired | e_dead | mbox_dead;
         if(!reset_n) begin
             wdog_rst_ctr <= 23'd0; wdog_rst_cnt <= 8'd0;
         end else begin
@@ -1356,7 +1356,9 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
             // while disabled, re-enable takes effect after the next core reset.
             // LANE4i: a dead extra CPU (frozen world) reboots the core the
             // same way a watchdog timeout does - counted in wdog_rst_cnt
-            if((wdog_expired || e_dead) && !wdog_exp_d && !wdis_s) begin
+            // LANE4r: a wedged 5A5A/4321 mailbox handshake ('68 freeze:
+            // both CPUs alive, logic deadlocked) reboots the core too
+            if((wdog_expired || e_dead || mbox_dead) && !wdog_exp_d && !wdis_s) begin
                 wdog_rst_ctr <= 23'd1;
                 wdog_rst_cnt <= wdog_rst_cnt + 8'd1;
             end else if(wdog_rst_ctr != 23'd0)
@@ -1513,7 +1515,6 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                             cont1_key[5]|cont1_key[8], cont1_key[7]|cont1_key[8]};
     // per-frame display latches for fast-changing HUD values
     reg [15:0] epc_fr, mbox_fr, vpc_fr, wrhi_fr, engine_fr, gmode_fr;
-    reg [15:0] mcmd_fr;   // LANE4f: last mailbox COMMAND word (16FFE0)
     reg [15:0] estall_fr; // LANE4l: longest extra bus cycle (clk counts)
     reg        vb_hud_d;
     reg [15:0] jsapc_fr, jsalink_fr;
@@ -1524,8 +1525,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             epc_fr    <= dbg_epc;
             vpc_fr    <= dbg_pc;
             wrhi_fr   <= dbg_wrhi;
-            mbox_fr   <= dbg_mbox_resp;
-            mcmd_fr   <= dbg_mbox_cmd;
+            mbox_fr   <= {dbg_erestart, dbg_mbox_cmd[7:0]};  // LANE4r: was resp (always 4321)
             estall_fr <= dbg_estall;
             engine_fr <= dbg_engine;
             gmode_fr  <= dbg_mode;
@@ -1549,7 +1549,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // field2 pre-fault: {extra restart count, last mbox cmd low byte} -
     // boot leaves a small known restart count; +1 at the freeze moment
     // confirms the mid-game-restart hypothesis in one photo
-    wire [15:0] pg1_f2 = e_faulted ? dbg_ecrash_data : {dbg_erestart, mcmd_fr[7:0]};
+    // LANE4r: non-fault path now shows the mailbox ledger {5A5A cmds, 4321
+    // acks} - equal at freeze = video missed the ack, cmds ahead = extra
+    // never answered. (erestart+mcmd moved to the old resp slot.)
+    wire [15:0] pg1_f2 = e_faulted ? dbg_ecrash_data : dbg_mbox_cnts;
     // LANE4c: free-running FRAME COUNTER (vblank edges since APF reset;
     // deliberately NOT cleared by watchdog/core resets so reboot loops can
     // be timed off video frames). Shown as page-3 field2.
@@ -1623,7 +1626,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3068;   // lane 4q frame-parity line-buffer tags (ghost pixels) - screen shows '68'
+    localparam [15:0] BUILD_ID = 16'h3069;   // lane 4r mailbox ledger + deadlock rescue - screen shows '69'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1942,6 +1945,8 @@ escape_mob umob (
 
     wire dbg_v_pc_fetch, dbg_e_running, dbg_alpha_wr;
     wire [15:0] dbg_mbox_cmd, dbg_mbox_resp, dbg_mbox_ramr, dbg_mbox_sum;
+    wire [15:0] dbg_mbox_cnts;                    // LANE4r {5A5A cmds, 4321 acks}
+    wire        mbox_dead;                        // LANE4r handshake deadlock
     wire [15:0] dbg_pf_wcnt, dbg_pf_last, dbg_col_wcnt;
     wire [15:0] dbg_boot;
     wire [15:0] dbg_retry;
@@ -2074,6 +2079,8 @@ escape_core ecore (
     .dbg_mbox_resp  ( dbg_mbox_resp ),
     .dbg_mbox_ramr  ( dbg_mbox_ramr ),
     .dbg_mbox_sum   ( dbg_mbox_sum ),
+    .dbg_mbox_cnts  ( dbg_mbox_cnts ),
+    .mbox_dead      ( mbox_dead ),
     .dbg_pf_wcnt    ( dbg_pf_wcnt ),
     .dbg_pf_last    ( dbg_pf_last ),
     .dbg_col_wcnt   ( dbg_col_wcnt ),
