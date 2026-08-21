@@ -1515,10 +1515,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                             cont1_key[5]|cont1_key[8], cont1_key[7]|cont1_key[8]};
     // per-frame display latches for fast-changing HUD values
     reg [15:0] epc_fr, mbox_fr, vpc_fr, wrhi_fr, engine_fr, gmode_fr;
-    reg [15:0] estall_fr; // LANE4l: longest extra bus cycle (clk counts)
+    reg [15:0] vcyc_fr, ecyc_fr; // LANE4s: bus cycles/frame per CPU (speed meter)
     reg        vb_hud_d;
     reg [15:0] jsapc_fr, jsalink_fr;
-    reg [15:0] respstat_fr, coincred_fr;
+    reg [15:0] coincred_fr;
     always @(posedge clk_sys_7159) begin
         vb_hud_d <= vblank_w;
         if(vblank_w && !vb_hud_d) begin
@@ -1526,12 +1526,12 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             vpc_fr    <= dbg_pc;
             wrhi_fr   <= dbg_wrhi;
             mbox_fr   <= {dbg_erestart, dbg_mbox_cmd[7:0]};  // LANE4r: was resp (always 4321)
-            estall_fr <= dbg_estall;
+            vcyc_fr   <= dbg_vcyc;
+            ecyc_fr   <= dbg_ecyc;
             engine_fr <= dbg_engine;
             gmode_fr  <= dbg_mode;
             jsapc_fr  <= dbg_jsa_pc;
             jsalink_fr<= dbg_jsa_link;
-            respstat_fr <= dbg_resp_stat;
             coincred_fr <= dbg_coin_cred;
         end
     end
@@ -1545,7 +1545,9 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // exception, then LOCK the faulting PC; field2 shows the last mailbox
     // command until a fault, then the opcode word the extra CPU received
     wire        e_faulted = (dbg_ecrash_pc != 16'd0);
-    wire [15:0] pg1_f1 = e_faulted ? dbg_ecrash_pc   : epc_fr;
+    // LANE4s: while the extra is executing the data table (the '69 wedge)
+    // show WHERE IT JUMPED FROM instead of the meaningless in-table PC
+    wire [15:0] pg1_f1 = e_faulted ? dbg_ecrash_pc : (dbg_eintab ? dbg_ewild : epc_fr);
     // field2 pre-fault: {extra restart count, last mbox cmd low byte} -
     // boot leaves a small known restart count; +1 at the freeze moment
     // confirms the mid-game-restart hypothesis in one photo
@@ -1580,10 +1582,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // attract NEVER resets after boot (extra released once at T=11s,
         // runs forever) - our ~35s reboot loop = a main-CPU death, and this
         // page names it.
-        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : respstat_fr[15:12];
-        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : respstat_fr[11:8];
-        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : respstat_fr[7:4];
-        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : respstat_fr[3:0];
+        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
+        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
+        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
+        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
         // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
@@ -1596,10 +1598,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // page 0 field2 = LANE4l max extra bus-cycle length: normal cycles
         // are tiny (< 0x0040); a stuck write shows FFFF = the invisible
         // freeze mode (bus active, rescue can't see it)
-        4'd5:  hex_digit = m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : estall_fr[15:12];
-        4'd6:  hex_digit = m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : estall_fr[11:8];
-        4'd7:  hex_digit = m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : estall_fr[7:4];
-        4'd8:  hex_digit = m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : estall_fr[3:0];
+        4'd5:  hex_digit = m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
+        4'd6:  hex_digit = m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
+        4'd7:  hex_digit = m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
+        4'd8:  hex_digit = m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
@@ -1626,7 +1628,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3069;   // lane 4r mailbox ledger + deadlock rescue - screen shows '69'
+    localparam [15:0] BUILD_ID = 16'h3070;   // lane 4s wild-jump locator + speed meters - screen shows '70'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1955,7 +1957,10 @@ escape_mob umob (
     wire [15:0] dbg_ecrash_pc, dbg_ecrash_data;   // LANE4f e-side first fault
     wire [7:0]  dbg_erestart;                     // LANE4h restart counter
     wire        e_dead;                           // LANE4i freeze rescue
-    wire [15:0] dbg_estall;                       // LANE4l stall probe
+    wire [15:0] dbg_estall;                       // LANE4l stall probe (unused in HUD now)
+    wire [15:0] dbg_vcyc, dbg_ecyc;               // LANE4s speed meters
+    wire [15:0] dbg_ewild;                        // LANE4s wild-jump source PC
+    wire        dbg_eintab;                       // extra executing data table now
     wire [15:0] dbg_vec;
     wire        dbg_fault;
     wire [15:0] dbg_fdata;
@@ -2074,6 +2079,10 @@ escape_core ecore (
     .dbg_erestart   ( dbg_erestart ),
     .e_dead         ( e_dead ),
     .dbg_estall     ( dbg_estall ),
+    .dbg_vcyc       ( dbg_vcyc ),
+    .dbg_ecyc       ( dbg_ecyc ),
+    .dbg_ewild      ( dbg_ewild ),
+    .dbg_eintab     ( dbg_eintab ),
     .dbg_ecrash_data( dbg_ecrash_data ),
     .dbg_mbox_cmd   ( dbg_mbox_cmd ),
     .dbg_mbox_resp  ( dbg_mbox_resp ),

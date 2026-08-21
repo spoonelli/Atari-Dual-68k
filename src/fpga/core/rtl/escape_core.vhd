@@ -143,6 +143,15 @@ entity escape_core is
         dbg_erestart    : out std_logic_vector(7 downto 0);
         -- LANE4l: longest bus cycle since last read of this register
         dbg_estall      : out std_logic_vector(15 downto 0);
+        -- LANE4s: completed bus cycles per frame, per CPU (as_n falling
+        -- edges, latched at vblank). Direct speed meter against the MAME
+        -- reference - answers "are the processors actually at speed?"
+        dbg_vcyc        : out std_logic_vector(15 downto 0);
+        dbg_ecyc        : out std_logic_vector(15 downto 0);
+        -- LANE4s: source PC of the extra's last jump into the 0xA62-0xB7F
+        -- data table, and a live flag that it is currently executing there
+        dbg_ewild       : out std_logic_vector(15 downto 0);
+        dbg_eintab      : out std_logic;
         -- LANE4i: extra CPU has executed no bus cycle for ~0.59s post-boot
         -- (the stop #\$2700 die state) - core_top treats it like a watchdog
         -- timeout so a frozen world reboots instead of hanging forever
@@ -265,6 +274,8 @@ architecture rtl of escape_core is
     signal alpha_vq : std_logic_vector(15 downto 0);
     signal a84_wr_i, a84_rd_i : std_logic_vector(15 downto 0);
     signal pc_i, wrhi_i, epc_i : std_logic_vector(15 downto 0);
+    signal ewild_src : std_logic_vector(15 downto 0) := (others=>'0');
+    signal e_in_tab  : std_logic := '0';
     signal vec_i : std_logic_vector(15 downto 0);
     -- LANE4f: extra-CPU first-fault forensics
     signal e_fdata_i, ecrash_pc_i, ecrash_data_i : std_logic_vector(15 downto 0)
@@ -341,6 +352,9 @@ architecture rtl of escape_core is
     signal mb_wait     : std_logic := '0';
     signal mb_timer    : unsigned(25 downto 0) := (others=>'0');
     signal mbox_dead_i : std_logic := '0';
+    -- LANE4s bus-cycle meters
+    signal vcyc_ctr, ecyc_ctr, vcyc_fr, ecyc_fr : unsigned(15 downto 0) := (others=>'0');
+    signal vas_d, eas_d, vb_cyc_d : std_logic := '1';
     signal pf_wcnt, pf_last, col_wcnt : std_logic_vector(15 downto 0) := (others=>'0');
     signal boot_flag  : std_logic_vector(7 downto 0) := (others=>'0');
     signal reboot_cnt : unsigned(7 downto 0) := (others=>'0');
@@ -650,6 +664,31 @@ begin
     dbg_mbox_cnts <= std_logic_vector(cmd5a_cnt) & std_logic_vector(ack_cnt);
     mbox_dead     <= mbox_dead_i;
 
+    -- LANE4s: per-frame bus-cycle meters. A real 7.16MHz 68000 completes a
+    -- bus cycle in 4 clocks minimum; every wait state here shows up as a
+    -- lower count. Compare against MAME's cycles/frame for ground truth.
+    cyc_meter : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                vcyc_ctr <= (others=>'0'); ecyc_ctr <= (others=>'0');
+                vcyc_fr  <= (others=>'0'); ecyc_fr  <= (others=>'0');
+                vas_d <= '1'; eas_d <= '1'; vb_cyc_d <= '0';
+            else
+                vas_d <= v_as_n; eas_d <= e_as_n; vb_cyc_d <= vblank_in;
+                if vblank_in='1' and vb_cyc_d='0' then
+                    vcyc_fr <= vcyc_ctr; ecyc_fr <= ecyc_ctr;
+                    vcyc_ctr <= (others=>'0'); ecyc_ctr <= (others=>'0');
+                else
+                    if v_as_n='0' and vas_d='1' then vcyc_ctr <= vcyc_ctr + 1; end if;
+                    if e_as_n='0' and eas_d='1' then ecyc_ctr <= ecyc_ctr + 1; end if;
+                end if;
+            end if;
+        end if;
+    end process;
+    dbg_vcyc <= std_logic_vector(vcyc_fr);
+    dbg_ecyc <= std_logic_vector(ecyc_fr);
+
     -- playfield / palette write activity probes (per bus write, not per cycle:
     -- count on the DTACK'd first cycle only via write-edge detect)
     pf_probe : process(clk)
@@ -865,6 +904,21 @@ begin
                     if e_dtack_n='0' then                  -- completing: capture data
                         e_fdata_i <= e_di;
                     end if;
+                    -- LANE4s wild-jump locator: the '69 freeze parks the
+                    -- extra EXECUTING the 0xA62-0xB7F data table (all
+                    -- harmless adda/suba encodings - no trap ever fires).
+                    -- Latch the last fetch OUTSIDE the table on every entry;
+                    -- once wedged inside, ewild_src = the jump-off point.
+                    if e_addr(23 downto 16) = x"00"
+                       and unsigned(e_addr(15 downto 0)) >= x"0A60"
+                       and unsigned(e_addr(15 downto 0)) <= x"0B80" then
+                        if e_in_tab = '0' then
+                            ewild_src <= epc_i;
+                            e_in_tab  <= '1';
+                        end if;
+                    else
+                        e_in_tab <= '0';
+                    end if;
                 end if;
                 if v_as_n='0' and v_rw_n='1' and v_fc(1)='1' and v_fc(0)='0' then
                     pc_i <= v_addr(15 downto 0);
@@ -882,6 +936,8 @@ begin
     end process;
     dbg_pc   <= pc_i;
     dbg_epc  <= epc_i;
+    dbg_ewild  <= ewild_src;
+    dbg_eintab <= e_in_tab;
     dbg_wrhi <= wrhi_i;
     dbg_ecrash_pc   <= ecrash_pc_i;
     dbg_ecrash_data <= ecrash_data_i;
