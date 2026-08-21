@@ -939,8 +939,17 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg  [24:0] rd_addr_q;   // per-grant latched read address (v39)
     reg         rd_pre_q;    // v42: armor CPU reads only
     wire        sd_rd_ack;
-synch_3 s_rr(core_rom_req, core_rom_req_s, clk_sdram);
-synch_3 s_ra(core_rom_ack_85, core_rom_ack_s, clk_sys_7159);
+    // sdram-sched: 7.159 and 85.909 are same-PLL siblings (12:1) and the
+    // SDC now groups them synchronous, so a single capture FF is a TIMED
+    // path - not a metastability risk. The 3-stage ack-return chain alone
+    // cost ~2 CPU clocks on every SDRAM access; this is the tier-2 fast
+    // path, first stage (scheduled TDM service comes next if this proves).
+    reg core_rom_req_s_q;
+    always @(posedge clk_sdram)    core_rom_req_s_q <= core_rom_req;
+    assign core_rom_req_s = core_rom_req_s_q;
+    reg core_rom_ack_s_q;
+    always @(posedge clk_sys_7159) core_rom_ack_s_q <= core_rom_ack_85;
+    assign core_rom_ack_s = core_rom_ack_s_q;
 
     // SDRAM self-check: after init + full ROM download, read word 0 and compare with
     // the known first ROM word (0x003F = high word of the reset SP). Proves the
@@ -1603,7 +1612,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3072;   // mo-sdram + BOMB on X bit6 - screen shows '72'
+    localparam [15:0] BUILD_ID = 16'h3073;   // sdram-sched: phase-aligned CPU<->SDRAM handshake - screen shows '73'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
