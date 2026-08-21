@@ -795,8 +795,10 @@ begin
                             and e_addr(23 downto 14) = "0000000000" else '0';
     e_sel_shad2 <= '1' when SHAD_EN=1 and e_sel_rom='1'
                             and e_addr(23 downto 12) = x"00F" else '0';
+    -- 72c: 8KB also overflowed (margin ~zero after 71); page 0xB000 alone
+    -- is 64% of the extra's misses - 4KB is the fit-or-bust minimum.
     e_sel_shad3 <= '1' when SHAD_EN=1 and e_sel_rom='1'
-                            and e_addr(23 downto 13) = "00000000101" else '0';
+                            and e_addr(23 downto 12) = x"00B" else '0';
     e_sel_shad <= e_sel_shad1 or e_sel_shad2 or e_sel_shad3;
     vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000000000" else '0';
     vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001001" else '0';
@@ -804,7 +806,7 @@ begin
     eshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000100000" else '0';
     eshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 12) = x"08F" else '0';
     jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
-    eshad3_we <= '1' when shad_we='1' and shad_waddr(23 downto 13) = "00001000101" else '0';
+    eshad3_we <= '1' when shad_we='1' and shad_waddr(23 downto 12) = x"08B" else '0';
 
     vshad : entity work.dpram_dc generic map ( awidth => 13 )
         port map ( wrclk=>shad_wclk, we=>vshad_we,
@@ -822,10 +824,10 @@ begin
         port map ( wrclk=>shad_wclk, we=>vshad3_we,
                    waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad3_q );
-    eshad3 : entity work.dpram_dc generic map ( awidth => 12 )
+    eshad3 : entity work.dpram_dc generic map ( awidth => 11 )
         port map ( wrclk=>shad_wclk, we=>eshad3_we,
-                   waddr=>shad_waddr(12 downto 1), wdata=>shad_wdata,
-                   rdclk=>clk, raddr=>e_addr(12 downto 1), q=>eshad3_q );
+                   waddr=>shad_waddr(11 downto 1), wdata=>shad_wdata,
+                   rdclk=>clk, raddr=>e_addr(11 downto 1), q=>eshad3_q );
     eshad2 : entity work.dpram_dc generic map ( awidth => 11 )
         port map ( wrclk=>shad_wclk, we=>eshad2_we,
                    waddr=>shad_waddr(11 downto 1), wdata=>shad_wdata,
