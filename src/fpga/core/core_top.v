@@ -1488,12 +1488,6 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             mopen_cnt  <= 8'd0;
         end
     end
-    // v74: user-decoded probe truth: Y+B+A(+X held) = 0x01B0 - so A=4,
-    // B=5, Y=7 are the DOCUMENTED bits after all; the only deviation is
-    // X = bit 8 (not 6). The lone 0x0100 presses were X itself (macro
-    // tests). v73's wholesale shift reverted; macro source moved to [8].
-    wire [3:0] btn_probe = {cont1_key[4]|cont1_key[8], 1'b0,
-                            cont1_key[5]|cont1_key[8], cont1_key[7]|cont1_key[8]};
     // per-frame display latches for fast-changing HUD values
     reg [15:0] epc_fr, mbox_fr, vpc_fr, wrhi_fr, engine_fr, gmode_fr;
     reg [15:0] vcyc_fr, ecyc_fr; // LANE4s: bus cycles/frame per CPU (speed meter)
@@ -1609,7 +1603,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3071;   // mo-sdram: MO fetch moved to SDRAM - screen shows '71'
+    localparam [15:0] BUILD_ID = 16'h3072;   // mo-sdram + BOMB on X bit6 - screen shows '72'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2017,11 +2011,14 @@ escape_core ecore (
     // MAME eprom: D9 = button 1 fire, D8 = button 2 jump, D11 = button 3 duck)
     // QoL layout: Jump on the left (Y), Fire in the middle (B), Duck on the right (A);
     // X (top, otherwise unused) = all three at once = the in-game BOMB
-    // LANE4a: cont1_key[8] (L) removed - the v74 macro-test OR made every
-    // L press hit three game buttons at once; since L became the overlay
-    // toggle ('4A') every HUD toggle fed phantom Jump+Fire+Duck into the
-    // game (advanced error screens, joined games mid-attract).
-    .p1_buttons ( {cont1_key[4], 1'b0, cont1_key[5], cont1_key[7]} ),
+    // MOSDRAM-72: BOMB macro restored on X = bit 6 (APF spec). History:
+    // v74 concluded 'X=bit8' from a probe, but bit 8 is L1 - the 0x0100
+    // presses in that test were the L button, mislabeled. The L-macro then
+    // had to be removed when L became the overlay toggle ('4A': every HUD
+    // toggle fed phantom Jump+Fire+Duck), orphaning X entirely - the
+    // 'bomb does nothing' report. Bit 6 has no other binding, no conflict.
+    .p1_buttons ( {cont1_key[4]|cont1_key[6], 1'b0,
+                   cont1_key[5]|cont1_key[6], cont1_key[7]|cont1_key[6]} ),
     .uvol_ym    ( uvolym_s ),
     .uvol_tms   ( uvoltms_s ),
     .svc_n      ( ~svc_mode_s ),
