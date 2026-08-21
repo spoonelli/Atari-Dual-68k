@@ -1028,6 +1028,8 @@ synch_3 s_acsd(dataslot_allcomplete, allcomplete_sd, clk_sdram);
     wire vidkill_src = cont1_key[11] | m_vidkill_px;
 synch_3 s_vk(vidkill_src, vidkill_sd, clk_sdram);   // R2 hold or debug mode 6
 
+always @(posedge clk_sdram) core_rstn_sd <= core_reset_n;
+
 always @(posedge clk_sdram) begin
     // CRAM download mirror: ALWAYS active (the original placement inside
     // the 4'd10 steady-state arm meant it never ran during the download -
@@ -1310,6 +1312,16 @@ always @(posedge clk_sdram) begin
     end
     default: chk_state <= 4'd10;
     endcase
+    // SDSCHED-75: fetch-tracker resync under core reset. The mob zeroes its
+    // req toggles on reset (menu soft-reset, rescue reboot) but these
+    // trackers kept stale values - an inverted pair = one phantom serve per
+    // channel per reset. Track the live toggles while reset is held.
+    if(!core_rstn_sd) begin
+        mgA_req_last <= mgA_req_s;
+        mgB_req_last <= mgB_req_s;
+        vg_reqA_last <= vg_reqA_s;
+        vg_reqB_last <= vg_reqB_s;
+    end
 end
 
     // ---------------- SDRAM controller
@@ -1536,7 +1548,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             vcyc_fr   <= dbg_vcyc;
             ecyc_fr   <= dbg_ecyc;
             engine_fr <= dbg_engine;
-            gmode_fr  <= dbg_mode;
+            gmode_fr  <= dbg_awr;   // SDSCHED-75: was dbg_mode (static, long proven)
             jsapc_fr  <= dbg_jsa_pc;
             jsalink_fr<= dbg_jsa_link;
             coincred_fr <= dbg_coin_cred;
@@ -1635,7 +1647,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3074;   // sdram-sched: MO/PF fetch handshakes phase-aligned too - screen shows '74'
+    localparam [15:0] BUILD_ID = 16'h3075;   // sdram-sched: alpha-write meter (wipe forensics) + reset resync - screen shows '75'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1968,6 +1980,8 @@ escape_mob umob (
     wire [15:0] dbg_vcyc, dbg_ecyc;               // LANE4s speed meters
     wire [15:0] dbg_ewild;                        // LANE4s wild-jump source PC
     wire        dbg_eintab;                       // extra executing data table now
+    wire [15:0] dbg_awr;                          // SDSCHED-75 alpha writes/frame
+    reg         core_rstn_sd = 1'b0;              // core reset, sdram-domain view
     wire [15:0] dbg_vec;
     wire        dbg_fault;
     wire [15:0] dbg_fdata;
@@ -2093,6 +2107,7 @@ escape_core ecore (
     .dbg_ecyc       ( dbg_ecyc ),
     .dbg_ewild      ( dbg_ewild ),
     .dbg_eintab     ( dbg_eintab ),
+    .dbg_awr        ( dbg_awr ),
     .dbg_ecrash_data( dbg_ecrash_data ),
     .dbg_mbox_cmd   ( dbg_mbox_cmd ),
     .dbg_mbox_resp  ( dbg_mbox_resp ),
