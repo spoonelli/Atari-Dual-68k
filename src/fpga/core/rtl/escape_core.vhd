@@ -905,12 +905,12 @@ begin
                         e_fdata_i <= e_di;
                     end if;
                     -- LANE4s wild-jump locator: the '69 freeze parks the
-                    -- extra EXECUTING the 0xA62-0xB7F data table (all
+                    -- extra EXECUTING the 0xA58-0xB7F data table (all
                     -- harmless adda/suba encodings - no trap ever fires).
                     -- Latch the last fetch OUTSIDE the table on every entry;
                     -- once wedged inside, ewild_src = the jump-off point.
                     if e_addr(23 downto 16) = x"00"
-                       and unsigned(e_addr(15 downto 0)) >= x"0A60"
+                       and unsigned(e_addr(15 downto 0)) >= x"0A58"
                        and unsigned(e_addr(15 downto 0)) <= x"0B80" then
                         if e_in_tab = '0' then
                             ewild_src <= epc_i;
