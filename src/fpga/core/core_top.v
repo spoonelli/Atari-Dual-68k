@@ -981,19 +981,42 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     wire       mgA_req_s, mgB_req_s;
     wire       mo_gfx_reqA, mo_gfx_reqB;
     wire [23:0] mo_gfx_addrA, mo_gfx_addrB;
-synch_3 s_mgA(mo_gfx_reqA, mgA_req_s, clk_sdram);
-synch_3 s_mgB(mo_gfx_reqB, mgB_req_s, clk_sdram);
+    // SDSCHED-74: same-family crossings (7.159 -> 85.909, timed since the
+    // '73 SDC grouping) - single capture FFs. The 3-stage done-return
+    // chains cost ~400ns per fetched sprite row (~1/3 of the row budget).
+    reg mgA_req_s_q, mgB_req_s_q;
+    always @(posedge clk_sdram) begin
+        mgA_req_s_q <= mo_gfx_reqA;
+        mgB_req_s_q <= mo_gfx_reqB;
+    end
+    assign mgA_req_s = mgA_req_s_q;
+    assign mgB_req_s = mgB_req_s_q;
     wire mgA_done_s, mgB_done_s;
-synch_3 s_mgdA(mgA_done_85, mgA_done_s, clk_sys_7159);
-synch_3 s_mgdB(mgB_done_85, mgB_done_s, clk_sys_7159);
+    reg mgA_done_s_q, mgB_done_s_q;
+    always @(posedge clk_sys_7159) begin
+        mgA_done_s_q <= mgA_done_85;
+        mgB_done_s_q <= mgB_done_85;
+    end
+    assign mgA_done_s = mgA_done_s_q;
+    assign mgB_done_s = mgB_done_s_q;
     wire       vg_reqA_s, vg_reqB_s;
     reg        vg_reqA_px, vg_reqB_px;    // pixel-domain request toggles
     reg [23:0] vg_addrA_px, vg_addrB_px;  // stable while request in flight
-synch_3 s_vgA(vg_reqA_px, vg_reqA_s, clk_sdram);
-synch_3 s_vgB(vg_reqB_px, vg_reqB_s, clk_sdram);
+    reg vg_reqA_s_q, vg_reqB_s_q;
+    always @(posedge clk_sdram) begin
+        vg_reqA_s_q <= vg_reqA_px;
+        vg_reqB_s_q <= vg_reqB_px;
+    end
+    assign vg_reqA_s = vg_reqA_s_q;
+    assign vg_reqB_s = vg_reqB_s_q;
     wire vg_doneA_s, vg_doneB_s;
-synch_3 s_vgdA(vg_doneA_85, vg_doneA_s, clk_sys_7159);
-synch_3 s_vgdB(vg_doneB_85, vg_doneB_s, clk_sys_7159);
+    reg vg_doneA_s_q, vg_doneB_s_q;
+    always @(posedge clk_sys_7159) begin
+        vg_doneA_s_q <= vg_doneA_85;
+        vg_doneB_s_q <= vg_doneB_85;
+    end
+    assign vg_doneA_s = vg_doneA_s_q;
+    assign vg_doneB_s = vg_doneB_s_q;
     reg [3:0]  chk_state;
     // char ROM DMA: combined image 0x110000..0x113FFF -> 8192x16 BRAM
     reg [13:0] chr_dma_word;         // word index 0..8191
@@ -1612,7 +1635,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3073;   // sdram-sched: phase-aligned CPU<->SDRAM handshake - screen shows '73'
+    localparam [15:0] BUILD_ID = 16'h3074;   // sdram-sched: MO/PF fetch handshakes phase-aligned too - screen shows '74'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
