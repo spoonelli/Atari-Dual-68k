@@ -9,25 +9,33 @@ prototype, so the core covers all three.
 
 ## Status
 
-🟢 **Boots on real hardware.** Both 68000s execute the genuine Escape program on the
-Pocket: the ROM (user-supplied) loads through an APF data slot into SDRAM, a hardware
-self-check verifies the download, and the CPU subsystem — memory decode, dual CPUs,
-autovectored VBLANK IRQs, control latches — runs the real boot code. Verified on-device
-via an 8-band diagnostic status screen (see [`docs/POCKET_TEST.md`](docs/POCKET_TEST.md)).
-
-No game video or sound yet — the screen currently shows diagnostics, not the game.
+🕹️ **The game is playable.** From a user-supplied ROM, the core boots the real
+dual-68000 program, runs the full attract cycle (story, announcer speech, high
+scores, demo), takes coins, starts, and plays: Jake walks, robots swarm, the
+JSA-I sound board delivers music, effects and TMS5220 speech in real time.
+Development continues on visual polish and final timing feel.
 
 | Subsystem | State |
 |---|---|
-| Build (CI, Quartus in Docker) | ✅ ~2 min per push, `bitstream.rbf_r` artifact |
-| Native simulation (GHDL, no Quartus) | ✅ full boot verified pre-hardware |
-| ROM loading (data slot → SDRAM) | ✅ verified on hardware (self-check green) |
-| Video CPU (68000) | ✅ executes real code on hardware |
-| Extra CPU (68000) + shared RAM | ✅ both CPUs run concurrently on hardware; handshake verified |
-| Video: raster/sync (456×262 native) | ✅ on hardware · game layers (alpha → playfield → motion objects) not started |
-| Sound (JSA-I: 6502 + YM2151 + TMS5220) | ⬜ stubbed (SCOM returns buffers-empty) |
-| Inputs | ✅ buttons mapped · ADC (Hall stick) stubbed centered |
-| EEPROM | stub RAM (no persistence) |
+| Build (CI, Quartus in Docker) | ✅ ~15 min per push, `bitstream.rbf_r` artifact |
+| Native simulation (GHDL + iverilog) | ✅ boot, march, JSA, speech-chip and sprite-scene replay benches |
+| ROM loading (data slot → SDRAM + CRAM + BRAM shadows) | ✅ verified, self-checked |
+| Dual 68000s + shared RAM + mailbox handshake | ✅ genuinely concurrent on hardware |
+| Hot-code BRAM shadows + speculative prefetch | ✅ ~98% of profiled gameplay execution at zero-wait |
+| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay |
+| Sound (JSA-I: 6502 + YM2151 + **TMS5220 speech**) | ✅ full pipeline, MAME-bus-trace verified |
+| Inputs (buttons, hall-stick via ADC0809, dock analog) | ✅ incl. in-game calibration screens |
+| Watchdog, freeze-rescue, on-device forensics HUD | ✅ (debug pages behind L/R, dev builds) |
+| EEPROM (2804) | ✅ in-session; persistence via Pocket save: planned |
+
+**Known issues:** dense sprite crowds can drop scanlines (bandwidth work in
+progress); occasional small sprite artifacts; speech phrase tails clip slightly;
+some scenes run marginally under arcade speed. See the issue tracker.
+
+**Core identities:** dev builds install as `spoonelli.ataridual68k`; the
+release core will ship as `spoonelli.eprom` (platform `eprom`, ROM goes in
+`Assets/eprom/common/`). Platform art is user-supplied (not distributed),
+like the ROMs.
 
 Full hardware map, roadmap, and schematic findings: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -42,10 +50,10 @@ present, serial SCOM sound link).
 | Block        | Real chip                               | Implementation |
 |--------------|-----------------------------------------|----------------|
 | CPUs ×2      | **68000** @ 7.16 MHz, shared RAM        | TG68K (`CPU="00"`), our decode/arbitration |
-| Sound        | Atari **JSA-I** (6502 + YM2151 + TMS5220) via serial SCOM | T65 + [jt51](https://github.com/jotego/jt51) — planned |
-| Video        | Atari motion objects + playfield + alpha | adapt from Atari System 1 core — in progress |
+| Sound        | Atari **JSA-I** (6502 + YM2151 + TMS5220) via serial SCOM | ✅ T65 + [jt51](https://github.com/jotego/jt51) + TMS5220 (System 1 core, patched) |
+| Video        | Atari motion objects + playfield + alpha | ✅ re-architected line engine, MAME-scene verified |
 | Protection   | **SLAPSTIC** (present on board)          | watch-item; MAME boots without it |
-| Palette      | 2048-color, per-layer color RAM + intensity | planned with video layers |
+| Palette      | 2048-color, per-layer color RAM + intensity | ✅ incl. authentic attract dimming |
 | Output       | 336×240 visible, 456×262 @ ~59.9 Hz      | ✅ native timing via APF scaler |
 
 ## Accuracy
@@ -62,8 +70,10 @@ autovectored interrupt scheme.
 
 **Approximate:** per-instruction CPU cycle counts (TG68K is instruction-accurate, not
 cycle-exact to a 68000); bus-cycle timing (the
-original used zero-wait parallel EPROM buses per subsystem; this core funnels memory
-through one SDRAM with wait states, mitigated by burst reads and sequential prefetch);
+original used zero-wait parallel EPROM buses per subsystem; this core splits memory
+across SDRAM, a dedicated CRAM chip for graphics, and BRAM shadows holding the
+profiled hot code — ~98% of gameplay execution runs zero-wait, the rest via
+speculative prefetch);
 video internals (same VRAM in, same pixels out on the same raster grid, but the
 scanout is a re-architected line engine, not a gate-level MOHLB/SLAGS clone).
 
@@ -78,7 +88,7 @@ core.json, video.json, data.json, ...   openFPGA core definition (APF)
 dist/                                    platform art + asset folder skeleton
 src/fpga/                                Quartus project
   apf/                                   Analogue Platform Framework (do not edit)
-  core/core_top.v                        top level: SDRAM, ROM download, diagnostics
+  core/core_top.v                        top level: SDRAM/CRAM services, download, video, HUD
   core/rtl/                              our core: escape_core, decode, SDRAM ctrl, BRAMs
 sim/                                     GHDL simulation harness + testbenches
 support/build_rom.py                     assemble user ROM dumps -> atari_escape.rom
@@ -117,7 +127,9 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
 - **d18c7db (Alex)** and **MiSTer-devel** for
   [`Arcade-Atari-system1_MiSTer`](https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer)
   (GPL-3.0), the schematic-based Atari System 1 core this project's RTL base was
-  derived from.
+  derived from — including the MAME-faithful **TMS5220** speech chip model
+  (vendored at `src/fpga/core/rtl/TMS5220.vhd` with a lattice-filter arithmetic
+  fix, provenance noted in the file header).
 - **Tobias Gubener (TobiFlex)** for the **TG68K.C** 68000 soft-CPU core (LGPL-3.0,
   with patches by MikeJ, Till Harbaum, Rok Krajnc and others) — both of this core's
   68000s are TG68K instances, via the System 1 tree.
