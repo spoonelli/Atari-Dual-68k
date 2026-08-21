@@ -9,7 +9,7 @@ Point the tool at your original dumps — either a folder of the individual
 `136069-*.xxx` chips or a standard MAME `eprom.zip`:
 
 ```bash
-python3 support/build_rom.py /path/to/eprom.zip dist/assets/atari_escape/common/atari_escape.rom
+python3 support/build_rom.py /path/to/eprom.zip ./atari_escape.rom
 ```
 
 Every chip is **CRC32-verified** against known-good values; wrong or modified dumps
@@ -34,7 +34,7 @@ known-good values (this project's `eprom` set was verified 28/28).
 Copy `atari_escape.rom` to:
 
 ```
-/Assets/atari_escape/common/atari_escape.rom
+/Assets/eprom/common/atari_escape.rom
 ```
 
 The core's `data.json` declares a required data slot (id 1, `atari_escape.rom`); the

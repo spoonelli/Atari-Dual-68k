@@ -1,52 +1,72 @@
-# Testing on the Analogue Pocket — hello-world drop
+# Running on the Analogue Pocket
 
-What this build does: boots both 68000s on real Escape code loaded from your ROM via
-SDRAM, and shows a **status screen** (no game video yet):
-
-| Screen area   | Meaning |
-|---------------|---------|
-| Top band      | **green** = Video CPU fetched its reset PC and is executing ROM · **red** = it isn't |
-| Middle band   | **green** = Video CPU released the Extra CPU (360010 D0) · **red** = still held in reset |
-| Bottom band   | gray reference |
-
-Native Escape raster (456×262 @ ~59.9 Hz, 336×240 visible).
+What a current build does: boots the full dual-68000 Escape program from your
+ROM, runs the complete attract cycle (story, TMS5220 announcer speech, high
+scores, demo), takes coins, and plays. Native Escape raster
+(456×262 @ ~59.9 Hz, 336×240 visible).
 
 ## Install
 
-1. **Get the bitstream**: download the `bitstream` artifact from the latest green
-   [Actions run](https://github.com/spoonelli/Atari-Dual-68k/actions) → unzip →
-   `bitstream.rbf_r`. Then build the SD package (correct Analogue layout, no ROM):
+1. **Get the bitstream**: download the `bitstream` artifact from the latest
+   green [Actions run](https://github.com/spoonelli/Atari-Dual-68k/actions)
+   (or your fork's), unzip, then build the SD package (correct Analogue layout,
+   no ROM):
    ```bash
-   ./support/package.sh path/to/bitstream.rbf_r
+   ./support/package.sh path/to/bitstream/output/bitstream.rbf_r
    ```
-   and merge the resulting zip's `Cores/ Platforms/ Assets/` onto the SD card root.
+   and merge the resulting zip's `Cores/ Platforms/ Assets/` onto the SD root.
 2. **SD card layout** (Pocket firmware 1.1+, jailbroken for unofficial cores):
    ```
-   /Cores/spoonelli.Atari Dual 68k/
+   /Cores/spoonelli.ataridual68k/
        bitstream.rbf_r
        core.json  audio.json  data.json  input.json  interact.json  variants.json  video.json
        info.txt   icon.bin
-   /Platforms/atari_escape.json
-   /Platforms/_images/atari_escape.bin
-   /Assets/atari_escape/common/atari_escape.rom
+   /Platforms/eprom.json
+   /Platforms/_images/eprom.bin        (text placeholder; swap in your own art)
+   /Assets/eprom/common/atari_escape.rom
    ```
-   - The json/txt/bin files come from this repo (`core.json` etc. at the root,
-     `dist/platforms/*` for the two Platforms files, `dist/icon.bin`).
-   - `atari_escape.rom` is built from your dumps:
-     `python3 support/build_rom.py /path/to/eprom dist/assets/atari_escape/common/atari_escape.rom`
-3. Insert SD, power on, open the core from the Pocket menu. It will ask for the ROM
-   (required slot) on launch.
+   - `atari_escape.rom` is built from your own verified dumps:
+     `python3 support/build_rom.py /path/to/eprom ./atari_escape.rom`
+     (see [`ROMS.md`](ROMS.md)). This project never distributes ROM data —
+     and no platform artwork either; the shipped image is an original text
+     placeholder you can replace on your SD.
+3. Insert SD, power on, open **Atari Dual 68k** from the Pocket menu. It asks
+   for the ROM (required slot) on launch.
 
-## Reading the result
+## Controls
 
-- **Green / green**: both CPUs run real code on hardware — the whole spine works
-  (SDRAM download + fetch, decode, dual-CPU, IRQ plumbing). Screenshot it!
-- **Green / red**: Video CPU runs but hasn't released the Extra CPU — could simply be
-  boot code order (it may wait on things our stubs don't provide yet). Still a pass
-  for the main spine.
-- **Red / red**: CPU never fetched its reset PC — points at ROM download or SDRAM
-  read path on real hardware (works in sim; timing/pin issue would show here).
-- **No video at all**: PLL/raster issue — different failure class, also informative.
+| Pocket | Game |
+|---|---|
+| D-pad | Move (emulated hall-effect stick; dock analog takes priority) |
+| Y | Jump / Start |
+| B | Fire |
+| A | Duck |
+| X | Bomb (all three buttons at once) |
+| Select | Coin |
+| Start | Self-test step/continue switch |
 
-Whatever it shows, report back the colors — each combination points at a specific
-subsystem and that's exactly what this drop is designed to isolate.
+The Interact menu (Pocket **+** button) has Service Mode, Soft Reset,
+stick options (invert/swap/deadzone), World X Align, and **Music / Speech
+volume** sliders.
+
+## Dev-build diagnostics (expected, not a bug)
+
+Dev builds show a cyan **build number** bottom-right — check it matches the
+zip you flashed — plus a diagnostic HUD:
+
+- **L** toggles the debug overlay
+- **R** cycles 4 HUD pages: 0 = JSA/sound status · 1 = world-engine (extra
+  CPU) PC + restart counter · 2 = main-CPU forensics / CRAM checksums ·
+  3 = engine state + frame counter
+- **R2 (hold)** = video-fetch kill test (screen garbles while held — a probe,
+  not a fault)
+
+The planned release core (`spoonelli.eprom`) will ship with all diagnostics
+removed.
+
+## Reporting problems
+
+A photo or short video showing the on-screen build number plus HUD page 1 or
+2 usually contains everything needed to diagnose an issue — the forensics
+pages latch crash addresses and checksums precisely so one picture tells the
+story.

@@ -99,7 +99,16 @@ docs/ROMS.md, docs/POCKET_TEST.md        ROM building; on-device test guide
 third_party/                             Arcade-Atari-system1_MiSTer submodule (RTL base)
 ```
 
-## Build your own copy (quickstart)
+## Get it
+
+**Recommended:** grab the latest package from the
+[**Releases page**](https://github.com/spoonelli/Atari-Dual-68k/releases) —
+unzip onto your Pocket SD, add your own ROM per
+[`docs/ROMS.md`](docs/ROMS.md), play. (Alpha pre-releases are dev builds:
+build number + diagnostic HUD on screen, see
+[`docs/POCKET_TEST.md`](docs/POCKET_TEST.md).)
+
+## Build it yourself (contributors)
 
 No local FPGA toolchain needed — GitHub Actions compiles the bitstream for you.
 
