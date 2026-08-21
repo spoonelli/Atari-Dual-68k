@@ -152,6 +152,11 @@ entity escape_core is
         -- data table, and a live flag that it is currently executing there
         dbg_ewild       : out std_logic_vector(15 downto 0);
         dbg_eintab      : out std_logic;
+        -- SDSCHED-75: alpha writes per frame. The attract wipe covers the
+        -- old scene with alpha tiles (~380 wr/frame in MAME); the stalled
+        -- red panel on device is either those writes missing (game-logic
+        -- divergence) or written-but-not-rendered. One HUD reading decides.
+        dbg_awr         : out std_logic_vector(15 downto 0);
         -- LANE4i: extra CPU has executed no bus cycle for ~0.59s post-boot
         -- (the stop #\$2700 die state) - core_top treats it like a watchdog
         -- timeout so a frozen world reboots instead of hanging forever
@@ -356,6 +361,8 @@ architecture rtl of escape_core is
     -- LANE4s bus-cycle meters
     signal vcyc_ctr, ecyc_ctr, vcyc_fr, ecyc_fr : unsigned(15 downto 0) := (others=>'0');
     signal vas_d, eas_d, vb_cyc_d : std_logic := '1';
+    signal awr_ctr, awr_fr : unsigned(15 downto 0) := (others=>'0');
+    signal awr_we_d, vb_awr_d : std_logic := '0';
     signal pf_wcnt, pf_last, col_wcnt : std_logic_vector(15 downto 0) := (others=>'0');
     signal boot_flag  : std_logic_vector(7 downto 0) := (others=>'0');
     signal reboot_cnt : unsigned(7 downto 0) := (others=>'0');
@@ -668,6 +675,23 @@ begin
     -- LANE4s: per-frame bus-cycle meters. A real 7.16MHz 68000 completes a
     -- bus cycle in 4 clocks minimum; every wait state here shows up as a
     -- lower count. Compare against MAME's cycles/frame for ground truth.
+    awr_meter : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                awr_ctr <= (others=>'0'); awr_fr <= (others=>'0'); awr_we_d <= '0'; vb_awr_d <= '0';
+            else
+                awr_we_d <= we_alpha; vb_awr_d <= vblank_in;
+                if vblank_in='1' and vb_awr_d='0' then
+                    awr_fr <= awr_ctr; awr_ctr <= (others=>'0');
+                elsif we_alpha='1' and awr_we_d='0' then
+                    awr_ctr <= awr_ctr + 1;
+                end if;
+            end if;
+        end if;
+    end process;
+    dbg_awr <= std_logic_vector(awr_fr);
+
     cyc_meter : process(clk)
     begin
         if rising_edge(clk) then
