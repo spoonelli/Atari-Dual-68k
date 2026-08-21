@@ -134,41 +134,17 @@ Reusable blocks (already in the System 1 core unless noted):
 | OKI6295 (guts/klaxp)| `jotego/jt6295`                                   |
 | 93C46 EEPROM        | `jotego/jteeprom`                                 |
 
-## Roadmap
+## Status (2026-08)
 
-1. **[done]** APF scaffold — builds a gray screen, packages for the Pocket.
-2. **[done]** CI build — compiles in `theypsilon/quartus-lite-c5:18.1` on a native-x86
-   runner; produces `bitstream.rbf_r` as an artifact in ~2 min per push. (Our own Quartus
-   install was incomplete — `quartus_map` crashed in synthesis even natively; the prebuilt
-   image fixed it. Local Docker still emulates on Apple Silicon, so use CI for bitstreams.)
-3. **[done]** Import base + native sim — System 1 RTL added as submodule; **GHDL** sim
-   harness (`sim/`) runs on the Mac with no Quartus. 16/18 base modules elaborate; `SYNGEN`
-   verified at **456 clocks/line == Escape's raster**. Verification path secured.
-4. **[done]** Memory map — `escape_decode.vhd` (our RTL), 42-check testbench passes.
-5. **CPU** — *both* 68000s verified booting their real code in sim (`tb_escape_cpu`,
-   `tb_escape_extracpu`): main SP=0x3F7F00/PC=0x694, extra SP=0x16FFDC/PC=0x342, extra
-   polls the shared-RAM mailbox @0x16FFE0. **Remaining:** wire both onto one shared RAM
-   (arbitration) so the handshake completes + `EXTRA CPU reset` bit.
-6. **Video** — adapt motion objects to **SLIP pointers**; per-layer color RAM; 336×240.
-7. **Sound** — JSA-I via SCOM mailbox: 6502 + jt51 (YM2151) + TMS5220 (+ POKEY if present).
-8. **Inputs** — map Pocket d-pad/stick to the analog Hall-effect joystick (ADC0–3).
-9. **ROM loading** — *assembler + data slot done*: `support/build_rom.py` builds one
-   0x220000 SDRAM image from user dumps; `data.json` declares the slot (see docs/ROMS.md).
-   **Remaining:** core-side SDRAM memory controller to serve it (part of step 6/core_top).
-10. **Variants** — eprom / eprom2 / klaxp / guts (JSA-II adds OKI6295).
+The roadmap below was written before hardware bring-up; every step of it is
+now **done** — the core boots, renders all three video layers, speaks through
+the full JSA-I sound board, and plays. Current work is polish: sprite
+bandwidth/placement details, speech phrase tails, EEPROM persistence via the
+Pocket save system, and release packaging (`spoonelli.eprom` clean build).
 
-## Big remaining phase: core_top integration (hardware path)
-
-Everything above the line is verified in GHDL sim. Turning it into a core that runs on
-the Pocket is a large, separate effort: an **SDRAM memory controller** (ROMs are ~2 MB,
-too big for BRAM), wiring the CPUs + decoder + memories + **Escape-specific video**
-(playfield/alpha/motion-objects reading VRAM, per-layer palette, SLIP pointers) into the
-Verilog `core_top`, PLL clocking, and APF video/audio output. This is multi-step RTL and
-its final validation needs real hardware. Sim (fx68k/TG68K + our RTL) de-risks each piece
-first; CI (`theypsilon/quartus-lite-c5`) gives fit/timing feedback per push.
-
-## ROM strategy
-
-The Pocket loads user-supplied ROMs through APF **data slots** (`data.json`). We define a
-manifest that concatenates/orders the individual ROM chips into the layout the RTL expects
-(mirroring how MAME's `ROM_START(eprom)` maps regions). No ROM data is stored in this repo.
+The engineering history — what the 150+ builds taught, which instruments
+cracked which bugs, and what a veteran would have done from day one — is
+distilled in [`LESSONS.md`](LESSONS.md). The on-device debug tooling
+(forensics HUD pages, crash latches, CRAM checksums, freeze rescue, scene
+replay benches) is a permanent part of dev builds; see
+[`POCKET_TEST.md`](POCKET_TEST.md).
