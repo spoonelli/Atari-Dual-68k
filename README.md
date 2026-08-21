@@ -99,6 +99,30 @@ docs/ROMS.md, docs/POCKET_TEST.md        ROM building; on-device test guide
 third_party/                             Arcade-Atari-system1_MiSTer submodule (RTL base)
 ```
 
+## Build your own copy (quickstart)
+
+No local FPGA toolchain needed — GitHub Actions compiles the bitstream for you.
+
+1. **Fork** this repo on GitHub and enable Actions on your fork
+   (Actions tab → "I understand… enable").
+2. **Trigger a build**: Actions → *Build core (Quartus)* → *Run workflow* on
+   `main` (or just push any commit). Takes ~15 minutes.
+3. **Download** the `bitstream` artifact from the finished run.
+4. **Clone locally** (submodules are required — a plain clone will not build):
+   ```bash
+   git clone --recursive https://github.com/<you>/Atari-Dual-68k
+   ```
+5. **Package** the Pocket SD zip (contains no ROMs, by design):
+   ```bash
+   ./support/package.sh path/to/bitstream/output/bitstream.rbf_r
+   ```
+6. **ROM**: build `atari_escape.rom` from your own verified dumps per
+   [`docs/ROMS.md`](docs/ROMS.md) and place it at `Assets/eprom/common/` on the SD.
+7. Unzip the package onto the SD, launch **Atari Dual 68k** on the Pocket.
+
+Dev builds show a build number bottom-right and diagnostic HUD pages on
+L / R / R2 — that is expected; the clean-screen release core comes later.
+
 ## Building & testing
 
 - **Bitstream**: GitHub Actions compiles every push inside
