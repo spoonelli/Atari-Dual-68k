@@ -1486,10 +1486,23 @@ end
     //   2 main-CPU (PC/wr-region) | 3 engine (actor head/mode bytes)
     // vidkill stays on R2 HOLD only; CRAM sums retired (sim benches cover).
     reg [1:0] dbgmode = 2'd0;
+    // SDSCHED-85 trace view: L2 toggles (demotes the alpha-hide bringup
+    // tool); R steps backward through entries while active.
+    reg       m_trace = 1'b0;
+    reg       l2_d = 1'b0;
+    reg [6:0] tr_back = 7'd0;      // steps back from newest entry
     reg       rbtn_d  = 1'b0;
     always @(posedge clk_sys_7159) begin
         rbtn_d <= cont1_key[9];
-        if(cont1_key[9] & ~rbtn_d) dbgmode <= dbgmode + 2'd1;
+        l2_d <= cont1_key[10];
+        if(cont1_key[10] & ~l2_d) begin
+            m_trace <= ~m_trace;
+            tr_back <= 7'd0;
+        end
+        if(cont1_key[9] & ~rbtn_d) begin
+            if(m_trace) tr_back <= tr_back + 7'd1;
+            else        dbgmode <= dbgmode + 2'd1;
+        end
     end
     // LANE3h3: modes 1-5 RETIRED (answered questions - PF map, input probe,
     // fetch probe, MO-kill, MO-priority). The design sits at the routing
@@ -1592,6 +1605,13 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         else if(vblank_w && !vb_hud_d) frame_ctr <= frame_ctr + 16'd1;
     end
     reg  [3:0] hex_digit;
+    always @(posedge clk_sys_7159)
+        trace_idx <= trace_wp - 7'd1 - tr_back;
+    wire [23:0] tr_addr = {trace_q[38:16], 1'b0};
+    wire [15:0] tr_data = trace_q[15:0];
+    wire [3:0]  tr_flag = trace_q[42:39];        // {rw, fc[2:0]}
+    wire [7:0]  tr_step = {1'b0, tr_back} ^ {8{1'b0}};
+
     always @(*) begin
         // HUD: PC | WRHI | BOOT(flag.reboots)
         // PC = last video-CPU instruction fetch (low 16 bits; boot/march code is
@@ -1610,10 +1630,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // attract NEVER resets after boot (extra released once at T=11s,
         // runs forever) - our ~35s reboot loop = a main-CPU death, and this
         // page names it.
-        4'd0:  hex_digit = m_moprobe ? cst0_px[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
-        4'd1:  hex_digit = m_moprobe ? cst0_px[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
-        4'd2:  hex_digit = m_moprobe ? cst0_px[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
-        4'd3:  hex_digit = m_moprobe ? cst0_px[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
+        4'd0:  hex_digit = m_trace ? tr_step[7:4] : m_moprobe ? cst0_px[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
+        4'd1:  hex_digit = m_trace ? tr_step[3:0] : m_moprobe ? cst0_px[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
+        4'd2:  hex_digit = m_trace ? (trace_frozen ? 4'hF : 4'h0) : m_moprobe ? cst0_px[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
+        4'd3:  hex_digit = m_trace ? tr_addr[23:20] : m_moprobe ? cst0_px[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
         // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
@@ -1626,22 +1646,22 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // page 0 field2 = LANE4l max extra bus-cycle length: normal cycles
         // are tiny (< 0x0040); a stuck write shows FFFF = the invisible
         // freeze mode (bus active, rescue can't see it)
-        4'd5:  hex_digit = m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
-        4'd6:  hex_digit = m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
-        4'd7:  hex_digit = m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
-        4'd8:  hex_digit = m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
+        4'd5:  hex_digit = m_trace ? tr_addr[19:16] : m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
+        4'd6:  hex_digit = m_trace ? tr_addr[15:12] : m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
+        4'd7:  hex_digit = m_trace ? tr_addr[11:8] : m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
+        4'd8:  hex_digit = m_trace ? tr_addr[7:4] : m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = m_moprobe ? cst1_px[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? pg2_f3[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? pg2_f3[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? pg2_f3[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? pg2_f3[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_trace ? tr_data[15:12] : m_moprobe ? cst1_px[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? pg2_f3[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_trace ? tr_data[11:8] : m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? pg2_f3[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_trace ? tr_data[7:4] : m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? pg2_f3[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_trace ? tr_data[3:0] : m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? pg2_f3[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
         // LANE4c: slot 14 (the gap) shows the crash SOURCE digit on page 2
         // (0=BRAM 1=prefetch 2=cache 3=fresh-SDRAM) - names which serve
         // path delivered the wrong opcode word
-        4'd14: hex_digit = {2'b00, crash_src};
-        4'd15: hex_digit = {2'b00, dbgmode};
+        4'd14: hex_digit = m_trace ? tr_addr[3:0] : {2'b00, crash_src};
+        4'd15: hex_digit = m_trace ? tr_flag : {2'b00, dbgmode};
         default: hex_digit = 4'h0;
         endcase
     end
@@ -1656,7 +1676,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3084;   // sdram-sched: HORIZONTAL FINE SCROLL fix (measured 8px lurch) - screen shows '84'
+    localparam [15:0] BUILD_ID = 16'h3085;   // sdram-sched: bus-trace flight recorder + HUD trace view - screen shows '85'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2013,6 +2033,11 @@ escape_mob umob (
     wire [15:0] dbg_ewrong;                       // SDSCHED-76 impostor 0x80E word
     wire [3:0]  dbg_ewrong_cnt;
     wire [15:0] dbg_ewrong_prev;                  // SDSCHED-81 predecessor read addr
+    // SDSCHED-85 flight recorder
+    reg  [6:0]  trace_idx = 7'd0;
+    wire [42:0] trace_q;
+    wire [6:0]  trace_wp;
+    wire        trace_frozen;
     // SDSCHED-79: impostor evidence SURVIVES core resets (the '78 rescue
     // reboot wiped its own proof). Cleared only by APF reset.
     reg  [15:0] ewrong_keep = 16'd0;
@@ -2157,6 +2182,10 @@ escape_core #(.PAR4_EN(1)) ecore (
     .dbg_ewrong     ( dbg_ewrong ),
     .dbg_ewrong_cnt ( dbg_ewrong_cnt ),
     .dbg_ewrong_prev( dbg_ewrong_prev ),
+    .trace_idx      ( trace_idx ),
+    .trace_q        ( trace_q ),
+    .trace_wp       ( trace_wp ),
+    .trace_frozen   ( trace_frozen ),
     .dbg_ecrash_data( dbg_ecrash_data ),
     .dbg_mbox_cmd   ( dbg_mbox_cmd ),
     .dbg_mbox_resp  ( dbg_mbox_resp ),
