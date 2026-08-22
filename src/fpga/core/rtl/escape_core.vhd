@@ -300,8 +300,8 @@ architecture rtl of escape_core is
     signal e_in_tab  : std_logic := '0';
     signal ewrong_val : std_logic_vector(15 downto 0) := (others=>'0');
     signal ewrong_cnt : unsigned(3 downto 0) := (others=>'0');
-    signal ewrong_prev : std_logic_vector(16 downto 1) := (others=>'0');
-    signal e_lastrd    : std_logic_vector(16 downto 1) := (others=>'0');
+    signal ewrong_prev : std_logic_vector(15 downto 0) := (others=>'0');
+    signal e_lastrd    : std_logic_vector(15 downto 0) := (others=>'0');
     signal vec_i : std_logic_vector(15 downto 0);
     -- LANE4f: extra-CPU first-fault forensics
     signal e_fdata_i, ecrash_pc_i, ecrash_data_i : std_logic_vector(15 downto 0)
@@ -1011,7 +1011,7 @@ begin
                     -- SDSCHED-81 replay forensic: remember the last completed
                     -- extra-CPU read address; pair it with any impostor.
                     if e_dtack_n='0' and e_rw_n='1' then
-                        e_lastrd <= e_addr(16 downto 1);
+                        e_lastrd <= e_addr(15 downto 1) & '0';
                     end if;
                     if e_dtack_n='0' and e_addr(23 downto 6) = "000000000000100000"
                        and unsigned(e_addr(5 downto 1)) <= 17 then
@@ -1069,7 +1069,7 @@ begin
     dbg_eintab <= e_in_tab;
     dbg_ewrong     <= ewrong_val;
     dbg_ewrong_cnt <= std_logic_vector(ewrong_cnt);
-    dbg_ewrong_prev <= ewrong_prev & '0';
+    dbg_ewrong_prev <= ewrong_prev;
     dbg_wrhi <= wrhi_i;
     dbg_ecrash_pc   <= ecrash_pc_i;
     dbg_ecrash_data <= ecrash_data_i;
