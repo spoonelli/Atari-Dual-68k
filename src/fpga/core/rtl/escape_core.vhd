@@ -373,6 +373,14 @@ architecture rtl of escape_core is
     signal shr_a_din  : std_logic_vector(15 downto 0);
     signal shr_a_uds, shr_a_lds : std_logic;
     signal v_addr_q, e_addr_q : std_logic_vector(23 downto 1) := (others=>'0');
+    -- SDSCHED-83: registered CPU read-data capture. Both captured impostor
+    -- words (080C, 08C4) were recent STACK content served into dispatch
+    -- reads of a DIFFERENT memory - the read mux presenting the wrong
+    -- source at the capture instant (RTL-clean per the vecrace sweep;
+    -- physical/synthesis-marginal). The CPUs now consume a registered
+    -- copy: data settles a full clock before DTACK, transients can't reach
+    -- the capture. DTACK timing already gives >=2 clocks on every path.
+    signal v_di_r, e_di_r : std_logic_vector(15 downto 0) := (others=>'0');
     signal mbox_cmd, mbox_resp, mbox_ramr, mbox_sum : std_logic_vector(15 downto 0) := (others=>'0');
     -- LANE4r mailbox forensics + deadlock rescue
     signal cmd5a_cnt, ack_cnt : unsigned(7 downto 0) := (others=>'0');
@@ -401,7 +409,7 @@ begin
     -- 68000 (schematic says U68010 but real boards carry 68000s); autovectored IRQs via VPA
     vcpu : entity work.TG68K generic map ( CPU => "00" )
         port map ( CLK=>clk, RESET=>reset_n, HALT=>reset_n, BERR=>'0', IPL=>v_ipl,
-                   ADDR=>v_addr, FC=>v_fc, DATAI=>v_di, DATAO=>v_do,
+                   ADDR=>v_addr, FC=>v_fc, DATAI=>v_di_r, DATAO=>v_do,
                    AS=>v_as_n, UDS=>v_uds_n, LDS=>v_lds_n, RW=>v_rw_n,
                    DTACK=>v_dtack_n, E=>open, VPA=>v_vpa_n, VMA=>open );
 
@@ -409,7 +417,7 @@ begin
     -- also a 68000 (same schematic-vs-board story as the video CPU)
     ecpu : entity work.TG68K generic map ( CPU => "00" )
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>e_ipl,
-                   ADDR=>e_addr, FC=>e_fc, DATAI=>e_di, DATAO=>e_do,
+                   ADDR=>e_addr, FC=>e_fc, DATAI=>e_di_r, DATAO=>e_do,
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,
                    DTACK=>e_dtack_n, E=>open, VPA=>e_vpa_n, VMA=>open );
 
@@ -1492,6 +1500,14 @@ begin
     e_sel_io <= '1' when e_as_n='0' and e_addr(23 downto 16) = x"26" else '0';
 
     ---------------------------------------------------------------- DTACK
+    di_capture : process(clk)
+    begin
+        if rising_edge(clk) then
+            v_di_r <= v_di;
+            e_di_r <= e_di;
+        end if;
+    end process;
+
     dtack_gen : process(clk)
     begin
         if rising_edge(clk) then

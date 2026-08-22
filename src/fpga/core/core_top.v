@@ -1547,7 +1547,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             epc_fr    <= dbg_epc;
             vpc_fr    <= dbg_pc;
             wrhi_fr   <= dbg_wrhi;
-            mbox_fr   <= {dbg_erestart, dbg_mbox_cmd[7:0]};  // LANE4r: was resp (always 4321)
+            // SDSCHED-83: once an impostor is caught, this slot shows the
+            // PREDECESSOR read address (replay-source confirmation)
+            mbox_fr   <= ewrong_seen ? ewrong_prev_keep
+                                     : {dbg_erestart, dbg_mbox_cmd[7:0]};
             vcyc_fr   <= dbg_vcyc;
             ecyc_fr   <= dbg_ecyc;
             engine_fr <= dbg_engine;
@@ -1653,7 +1656,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3082;   // sdram-sched: 81 + dual-port collision bypass (robot-door garble) - screen shows '82'
+    localparam [15:0] BUILD_ID = 16'h3083;   // sdram-sched: registered CPU read-data capture + prev-addr display - screen shows '83'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1989,15 +1992,18 @@ escape_mob umob (
     wire [15:0] dbg_awr;                          // SDSCHED-75 alpha writes/frame
     wire [15:0] dbg_ewrong;                       // SDSCHED-76 impostor 0x80E word
     wire [3:0]  dbg_ewrong_cnt;
+    wire [15:0] dbg_ewrong_prev;                  // SDSCHED-81 predecessor read addr
     // SDSCHED-79: impostor evidence SURVIVES core resets (the '78 rescue
     // reboot wiped its own proof). Cleared only by APF reset.
     reg  [15:0] ewrong_keep = 16'd0;
+    reg  [15:0] ewrong_prev_keep = 16'd0;
     reg         ewrong_seen = 1'b0;
     always @(posedge clk_sys_7159) begin
         if(!reset_n) begin
             ewrong_keep <= 16'd0; ewrong_seen <= 1'b0;
         end else if(!ewrong_seen && dbg_ewrong_cnt != 4'd0) begin
-            ewrong_keep <= dbg_ewrong; ewrong_seen <= 1'b1;
+            ewrong_keep <= dbg_ewrong; ewrong_prev_keep <= dbg_ewrong_prev;
+            ewrong_seen <= 1'b1;
         end
     end
     reg         core_rstn_sd = 1'b0;              // core reset, sdram-domain view
@@ -2130,6 +2136,7 @@ escape_core #(.PAR4_EN(1)) ecore (
     .dbg_awr        ( dbg_awr ),
     .dbg_ewrong     ( dbg_ewrong ),
     .dbg_ewrong_cnt ( dbg_ewrong_cnt ),
+    .dbg_ewrong_prev( dbg_ewrong_prev ),
     .dbg_ecrash_data( dbg_ecrash_data ),
     .dbg_mbox_cmd   ( dbg_mbox_cmd ),
     .dbg_mbox_resp  ( dbg_mbox_resp ),
