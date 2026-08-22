@@ -47,3 +47,4 @@ output/*.zip
 output/*.rbf_r
 output/*
 !output/.gitkeep
+.claude/
