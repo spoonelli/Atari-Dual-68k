@@ -931,6 +931,7 @@ begin
 
     -- wedge locator: FC(1:0)="10" marks program-space reads (user or supervisor)
     pc_probe : process(clk)
+        variable tramp_exp : std_logic_vector(15 downto 0);
     begin
         if rising_edge(clk) then
             if reset_n='0' then
@@ -941,15 +942,27 @@ begin
                     if e_dtack_n='0' then                  -- completing: capture data
                         e_fdata_i <= e_di;
                     end if;
-                    -- SDSCHED-76 operand watchdog: 0x80E is the target-
-                    -- operand word of the extra's vblank trampoline
-                    -- (jmp $842 at 0x80C). The wild-jump locator caught a
-                    -- freeze jumping from exactly this fetch - a wrong word
-                    -- served here IS the freeze. Latch any impostor value.
-                    if e_dtack_n='0' and e_addr(23 downto 16) = x"00"
-                       and e_addr(15 downto 1) = "000100000000111" then
-                        if e_di /= x"0842" and ewrong_cnt /= x"F" then
-                            ewrong_val <= e_di;
+                    -- SDSCHED-77 trampoline watchdog (widened from 76's
+                    -- single word): freezes jump off the extra's interrupt
+                    -- dispatch table - '69 from slot 0x80C's operand, '76
+                    -- session from slot 0x800's (wild_src=0x804). Compare
+                    -- EVERY completed fetch of 0x800-0x823 against the ROM
+                    -- truth; latch the FIRST impostor (root evidence), count
+                    -- all. Cycling p1 display = re-corruption every dispatch.
+                    if e_dtack_n='0' and e_addr(23 downto 6) = "000000000000100000"
+                       and unsigned(e_addr(5 downto 1)) <= 17 then
+                        case e_addr(5 downto 1) is
+                            when "00000" | "00011" | "00110" | "01001" | "01100" | "01111" =>
+                                tramp_exp := x"4EF9";   -- jmp opcodes
+                            when "00001" | "00100" | "00111" | "01010" | "01101" | "10000" =>
+                                tramp_exp := x"0000";   -- target hi words
+                            when "00010" => tramp_exp := x"0970";
+                            when "00101" => tramp_exp := x"08F6";
+                            when "01000" | "01011" | "01110" => tramp_exp := x"0842";
+                            when others  => tramp_exp := x"0994";  -- 0x822
+                        end case;
+                        if e_di /= tramp_exp and ewrong_cnt /= x"F" then
+                            if ewrong_cnt = x"0" then ewrong_val <= e_di; end if;
                             ewrong_cnt <= ewrong_cnt + 1;
                         end if;
                     end if;
