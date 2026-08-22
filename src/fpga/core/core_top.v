@@ -1566,7 +1566,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire        e_faulted = (dbg_ecrash_pc != 16'd0);
     // LANE4s: while the extra is executing the data table (the '69 wedge)
     // show WHERE IT JUMPED FROM instead of the meaningless in-table PC
-    wire [15:0] pg1_f1 = e_faulted ? dbg_ecrash_pc : (dbg_eintab ? dbg_ewild : epc_fr);
+    // SDSCHED-76: an impostor 0x80E word outranks everything - it IS the
+    // root cause, caught in the act.
+    wire [15:0] pg1_f1 = (dbg_ewrong_cnt != 4'd0) ? dbg_ewrong
+                       : e_faulted ? dbg_ecrash_pc : (dbg_eintab ? dbg_ewild : epc_fr);
     // field2 pre-fault: {extra restart count, last mbox cmd low byte} -
     // boot leaves a small known restart count; +1 at the freeze moment
     // confirms the mid-game-restart hypothesis in one photo
@@ -1647,7 +1650,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3075;   // sdram-sched: alpha-write meter (wipe forensics) + reset resync - screen shows '75'
+    localparam [15:0] BUILD_ID = 16'h3076;   // sdram-sched: 0x80E operand watchdog (freeze root-cause trap) - screen shows '76'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1981,6 +1984,8 @@ escape_mob umob (
     wire [15:0] dbg_ewild;                        // LANE4s wild-jump source PC
     wire        dbg_eintab;                       // extra executing data table now
     wire [15:0] dbg_awr;                          // SDSCHED-75 alpha writes/frame
+    wire [15:0] dbg_ewrong;                       // SDSCHED-76 impostor 0x80E word
+    wire [3:0]  dbg_ewrong_cnt;
     reg         core_rstn_sd = 1'b0;              // core reset, sdram-domain view
     wire [15:0] dbg_vec;
     wire        dbg_fault;
@@ -2108,6 +2113,8 @@ escape_core ecore (
     .dbg_ewild      ( dbg_ewild ),
     .dbg_eintab     ( dbg_eintab ),
     .dbg_awr        ( dbg_awr ),
+    .dbg_ewrong     ( dbg_ewrong ),
+    .dbg_ewrong_cnt ( dbg_ewrong_cnt ),
     .dbg_ecrash_data( dbg_ecrash_data ),
     .dbg_mbox_cmd   ( dbg_mbox_cmd ),
     .dbg_mbox_resp  ( dbg_mbox_resp ),
