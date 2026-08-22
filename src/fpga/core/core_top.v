@@ -1568,7 +1568,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // show WHERE IT JUMPED FROM instead of the meaningless in-table PC
     // SDSCHED-76: an impostor 0x80E word outranks everything - it IS the
     // root cause, caught in the act.
-    wire [15:0] pg1_f1 = (dbg_ewrong_cnt != 4'd0) ? dbg_ewrong
+    wire [15:0] pg1_f1 = ewrong_seen ? ewrong_keep
                        : e_faulted ? dbg_ecrash_pc : (dbg_eintab ? dbg_ewild : epc_fr);
     // field2 pre-fault: {extra restart count, last mbox cmd low byte} -
     // boot leaves a small known restart count; +1 at the freeze moment
@@ -1650,7 +1650,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3078;   // sdram-sched: STALE-SERVE FIX (addr-qualified waitstate) + watchdog verifier - screen shows '78'
+    localparam [15:0] BUILD_ID = 16'h3079;   // sdram-sched: vector-read watchdog + reset-surviving evidence - screen shows '79'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1986,6 +1986,17 @@ escape_mob umob (
     wire [15:0] dbg_awr;                          // SDSCHED-75 alpha writes/frame
     wire [15:0] dbg_ewrong;                       // SDSCHED-76 impostor 0x80E word
     wire [3:0]  dbg_ewrong_cnt;
+    // SDSCHED-79: impostor evidence SURVIVES core resets (the '78 rescue
+    // reboot wiped its own proof). Cleared only by APF reset.
+    reg  [15:0] ewrong_keep = 16'd0;
+    reg         ewrong_seen = 1'b0;
+    always @(posedge clk_sys_7159) begin
+        if(!reset_n) begin
+            ewrong_keep <= 16'd0; ewrong_seen <= 1'b0;
+        end else if(!ewrong_seen && dbg_ewrong_cnt != 4'd0) begin
+            ewrong_keep <= dbg_ewrong; ewrong_seen <= 1'b1;
+        end
+    end
     reg         core_rstn_sd = 1'b0;              // core reset, sdram-domain view
     wire [15:0] dbg_vec;
     wire        dbg_fault;

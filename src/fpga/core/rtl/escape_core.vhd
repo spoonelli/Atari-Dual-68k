@@ -933,6 +933,7 @@ begin
     -- wedge locator: FC(1:0)="10" marks program-space reads (user or supervisor)
     pc_probe : process(clk)
         variable tramp_exp : std_logic_vector(15 downto 0);
+        variable vec_exp   : std_logic_vector(15 downto 0);
     begin
         if rising_edge(clk) then
             if reset_n='0' then
@@ -950,6 +951,28 @@ begin
                     -- EVERY completed fetch of 0x800-0x823 against the ROM
                     -- truth; latch the FIRST impostor (root evidence), count
                     -- all. Cycling p1 display = re-corruption every dispatch.
+                    -- SDSCHED-79: the VECTOR READS themselves (0x64-0x7F,
+                    -- data reads - invisible to the trampoline trap). A
+                    -- stale word here dispatches straight into the table
+                    -- with the trampoline never touched = silent '78 freeze.
+                    if e_dtack_n='0' and e_addr(23 downto 5) = "0000000000000000011"
+                       and e_addr(4 downto 1) /= "0000" and e_addr(4 downto 1) /= "0001" then
+                        -- words 0x64..0x7E; even-index = 0000, odd = 0300
+                        -- except 0x72 = 0308 and 0x7A = 0306
+                        if e_addr(1) = '0' then
+                            vec_exp := x"0000";
+                        elsif e_addr(4 downto 1) = "1001" then
+                            vec_exp := x"0308";           -- 0x72
+                        elsif e_addr(4 downto 1) = "1101" then
+                            vec_exp := x"0306";           -- 0x7A
+                        else
+                            vec_exp := x"0300";
+                        end if;
+                        if e_di /= vec_exp and ewrong_cnt /= x"F" then
+                            if ewrong_cnt = x"0" then ewrong_val <= e_di; end if;
+                            ewrong_cnt <= ewrong_cnt + 1;
+                        end if;
+                    end if;
                     if e_dtack_n='0' and e_addr(23 downto 6) = "000000000000100000"
                        and unsigned(e_addr(5 downto 1)) <= 17 then
                         case e_addr(5 downto 1) is
