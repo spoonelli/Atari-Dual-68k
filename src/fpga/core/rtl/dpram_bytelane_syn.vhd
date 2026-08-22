@@ -30,6 +30,12 @@ architecture rtl of dpram_bytelane_syn is
     type bank_t is array (0 to 2**awidth-1) of std_logic_vector(7 downto 0);
     shared variable hi, lo : bank_t := (others => (others => '0'));
 begin
+    -- SDSCHED-82: cross-port same-address collision bypass. The inference
+    -- template leaves mixed-port read-during-write to the synthesizer
+    -- (M10K default: UNDEFINED data). Real arcade VRAM returned old data;
+    -- undefined reads showed up as location-locked garble exactly where
+    -- MO-entry churn is highest (the robot entry door). A colliding read
+    -- now deterministically returns the in-flight write data.
     port_a : process(clk)
     begin
         if rising_edge(clk) then
@@ -37,6 +43,10 @@ begin
             if we_a='1' and lds_a_n='0' then lo(to_integer(unsigned(addr_a))) := din_a(7 downto 0);  end if;
             q_a(15 downto 8) <= hi(to_integer(unsigned(addr_a)));
             q_a(7 downto 0)  <= lo(to_integer(unsigned(addr_a)));
+            if we_b='1' and addr_b = addr_a then
+                if uds_b_n='0' then q_a(15 downto 8) <= din_b(15 downto 8); end if;
+                if lds_b_n='0' then q_a(7 downto 0)  <= din_b(7 downto 0);  end if;
+            end if;
         end if;
     end process;
 
@@ -47,6 +57,10 @@ begin
             if we_b='1' and lds_b_n='0' then lo(to_integer(unsigned(addr_b))) := din_b(7 downto 0);  end if;
             q_b(15 downto 8) <= hi(to_integer(unsigned(addr_b)));
             q_b(7 downto 0)  <= lo(to_integer(unsigned(addr_b)));
+            if we_a='1' and addr_a = addr_b then
+                if uds_a_n='0' then q_b(15 downto 8) <= din_a(15 downto 8); end if;
+                if lds_a_n='0' then q_b(7 downto 0)  <= din_a(7 downto 0);  end if;
+            end if;
         end if;
     end process;
 end rtl;
