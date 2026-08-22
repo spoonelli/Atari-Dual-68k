@@ -32,7 +32,10 @@ entity tb_escape_vecrace is
         G_SWEEP : integer := 613;     -- phase modulus (period = BASE + phase)
         G_PHOFF : integer := 0;       -- phase offset: phase = (G_PHOFF+i) mod G_SWEEP
                                       -- (parallel sweep slices use disjoint offsets)
-        G_LAT   : integer := 2;       -- rom service latency, clks
+        G_DIAG  : integer := 0;       -- 1 = per-clk trace of FC=111 cycles
+        G_LAT   : integer := 2;       -- rom service latency, clks (0 = jitter
+                                      -- mode: pseudo-random 1..16 per request,
+                                      -- modeling SDRAM contention/refresh)
         G_HEX   : string  := "sim/work/vecrace_words.hex"
     );
 end tb_escape_vecrace;
@@ -142,16 +145,26 @@ begin
         variable lat : integer := 0; variable served : boolean := false;
         variable wi  : integer;
         variable d32 : std_logic_vector(31 downto 0);
+        variable lfsr : std_logic_vector(15 downto 0) := x"ACE1";
+        variable tgt  : integer := 2;
     begin
         if rising_edge(clk) then
+            if G_LAT > 0 then
+                tgt := G_LAT;
+            end if;
             if rom_req='1' then
                 if not served then
-                    if lat = G_LAT then
+                    if lat = tgt then
                         wi  := to_integer(unsigned(rom_addr(AW downto 1)));
                         d32 := img(wi) & img((wi + 1) mod 2**AW);
                         rom_data <= d32;
                         rom_par  <= xor d32;
                         rom_ack  <= '1'; served := true; lat := 0;
+                        if G_LAT = 0 then      -- jitter: next latency 1..16
+                            lfsr := lfsr(14 downto 0) &
+                                    (lfsr(15) xor lfsr(13) xor lfsr(12) xor lfsr(10));
+                            tgt  := to_integer(unsigned(lfsr(3 downto 0))) + 1;
+                        end if;
                     else lat := lat + 1; end if;
                 end if;
             else rom_ack <= '0'; served := false; lat := 0; end if;
@@ -319,6 +332,27 @@ begin
             di_q    := m_edi;
             addr_q  := m_eaddr(23 downto 0);
             fc_q    := m_efc;
+        end if;
+    end process;
+
+    -- G_DIAG: per-clock trace of FC=111 (interrupt-acknowledge-shaped)
+    -- cycles - shows whether the address morphs mid-cycle and how the cycle
+    -- terminates (DTACK vs the VPA/sync9 path)
+    diag : process(clk)
+        variable budget : integer := 120;
+    begin
+        if rising_edge(clk) and G_DIAG = 1 and budget > 0 then
+            if m_eas='0' and m_efc="111" then
+                report "DIAG fc111: addr " & hex16(m_eaddr(31 downto 16)) &
+                       hex16(m_eaddr(15 downto 0)) &
+                       " rw " & std_logic'image(m_erw) &
+                       " dtack_n " & std_logic'image(m_edtack) &
+                       " di " & hex16(m_edi) &
+                       " S " & integer'image(to_integer(unsigned(m_sstate))) &
+                       " vpad " & std_logic'image(m_vpad) &
+                       " t " & time'image(now);
+                budget := budget - 1;
+            end if;
         end if;
     end process;
 

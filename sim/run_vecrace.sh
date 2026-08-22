@@ -10,6 +10,7 @@
 #   LAT=n         rom service latency clks (default 2)
 #   FIXED=0|1     1 = substitute the main checkout's escape_core.vhd (the
 #                 SDSCHED-78 address-qualified-waitstate fix) for this tree's
+#   DIAG=1        per-clock trace of FC=111 cycles (small NIRQ runs)
 #   PHOFF=n       phase offset (parallel sweep slices use disjoint offsets)
 #   TAG=name      unique build-dir tag, for parallel slices (default: shad$SHAD-p$PHOFF)
 #   SKIPHEX=1     don't regenerate the hex image (parallel launchers pre-generate)
@@ -25,6 +26,7 @@ SWEEP="${SWEEP:-613}"
 LAT="${LAT:-2}"
 FIXED="${FIXED:-0}"
 PHOFF="${PHOFF:-0}"
+DIAG="${DIAG:-0}"
 TAG="${TAG:-shad$SHAD-p$PHOFF}"
 WAVE="${WAVE:-}"
 STOPTIME="${STOPTIME:-2sec}"
@@ -67,5 +69,5 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W tb_escape_vecrace >/dev/null
   ghdl -r \$STD --workdir=\$W tb_escape_vecrace $RUNFLAGS \
-    -gG_SHAD=$SHAD -gG_NIRQ=$NIRQ -gG_BASE=$BASE -gG_SWEEP=$SWEEP -gG_LAT=$LAT -gG_PHOFF=$PHOFF
+    -gG_SHAD=$SHAD -gG_NIRQ=$NIRQ -gG_BASE=$BASE -gG_SWEEP=$SWEEP -gG_LAT=$LAT -gG_PHOFF=$PHOFF -gG_DIAG=$DIAG
 "
