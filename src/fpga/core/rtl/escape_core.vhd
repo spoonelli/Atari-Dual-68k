@@ -168,6 +168,13 @@ entity escape_core is
         dbg_ewrong      : out std_logic_vector(15 downto 0);
         dbg_ewrong_cnt  : out std_logic_vector(3 downto 0);
         dbg_ewrong_prev : out std_logic_vector(15 downto 0);  -- addr of prior read
+        -- SDSCHED-85 bus-trace flight recorder: last 128 extra-CPU bus
+        -- transactions, frozen when the wild-jump detector fires. Readout
+        -- is combinational by index (same clock domain as the HUD).
+        trace_idx       : in  std_logic_vector(6 downto 0) := (others=>'0');
+        trace_q         : out std_logic_vector(42 downto 0);
+        trace_wp        : out std_logic_vector(6 downto 0);
+        trace_frozen    : out std_logic;
         -- LANE4i: extra CPU has executed no bus cycle for ~0.59s post-boot
         -- (the stop #\$2700 die state) - core_top treats it like a watchdog
         -- timeout so a frozen world reboots instead of hanging forever
@@ -300,6 +307,13 @@ architecture rtl of escape_core is
     signal e_in_tab  : std_logic := '0';
     signal ewrong_val : std_logic_vector(15 downto 0) := (others=>'0');
     signal ewrong_cnt : unsigned(3 downto 0) := (others=>'0');
+    type trace_t is array (0 to 127) of std_logic_vector(42 downto 0);
+    signal tr_ring : trace_t := (others => (others=>'0'));
+    attribute ramstyle : string;
+    attribute ramstyle of tr_ring : signal is "MLAB, no_rw_check";
+    signal tr_wp     : unsigned(6 downto 0) := (others=>'0');
+    signal tr_froze  : std_logic := '0';
+    signal tr_seen   : std_logic := '0';
     signal ewrong_prev : std_logic_vector(15 downto 0) := (others=>'0');
     signal e_lastrd    : std_logic_vector(15 downto 0) := (others=>'0');
     signal vec_i : std_logic_vector(15 downto 0);
@@ -527,7 +541,7 @@ begin
                               and (last_was_v='1' or v_rom_pend='0' or v_hit_dly/="00") then
                             rom_owner <= OWN_E; last_was_v <= '0';
                             rom_addr_i <= std_logic_vector(
-                                unsigned(x"0" & e_addr(19 downto 1) & '0') + x"080000");
+                                unsigned(std_logic_vector'(x"0" & e_addr(19 downto 1) & '0')) + x"080000");
                             rom_req_i <= '1';
                         elsif v_rom_pend='1' and v_hit_dly="00" and v_served='0' then
                             rom_owner <= OWN_V; last_was_v <= '1';
@@ -541,7 +555,7 @@ begin
                         elsif ep_want='1' then
                             rom_owner <= OWN_EP; ep_want <= '0';
                             rom_addr_i <= std_logic_vector(
-                                unsigned(x"0" & ep_addr) + x"080000");
+                                unsigned(std_logic_vector'(x"0" & ep_addr)) + x"080000");
                             rom_req_i <= '1';
                         end if;
                     when OWN_V =>
@@ -1073,6 +1087,37 @@ begin
     end process;
     dbg_pc   <= pc_i;
     dbg_epc  <= epc_i;
+    -- SDSCHED-85: the flight recorder itself. One entry per completed
+    -- extra-CPU bus cycle: {rw, fc[2:0], addr[23:1], data[15:0]}.
+    trace_rec : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                tr_wp <= (others=>'0'); tr_froze <= '0'; tr_seen <= '0';
+            else
+                if e_as_n='1' then
+                    tr_seen <= '0';
+                elsif e_dtack_n='0' and tr_seen='0' and tr_froze='0' then
+                    if e_rw_n='1' then
+                        tr_ring(to_integer(tr_wp)) <=
+                            e_rw_n & e_fc & e_addr(23 downto 1) & e_di;
+                    else
+                        tr_ring(to_integer(tr_wp)) <=
+                            e_rw_n & e_fc & e_addr(23 downto 1) & e_do;
+                    end if;
+                    tr_wp   <= tr_wp + 1;
+                    tr_seen <= '1';
+                end if;
+                if e_in_tab='1' and boot_flag = x"01" then
+                    tr_froze <= '1';           -- crime scene preserved
+                end if;
+            end if;
+        end if;
+    end process;
+    trace_q      <= tr_ring(to_integer(unsigned(trace_idx)));
+    trace_wp     <= std_logic_vector(tr_wp);
+    trace_frozen <= tr_froze;
+
     dbg_ewild  <= ewild_src;
     dbg_eintab <= e_in_tab;
     dbg_ewrong     <= ewrong_val;
