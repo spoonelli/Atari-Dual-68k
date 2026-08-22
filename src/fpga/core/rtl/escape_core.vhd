@@ -257,6 +257,12 @@ architecture rtl of escape_core is
         for i in 0 to 31 loop p := p xor v(i); end loop;
         return p;
     end function;
+    function parity8(v : std_logic_vector(7 downto 0)) return std_logic is
+        variable p : std_logic := '0';
+    begin
+        for i in 0 to 7 loop p := p xor v(i); end loop;
+        return p;
+    end function;
 
     -- v63: OWN_J retired - the JSA fetches from its own BRAM shadow now,
     -- shrinking this to a two-client arbiter and freeing SDRAM slots for
@@ -769,10 +775,10 @@ begin
     dbg_boot     <= boot_flag & std_logic_vector(reboot_cnt);
     rom_par_ok   <= '1' when PAR4_EN = 0 and parity32(rom_data) = rom_par else
                     '1' when PAR4_EN = 1
-                             and (xor rom_data(31 downto 24)) = rom_par4(3)
-                             and (xor rom_data(23 downto 16)) = rom_par4(2)
-                             and (xor rom_data(15 downto 8))  = rom_par4(1)
-                             and (xor rom_data(7 downto 0))   = rom_par4(0)
+                             and parity8(rom_data(31 downto 24)) = rom_par4(3)
+                             and parity8(rom_data(23 downto 16)) = rom_par4(2)
+                             and parity8(rom_data(15 downto 8))  = rom_par4(1)
+                             and parity8(rom_data(7 downto 0))   = rom_par4(0)
                              else '0';
     dbg_retry    <= std_logic_vector(retry_cnt);
 
