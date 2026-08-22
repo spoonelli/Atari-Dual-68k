@@ -1656,7 +1656,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3083;   // sdram-sched: registered CPU read-data capture + prev-addr display - screen shows '83'
+    localparam [15:0] BUILD_ID = 16'h3084;   // sdram-sched: HORIZONTAL FINE SCROLL fix (measured 8px lurch) - screen shows '84'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -1687,6 +1687,8 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                                                         // the fitter into a 90-minute
                                                         // spiral twice; slider deferred
     reg  [4:0] pfcol_q0, pfcol_q1, pfcol_q2, pfcol_q3, pfcol_show;  // {flip, color[3:0]}
+    reg  [31:0] pf_next;      // SDSCHED-84: the FOLLOWING cell's row word
+    reg  [4:0]  pfcol_next;   // ...and its attributes (fine-scroll window)
     reg  [3:0] pfcode_q0, pfcode_q1, pfcode_q2, pfcode_q3, pfcode_show; // v66 map debug
     // LANE3i: two fetches in flight (A/B ping-pong) - see channel decls at
     // the sdram-domain end. inflA/inflB = per-channel outstanding flags.
@@ -1757,8 +1759,16 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
                     2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
                     2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
                 endcase
+                // SDSCHED-84: also stage the FOLLOWING cell - with a nonzero
+                // horizontal fine scroll the last (xscroll&7) pixels of each
+                // 8px window belong to the next tile over.
+                case(pf_rp + 2'd1)
+                    2'd0: pf_next <= pfring0;  2'd1: pf_next <= pfring1;
+                    2'd2: pf_next <= pfring2;  default: pf_next <= pfring3;
+                endcase
                 pf_rp <= pf_rp + 2'd1;
                 pfcol_show <= pfcol_q3;
+                pfcol_next <= pfcol_q2;
                 pfcode_show<= pfcode_q3;
             end
             default: ;
@@ -1817,18 +1827,28 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         end
     end
 
-    // pixel extraction: chunky nibbles px0..px7 across the 32-bit row; xflip reverses
-    wire [2:0] pf_n   = pfcol_show[4] ? (3'd7 - visible_x[2:0]) : visible_x[2:0];
+    // pixel extraction: chunky nibbles px0..px7 across the 32-bit row.
+    // SDSCHED-84 HORIZONTAL FINE SCROLL: the pixel index is the SCROLLED
+    // fine X (pf_x2[2:0]), not raw screen X - the coarse column already
+    // came from pf_x2[8:3], but the sub-tile phase was dropped, quantizing
+    // all horizontal motion to 8px tile lurches (device 60fps capture:
+    // dx = 0,0,...,+8 vs MAME's smooth +-1..3; vertical was always fine
+    // because pf_y feeds both lookup and row). When the fine phase wraps
+    // (pf_x2[2:0] < visible_x[2:0]) the pixel lives in the NEXT cell.
+    wire        pf_cross = pf_x2[2:0] < visible_x[2:0];
+    wire [31:0] pf_word  = pf_cross ? pf_next    : pf_show;
+    wire [4:0]  pf_att   = pf_cross ? pfcol_next : pfcol_show;
+    wire [2:0] pf_n   = pf_att[4] ? (3'd7 - pf_x2[2:0]) : pf_x2[2:0];
     reg  [3:0] pf_pix;
     always @(*) begin
         if(m_pfmap) begin
             pf_pix = pfcode_show;    // v66 map-debug: flat color per tile code
         end else
         case(pf_n)
-            3'd0: pf_pix = pf_show[31:28]; 3'd1: pf_pix = pf_show[27:24];
-            3'd2: pf_pix = pf_show[23:20]; 3'd3: pf_pix = pf_show[19:16];
-            3'd4: pf_pix = pf_show[15:12]; 3'd5: pf_pix = pf_show[11:8];
-            3'd6: pf_pix = pf_show[7:4];   default: pf_pix = pf_show[3:0];
+            3'd0: pf_pix = pf_word[31:28]; 3'd1: pf_pix = pf_word[27:24];
+            3'd2: pf_pix = pf_word[23:20]; 3'd3: pf_pix = pf_word[19:16];
+            3'd4: pf_pix = pf_word[15:12]; 3'd5: pf_pix = pf_word[11:8];
+            3'd6: pf_pix = pf_word[7:4];   default: pf_pix = pf_word[3:0];
         endcase
     end
 
@@ -1951,7 +1971,7 @@ escape_mob umob (
     always @(posedge clk_sys_7159)
         color_vaddr <= alpha_vis ? {3'b000, act_color, pix}
                      : mo_show   ? {3'b001, mo_pen}
-                                 : {3'b010, pfcol_show[3:0], pf_pix};
+                                 : {3'b010, pf_att[3:0], pf_pix};
 
     // palette: IRGB4444 with intensity: i=(I+1)*(4-intensity), ch8 = ch4*i/4
     wire [3:0] ints   = (eintensity > 4'd4) ? 4'd4 : eintensity;
