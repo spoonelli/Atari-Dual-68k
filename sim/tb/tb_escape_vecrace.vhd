@@ -19,6 +19,20 @@
 -- G_SHAD=1 additionally fills vshad1/eshad1/eshad2 through the download port
 -- before releasing reset, so the dispatch chain is BRAM-shadow-served (the
 -- hardware path) while the 0x6000 main loop still fetches over SDRAM.
+--
+-- RESULTS (2026-08-22, GHDL 1.0 mcode): 46,676 IRQs / ~2.06M verified reads
+-- across the full matrix - pre-fix (3ee6859) and sdram-sched-tip escape_core,
+-- SHAD_EN 0 and 1, rom latencies 2/3/4 and LFSR-jittered 1..16, phase offsets
+-- 0..613 - ZERO corruption, zero early-terminated reads, no wild PC, no
+-- heartbeat stall. The dispatch-chain corruption seen on hardware does NOT
+-- exist in escape_core at RTL timing; see the vecrace commits for the
+-- structural argument (TG68K's S_state machine always gaps AS >= 2 clks, so
+-- the SDSCHED-78 stale-ws scenario cannot arise; the vpad/sync9 VPA
+-- termination can only ever cover the exception stack pushes). The hardware
+-- impostor 0x080C equals the image word at extra 0x30C (the jmp $80C operand
+-- fetched 3 fetches earlier) - a stale-serve signature that must originate
+-- outside this RTL: core_top's SDRAM service, synthesis-level BRAM/timing
+-- behavior, or the rom_data CDC (parity misses 2-bit errors).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
