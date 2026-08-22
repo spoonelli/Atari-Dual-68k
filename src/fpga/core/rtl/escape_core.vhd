@@ -597,9 +597,20 @@ begin
     rom_req  <= rom_req_i;
 
     ---------------------------------------------------------------- memories
-    v_wr     <= '1' when v_as_n='0' and v_rw_n='0' else '0';
+    -- SDSCHED-80 WRITE-SIDE DISCIPLINE: strobes fire only once the address
+    -- has been stable a full clk. '79 eliminated the entire read side (both
+    -- dispatch-chain traps silent through a live freeze) - the remaining
+    -- bus-level suspect is a boundary-edge write landing at a mixed
+    -- old/new address during back-to-back cycles (exception stacking is a
+    -- train of consecutive pushes). A stale-address push corrupts the
+    -- stack; the RTE then pops garbage - correct reads of corrupt content,
+    -- silent to every read watchdog. Writes repeat every stable clk of the
+    -- (dtack-extended) cycle, so excluding the first edge loses nothing.
+    v_wr     <= '1' when v_as_n='0' and v_rw_n='0'
+                         and v_addr(23 downto 1) = v_addr_q else '0';
     we_shr_a <= '1' when dbg_shr_we='1' else (v_wr and v_sel_ram);
-    we_shr_b <= '1' when e_as_n='0' and e_rw_n='0' and e_sel_ram='1' else '0';
+    we_shr_b <= '1' when e_as_n='0' and e_rw_n='0' and e_sel_ram='1'
+                         and e_addr(23 downto 1) = e_addr_q else '0';
     -- sim backdoor mux on port A (dbg_shr_we tied '0' on hardware -> collapses away)
     shr_a_addr <= dbg_shr_addr    when dbg_shr_we='1' else v_addr(15 downto 1);
     shr_a_din  <= dbg_shr_din     when dbg_shr_we='1' else v_do;
@@ -1280,10 +1291,10 @@ begin
     -- link strobes: level-per-bus-cycle is safe (data stable across the cycle;
     -- escape_jsa's full/NMI logic is edge-derived internally)
     -- LANE4j: exact widths here too (MAME: 360031 byte, 360020-21, 260031 byte)
-    snd_cmd_we  <= '1' when v_as_n='0' and v_rw_n='0' and v_sel_vctl='1'
+    snd_cmd_we  <= '1' when v_wr='1' and v_sel_vctl='1'
                             and v_addr(5 downto 4)="11"
                             and v_addr(3 downto 1)="000" and v_lds_n='0' else '0';
-    snd_res_p   <= '1' when v_as_n='0' and v_rw_n='0' and v_sel_vctl='1'
+    snd_res_p   <= '1' when v_wr='1' and v_sel_vctl='1'
                             and v_addr(5 downto 4)="10"
                             and v_addr(3 downto 1)="000" else '0';
     snd_resp_rd <= '1' when v_as_n='0' and v_rw_n='1' and v_sel_io='1'
@@ -1472,7 +1483,9 @@ begin
                 v_addr_q <= v_addr(23 downto 1);
                 e_addr_q <= e_addr(23 downto 1);
                 if v_as_n='0' then
-                    if v_addr(23 downto 1) /= v_addr_q then
+                    if v_fc = "111" then
+                        v_dtack_n <= '1';        -- IACK: autovector via VPA only
+                    elsif v_addr(23 downto 1) /= v_addr_q then
                         v_ws <= '0'; v_dtack_n <= '1';
                     elsif v_sel_rom='1' and v_sel_shad='0' then
                         if v_rom_dtack='1' then v_dtack_n <= '0'; end if;
@@ -1485,7 +1498,9 @@ begin
                     v_dtack_n <= '1'; v_ws <= '0';
                 end if;
                 if e_as_n='0' then
-                    if e_addr(23 downto 1) /= e_addr_q then
+                    if e_fc = "111" then
+                        e_dtack_n <= '1';        -- IACK: autovector via VPA only
+                    elsif e_addr(23 downto 1) /= e_addr_q then
                         e_ws <= '0'; e_dtack_n <= '1';
                     elsif e_sel_rom='1' and e_sel_shad='0' then
                         if e_rom_dtack='1' then e_dtack_n <= '0'; end if;
