@@ -157,6 +157,10 @@ entity escape_core is
         -- red panel on device is either those writes missing (game-logic
         -- divergence) or written-but-not-rendered. One HUD reading decides.
         dbg_awr         : out std_logic_vector(15 downto 0);
+        -- SDSCHED-76: impostor word served at extra 0x80E (0 = never) and
+        -- how many times (saturates at 15)
+        dbg_ewrong      : out std_logic_vector(15 downto 0);
+        dbg_ewrong_cnt  : out std_logic_vector(3 downto 0);
         -- LANE4i: extra CPU has executed no bus cycle for ~0.59s post-boot
         -- (the stop #\$2700 die state) - core_top treats it like a watchdog
         -- timeout so a frozen world reboots instead of hanging forever
@@ -281,6 +285,8 @@ architecture rtl of escape_core is
     signal pc_i, wrhi_i, epc_i : std_logic_vector(15 downto 0);
     signal ewild_src : std_logic_vector(15 downto 0) := (others=>'0');
     signal e_in_tab  : std_logic := '0';
+    signal ewrong_val : std_logic_vector(15 downto 0) := (others=>'0');
+    signal ewrong_cnt : unsigned(3 downto 0) := (others=>'0');
     signal vec_i : std_logic_vector(15 downto 0);
     -- LANE4f: extra-CPU first-fault forensics
     signal e_fdata_i, ecrash_pc_i, ecrash_data_i : std_logic_vector(15 downto 0)
@@ -935,6 +941,18 @@ begin
                     if e_dtack_n='0' then                  -- completing: capture data
                         e_fdata_i <= e_di;
                     end if;
+                    -- SDSCHED-76 operand watchdog: 0x80E is the target-
+                    -- operand word of the extra's vblank trampoline
+                    -- (jmp $842 at 0x80C). The wild-jump locator caught a
+                    -- freeze jumping from exactly this fetch - a wrong word
+                    -- served here IS the freeze. Latch any impostor value.
+                    if e_dtack_n='0' and e_addr(23 downto 16) = x"00"
+                       and e_addr(15 downto 1) = "000100000000111" then
+                        if e_di /= x"0842" and ewrong_cnt /= x"F" then
+                            ewrong_val <= e_di;
+                            ewrong_cnt <= ewrong_cnt + 1;
+                        end if;
+                    end if;
                     -- LANE4s wild-jump locator: the '69 freeze parks the
                     -- extra EXECUTING the 0xA58-0xB7F data table (all
                     -- harmless adda/suba encodings - no trap ever fires).
@@ -969,6 +987,8 @@ begin
     dbg_epc  <= epc_i;
     dbg_ewild  <= ewild_src;
     dbg_eintab <= e_in_tab;
+    dbg_ewrong     <= ewrong_val;
+    dbg_ewrong_cnt <= std_logic_vector(ewrong_cnt);
     dbg_wrhi <= wrhi_i;
     dbg_ecrash_pc   <= ecrash_pc_i;
     dbg_ecrash_data <= ecrash_data_i;
