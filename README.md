@@ -145,6 +145,8 @@ L / R / R2 — that is expected; the clean-screen release core comes later.
 
 ## Credits & acknowledgements
 
+Thanks: LMSS, DJS, LCS, TBPL, EG
+
 - **MAME** and **Aaron Giles**, author of the Atari Escape driver
   ([`src/mame/atari/eprom.cpp`](https://github.com/mamedev/mame/blob/master/src/mame/atari/eprom.cpp),
   `license:BSD-3-Clause`, `copyright-holders: Aaron Giles`) and the supporting device
