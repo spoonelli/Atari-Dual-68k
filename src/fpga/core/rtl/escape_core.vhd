@@ -357,6 +357,7 @@ architecture rtl of escape_core is
     signal shr_a_addr : std_logic_vector(14 downto 0);
     signal shr_a_din  : std_logic_vector(15 downto 0);
     signal shr_a_uds, shr_a_lds : std_logic;
+    signal v_addr_q, e_addr_q : std_logic_vector(23 downto 1) := (others=>'0');
     signal mbox_cmd, mbox_resp, mbox_ramr, mbox_sum : std_logic_vector(15 downto 0) := (others=>'0');
     -- LANE4r mailbox forensics + deadlock rescue
     signal cmd5a_cnt, ack_cnt : unsigned(7 downto 0) := (others=>'0');
@@ -1430,12 +1431,27 @@ begin
             if reset_n='0' then
                 v_dtack_n <= '1'; e_dtack_n <= '1';
                 v_ws <= '0'; e_ws <= '0';
+                v_addr_q <= (others=>'0'); e_addr_q <= (others=>'0');
             else
                 -- latch DTACK low until the CPU ends the bus cycle (AS high).
                 -- Non-ROM accesses take one extra waitstate so the BRAM output
                 -- has a full settled cycle in the read mux before capture.
+                -- SDSCHED-78 STALE-SERVE FIX: the waitstate now restarts on
+                -- ANY address change, not just on AS edges. TG68K's exception
+                -- microcode can run bus cycles back-to-back without a clean
+                -- AS gap; with e_ws still set, the next access got DTACK
+                -- before the BRAM read mux reflected the new address - the
+                -- CPU captured the PREVIOUS read's word. Caught in the act
+                -- by the '77 trampoline watchdog: impostor 0x080C = the
+                -- stack word an RTE had just read, served again as the
+                -- first instruction fetch after it. Every freeze traced to
+                -- this class. Address-qualified settle makes it impossible.
+                v_addr_q <= v_addr(23 downto 1);
+                e_addr_q <= e_addr(23 downto 1);
                 if v_as_n='0' then
-                    if v_sel_rom='1' and v_sel_shad='0' then
+                    if v_addr(23 downto 1) /= v_addr_q then
+                        v_ws <= '0'; v_dtack_n <= '1';
+                    elsif v_sel_rom='1' and v_sel_shad='0' then
                         if v_rom_dtack='1' then v_dtack_n <= '0'; end if;
                     elsif v_ws='1' then
                         v_dtack_n <= '0';
@@ -1446,7 +1462,9 @@ begin
                     v_dtack_n <= '1'; v_ws <= '0';
                 end if;
                 if e_as_n='0' then
-                    if e_sel_rom='1' and e_sel_shad='0' then
+                    if e_addr(23 downto 1) /= e_addr_q then
+                        e_ws <= '0'; e_dtack_n <= '1';
+                    elsif e_sel_rom='1' and e_sel_shad='0' then
                         if e_rom_dtack='1' then e_dtack_n <= '0'; end if;
                     elsif e_ws='1' then
                         e_dtack_n <= '0';
