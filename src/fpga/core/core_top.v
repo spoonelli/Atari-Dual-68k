@@ -935,6 +935,7 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     wire [31:0] sd_rd_data;
     reg  [31:0] core_rom_data;
     reg         core_rom_par;
+    reg  [3:0]  core_rom_par4;               // SDSCHED-81 per-byte parity
     reg         sd_rd_req;
     reg  [24:0] rd_addr_q;   // per-grant latched read address (v39)
     reg         rd_pre_q;    // v42: armor CPU reads only
@@ -1260,6 +1261,8 @@ always @(posedge clk_sdram) begin
             cpu_owner <= 0;
             core_rom_data <= sd_rd_data;
             core_rom_par  <= ^sd_rd_data;      // even parity rides with the data
+            core_rom_par4 <= {^sd_rd_data[31:24], ^sd_rd_data[23:16],
+                              ^sd_rd_data[15:8],  ^sd_rd_data[7:0]};
             core_rom_ack_85 <= 1;
         end
         if(!core_rom_req_s) core_rom_ack_85 <= 0;
@@ -1650,7 +1653,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3080;   // sdram-sched: write-side address discipline + IACK dtack suppression - screen shows '80'
+    localparam [15:0] BUILD_ID = 16'h3081;   // sdram-sched: per-byte ROM-CDC parity + retry, replay forensic - screen shows '81'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2056,12 +2059,13 @@ hall_stick hall_p2 (
     .joy_x ( cont2_joy[7:0] ), .joy_y ( cont2_joy[15:8] ),
     .adc_x ( adc_p2x ),        .adc_y ( adc_p2y )
 );
-escape_core ecore (
+escape_core #(.PAR4_EN(1)) ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
     .rom_addr   ( core_rom_addr ),
     .rom_data   ( core_rom_data ),
     .rom_par    ( core_rom_par ),
+    .rom_par4   ( core_rom_par4 ),
     .rom_req    ( core_rom_req ),
     .rom_ack    ( core_rom_ack_s ),
     .shad_wclk  ( clk_sdram ),

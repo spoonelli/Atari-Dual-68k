@@ -18,7 +18,12 @@ entity escape_core is
         YM_ENABLE : integer := 1;
         -- 1 = serve low-64KB code from the download-filled shadows (hardware);
         -- 0 = disable (GHDL tbs: shadows unfilled, all fetches via arbiter)
-        SHAD_EN   : integer := 1
+        SHAD_EN   : integer := 1;
+        -- SDSCHED-81: 1 = per-byte parity on the ROM CDC (rom_par4 valid).
+        -- The legacy single bit passes any 2-bit error - and a passed error
+        -- is EXECUTED. Per-byte detection feeds the existing retry path.
+        -- 0 = legacy single-bit check only (testbenches).
+        PAR4_EN   : integer := 0
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -28,6 +33,7 @@ entity escape_core is
         rom_addr   : out std_logic_vector(23 downto 0);
         rom_data   : in  std_logic_vector(31 downto 0);  -- [31:16]=addr, [15:0]=addr+2
         rom_par    : in  std_logic := '0';   -- even parity over rom_data, from server
+        rom_par4   : in  std_logic_vector(3 downto 0) := "0000";  -- per-byte parity (PAR4_EN=1)
         rom_req    : out std_logic;
         rom_ack    : in  std_logic;
 
@@ -161,6 +167,7 @@ entity escape_core is
         -- how many times (saturates at 15)
         dbg_ewrong      : out std_logic_vector(15 downto 0);
         dbg_ewrong_cnt  : out std_logic_vector(3 downto 0);
+        dbg_ewrong_prev : out std_logic_vector(15 downto 0);  -- addr of prior read
         -- LANE4i: extra CPU has executed no bus cycle for ~0.59s post-boot
         -- (the stop #\$2700 die state) - core_top treats it like a watchdog
         -- timeout so a frozen world reboots instead of hanging forever
@@ -287,6 +294,8 @@ architecture rtl of escape_core is
     signal e_in_tab  : std_logic := '0';
     signal ewrong_val : std_logic_vector(15 downto 0) := (others=>'0');
     signal ewrong_cnt : unsigned(3 downto 0) := (others=>'0');
+    signal ewrong_prev : std_logic_vector(16 downto 1) := (others=>'0');
+    signal e_lastrd    : std_logic_vector(16 downto 1) := (others=>'0');
     signal vec_i : std_logic_vector(15 downto 0);
     -- LANE4f: extra-CPU first-fault forensics
     signal e_fdata_i, ecrash_pc_i, ecrash_data_i : std_logic_vector(15 downto 0)
@@ -758,7 +767,13 @@ begin
     dbg_pf_last  <= pf_last;
     dbg_col_wcnt <= col_wcnt;
     dbg_boot     <= boot_flag & std_logic_vector(reboot_cnt);
-    rom_par_ok   <= '1' when parity32(rom_data) = rom_par else '0';
+    rom_par_ok   <= '1' when PAR4_EN = 0 and parity32(rom_data) = rom_par else
+                    '1' when PAR4_EN = 1
+                             and (xor rom_data(31 downto 24)) = rom_par4(3)
+                             and (xor rom_data(23 downto 16)) = rom_par4(2)
+                             and (xor rom_data(15 downto 8))  = rom_par4(1)
+                             and (xor rom_data(7 downto 0))   = rom_par4(0)
+                             else '0';
     dbg_retry    <= std_logic_vector(retry_cnt);
 
     we_pf    <= v_wr and v_sel_pf;
@@ -980,9 +995,17 @@ begin
                             vec_exp := x"0300";
                         end if;
                         if e_di /= vec_exp and ewrong_cnt /= x"F" then
-                            if ewrong_cnt = x"0" then ewrong_val <= e_di; end if;
+                            if ewrong_cnt = x"0" then
+                                ewrong_val  <= e_di;
+                                ewrong_prev <= e_lastrd;
+                            end if;
                             ewrong_cnt <= ewrong_cnt + 1;
                         end if;
+                    end if;
+                    -- SDSCHED-81 replay forensic: remember the last completed
+                    -- extra-CPU read address; pair it with any impostor.
+                    if e_dtack_n='0' and e_rw_n='1' then
+                        e_lastrd <= e_addr(16 downto 1);
                     end if;
                     if e_dtack_n='0' and e_addr(23 downto 6) = "000000000000100000"
                        and unsigned(e_addr(5 downto 1)) <= 17 then
@@ -997,7 +1020,10 @@ begin
                             when others  => tramp_exp := x"0994";  -- 0x822
                         end case;
                         if e_di /= tramp_exp and ewrong_cnt /= x"F" then
-                            if ewrong_cnt = x"0" then ewrong_val <= e_di; end if;
+                            if ewrong_cnt = x"0" then
+                                ewrong_val  <= e_di;
+                                ewrong_prev <= e_lastrd;
+                            end if;
                             ewrong_cnt <= ewrong_cnt + 1;
                         end if;
                     end if;
@@ -1037,6 +1063,7 @@ begin
     dbg_eintab <= e_in_tab;
     dbg_ewrong     <= ewrong_val;
     dbg_ewrong_cnt <= std_logic_vector(ewrong_cnt);
+    dbg_ewrong_prev <= ewrong_prev & '0';
     dbg_wrhi <= wrhi_i;
     dbg_ecrash_pc   <= ecrash_pc_i;
     dbg_ecrash_data <= ecrash_data_i;
