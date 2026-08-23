@@ -76,30 +76,33 @@ module tb_mob;
     // ---------------- gfx model: real chunky image bytes, ~4-cycle latency
     reg [7:0] gfx [0:(1<<22)-1];        // image bytes 0..0x220000
     initial $readmemh("sim/work/image_bytes.hex", gfx);
-    wire        gfx_reqA, gfx_reqB;
-    wire [23:0] gfx_addrA, gfx_addrB;
-    reg         gfx_doneA = 0, gfx_doneB = 0;
-    reg  [31:0] gfx_dataA, gfx_dataB;
-    reg         reqA_d = 0, reqB_d = 0;
-    reg  [4:0]  latA = 0, latB = 0;
-    reg  [23:0] addrA_l, addrB_l;
+    // MOCHAN-4: four packed fetch channels (was the A/B ping-pong)
+    localparam NCH = 4;
+    wire [3:0]   gfx_req;
+    wire [95:0]  gfx_addr;
+    reg  [3:0]   gfx_done = 4'd0;
+    reg  [127:0] gfx_data;
+    reg  [3:0]   req_d = 4'd0;
+    reg  [6:0]   lat    [0:3];
+    reg  [23:0]  addr_l [0:3];
+    integer k;
+    initial begin
+        for(k = 0; k < 4; k = k + 1) begin lat[k] = 0; addr_l[k] = 0; end
+        gfx_data = 0;
+    end
     always @(posedge clk) begin
-        if(gfx_reqA != reqA_d && latA == 0) begin
-            reqA_d <= gfx_reqA; addrA_l <= gfx_addrA; latA <= GFX_LAT[4:0];
-        end else if(latA != 0) begin
-            latA <= latA - 5'd1;
-            if(latA == 5'd1) begin
-                gfx_dataA <= {gfx[addrA_l], gfx[addrA_l+1], gfx[addrA_l+2], gfx[addrA_l+3]};
-                gfx_doneA <= ~gfx_doneA;
-            end
-        end
-        if(gfx_reqB != reqB_d && latB == 0) begin
-            reqB_d <= gfx_reqB; addrB_l <= gfx_addrB; latB <= GFX_LAT[4:0];
-        end else if(latB != 0) begin
-            latB <= latB - 5'd1;
-            if(latB == 5'd1) begin
-                gfx_dataB <= {gfx[addrB_l], gfx[addrB_l+1], gfx[addrB_l+2], gfx[addrB_l+3]};
-                gfx_doneB <= ~gfx_doneB;
+        for(k = 0; k < NCH; k = k + 1) begin
+            if(gfx_req[k] != req_d[k] && lat[k] == 0) begin
+                req_d[k]  <= gfx_req[k];
+                addr_l[k] <= gfx_addr[k*24 +: 24];
+                lat[k]    <= GFX_LAT[6:0];
+            end else if(lat[k] != 0) begin
+                lat[k] <= lat[k] - 7'd1;
+                if(lat[k] == 7'd1) begin
+                    gfx_data[k*32 +: 32] <= {gfx[addr_l[k]],   gfx[addr_l[k]+1],
+                                             gfx[addr_l[k]+2], gfx[addr_l[k]+3]};
+                    gfx_done[k] <= ~gfx_done[k];
+                end
             end
         end
     end
@@ -124,14 +127,10 @@ module tb_mob;
         .mo_vdata ( mo_vdata ),
         .cfg_vaddr( cfg_vaddr ),
         .cfg_vdata( cfg_vdata ),
-        .gfx_reqA ( gfx_reqA ),
-        .gfx_reqB ( gfx_reqB ),
-        .gfx_addrA( gfx_addrA ),
-        .gfx_addrB( gfx_addrB ),
-        .gfx_doneA( gfx_doneA ),
-        .gfx_doneB( gfx_doneB ),
-        .gfx_dataA( gfx_dataA ),
-        .gfx_dataB( gfx_dataB ),
+        .gfx_req  ( gfx_req ),
+        .gfx_addr ( gfx_addr ),
+        .gfx_done ( gfx_done ),
+        .gfx_data ( gfx_data ),
         .disp_x   ( visible_x[8:0] ),
         .disp_pen ( disp_pen ),
         .disp_prio( disp_prio ),
@@ -181,7 +180,7 @@ escape_prio uprio (
     // ---------------- debug: what does the engine actually do per line?
     reg dumping = 0;
     integer n_slip, n_entries, n_ymatch, n_fetch, n_wren, n_wren_off;
-    integer n_pend, n_done, n_blitst; reg pendA_d = 0, doneA_d = 0;
+    integer n_pend, n_done, n_blitst; reg pend0_d = 0, done0_d = 0;
     integer n_mowin, n_shade, n_m7, n_occl;   // MOPRI-1 decision census
     initial begin n_slip=0; n_entries=0; n_ymatch=0; n_fetch=0; n_wren=0; n_wren_off=0; n_pend=0; n_done=0; n_blitst=0;
                   n_mowin=0; n_shade=0; n_m7=0; n_occl=0; end
@@ -191,13 +190,16 @@ escape_prio uprio (
         if(dut.state == 4'd3 && state_d != 4'd3) n_slip = n_slip + 1;          // S_SLIP1
         if(dut.state == 4'd8 && state_d != 4'd8) n_entries = n_entries + 1;    // S_MATCH
         if(dut.state == 4'd10 && state_d != 4'd10 && dut.ymatch) n_ymatch = n_ymatch + 1;
-        if(dut.state == 4'd11 && dut.blit_n == 4'd15) n_fetch = n_fetch + 1;
-        if(dut.pendA && !pendA_d) n_pend = n_pend + 1;
-        pendA_d = dut.pendA;
-        if(gfx_doneA != doneA_d) n_done = n_done + 1;
-        if(gfx_doneA != doneA_d && n_done < 25)
-            $display("FETCH addr=%06x data=%08x", addrA_l, {gfx[addrA_l], gfx[addrA_l+1], gfx[addrA_l+2], gfx[addrA_l+3]});
-        doneA_d = gfx_doneA;
+        // MOCHAN-4: the pump issues in parallel with the blit, so there is no
+        // blit_n==15 issue cycle any more; count sprite loads (S_E0) instead.
+        if(dut.state == 4'd4 && state_d != 4'd4) n_fetch = n_fetch + 1;
+        if(dut.pend[0] && !pend0_d) n_pend = n_pend + 1;
+        pend0_d = dut.pend[0];
+        if(gfx_done[0] != done0_d) n_done = n_done + 1;
+        if(gfx_done[0] != done0_d && n_done < 25)
+            $display("FETCH addr=%06x data=%08x", addr_l[0],
+                     {gfx[addr_l[0]], gfx[addr_l[0]+1], gfx[addr_l[0]+2], gfx[addr_l[0]+3]});
+        done0_d = gfx_done[0];
         if(dut.state == 4'd12 && state_d != 4'd12) n_blitst = n_blitst + 1;
         if(dut.wr_en) n_wren = n_wren + 1;
         if(dut.state == 4'd11 && dut.blit_n < 4'd8 && dut.pix_val != 0 && dut.blit_x >= 9'd344)
@@ -208,8 +210,12 @@ escape_prio uprio (
 
     // ---------------- frame dump
     integer fd, px_seen, reqs;
-    always @(gfx_reqA) reqs = reqs + 1;
-    always @(gfx_reqB) reqs = reqs + 1;
+    reg [3:0] req_cnt_d = 4'd0;
+    always @(posedge clk) begin
+        for(k = 0; k < NCH; k = k + 1)
+            if(gfx_req[k] != req_cnt_d[k]) reqs = reqs + 1;
+        req_cnt_d <= gfx_req;
+    end
     integer fdp;                        // MOPRI-1: per-pixel priority decision log
     initial begin
         $display("TB_MOB scroll: XSCROLL=%0d YSCROLL=%0d", XSCROLL, YSCROLL);
