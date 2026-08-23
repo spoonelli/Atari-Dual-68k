@@ -2246,8 +2246,13 @@ hall_stick hall_p2 (
     .joy_x ( cont2_joy[7:0] ), .joy_y ( cont2_joy[15:8] ),
     .adc_x ( adc_p2x ),        .adc_y ( adc_p2y )
 );
-// EIRQ_MODE 2 = ZEROWAIT-92 armed extra-vblank latch (worldwake-bench
-// validated; see escape_core generic comment + docs/NIGHT-ANALYSIS.md)
+// EIRQ_MODE 0 = the schematic-literal model and what this build SHIPS: one
+// shared vblank latch, cleared by either CPU's 0x360000 access. The board has
+// exactly one vblank flip-flop (60M LS74; CLR = /VACK off a common-bus decoder
+// that cannot tell which CPU is driving), so modes 1 and 2 model a structure
+// the hardware does not have - they are kept only for A/B. The entity's own
+// default is still 2 and is overridden here; read THIS line, not the default.
+// (The previous comment here claimed mode 2 while the line passed 0.)
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0)) ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
