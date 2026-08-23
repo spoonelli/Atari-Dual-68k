@@ -24,6 +24,12 @@ jobs:
         with:
           submodules: recursive
 
+      # Fast fail before spending 30 minutes in Quartus: the Verilog->VHDL
+      # boundary is only validated late in the compile, and the shared machine
+      # RTL moves under this port (BUILD 103 added five ee_* ports).
+      - name: Check escape_core port list
+        run: python3 src/mister/check_ports.py
+
       - name: Compile Arcade-Escape
         run: |
           docker run --rm -v "$PWD":/work -w /work/src/mister \
