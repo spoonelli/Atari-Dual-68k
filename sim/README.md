@@ -34,6 +34,11 @@ Escape's raster (456×262), confirming the System 1 video base matches Escape's 
 
 ## Run it
 ```bash
-./sim/analyze_base.sh      # elaboration coverage of the base RTL
-./sim/run_tb.sh tb_syngen  # run the sync-generator timing testbench
+./sim/analyze_base.sh          # elaboration coverage of the base RTL
+./sim/run_tb.sh tb_syngen      # sync-generator timing
+./sim/run_tb.sh tb_ee_save 3ms # EEPROM save/restore across a simulated power cycle
 ```
+
+`tb_ee_save` needs the longer stop time: it walks all 512 EEPROM bytes through
+a restore, an autosave and an exit-time snapshot, which is ~1.4 ms of core
+clock. See [`../docs/EEPROM_SAVE.md`](../docs/EEPROM_SAVE.md).
