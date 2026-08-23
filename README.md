@@ -90,6 +90,11 @@ src/fpga/                                Quartus project
   apf/                                   Analogue Platform Framework (do not edit)
   core/core_top.v                        top level: SDRAM/CRAM services, download, video, HUD
   core/rtl/                              our core: escape_core, decode, SDRAM ctrl, BRAMs
+src/mister/                              MiSTer (DE10-Nano) Quartus project
+  Arcade-Escape.sv                       MiSTer top level (hps_io, arcade_video, PLL)
+  rtl/escape_mister.v                    machine assembly: same escape_core, MiSTer glue
+  releases/*.mra                         ROM manifest (MAME CRCs only, zero ROM bytes)
+  sys/                                   vendored MiSTer framework (do not edit)
 sim/                                     GHDL simulation harness + testbenches
 support/build_rom.py                     assemble user ROM dumps -> atari_escape.rom
 support/package.sh                       build a Pocket SD-layout release zip (no ROMs)
@@ -98,6 +103,14 @@ docs/ARCHITECTURE.md                     hardware map, roadmap, schematic findin
 docs/ROMS.md, docs/POCKET_TEST.md        ROM building; on-device test guide
 third_party/                             Arcade-Atari-system1_MiSTer submodule (RTL base)
 ```
+
+## MiSTer (DE10-Nano)
+
+There is a second front end in `src/mister/` that runs the **same machine RTL**
+on a DE10-Nano, loaded from a community-standard `.mra`. It compiles, and that
+is all anyone can honestly claim so far — it has never been run on hardware.
+Requirements, SD-card layout, the ROM-mapping rationale, and an explicit
+verified/unverified list are in [`docs/MISTER.md`](docs/MISTER.md).
 
 ## Get it
 
