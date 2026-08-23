@@ -179,14 +179,22 @@ module escape_mob (
             if(x_count == 10'd0 && y_count >= vbporch - 10'd1
                && y_count < vbporch + vactive - 10'd1) begin
                 build_sel <= ~build_sel;
-                ly <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
+                // MOPLACE-1: the buffer built during raster line Y is displayed
+                // on line Y+1, i.e. at visible_y = Y - vbporch + 1. The
+                // reference puts screen line v at playfield row v + yscroll
+                // (core_top's own pf_y is exactly visible_y + yscroll), so
+                //   ly = (Y - vbporch + 1) + yscroll.
+                // The old "+2" made every sprite land one scanline too high;
+                // cross-correlating the engine's output against MAME's showed a
+                // clean (dx=0, dy=+1) peak covering 88% of the matched pixels.
+                ly <= (y_count - vbporch + 10'd1 + {1'b0, yscroll}) & 9'h1FF;
                 // tag bookkeeping: the buffer we are about to build will hold
                 // pixels for this ly (stale content mismatches by definition)
                 if(build_sel) begin
-                    built_ly0 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
+                    built_ly0 <= (y_count - vbporch + 10'd1 + {1'b0, yscroll}) & 9'h1FF;
                     built_fp0 <= fpar;
                 end else begin
-                    built_ly1 <= (y_count - vbporch + 10'd2 + {1'b0, yscroll}) & 9'h1FF;
+                    built_ly1 <= (y_count - vbporch + 10'd1 + {1'b0, yscroll}) & 9'h1FF;
                     built_fp1 <= fpar;
                 end
                 wr_en <= 0;
