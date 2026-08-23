@@ -7,6 +7,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="ghdl/ghdl:ubuntu20-mcode"
 TB="${1:-tb_syngen}"
 STOPTIME="${2:-500us}"
+# optional generic overrides, e.g. GARGS='-gG_FPEN=0 -gG_FP=0'
+GARGS="${GARGS:-}"
 # tb_escape_adc boots from a generated stub image (hand-assembled words, no
 # game ROM); rebuild it here on the host, since hex files are never committed
 if [ "$TB" = "tb_escape_adc" ]; then
@@ -37,5 +39,5 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}
   FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' ! -iname 'TMS5220.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd | grep -v escape_jsa_vecstub)\"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W $TB >/dev/null
-  ghdl -r \$STD --workdir=\$W $TB --ieee-asserts=disable --stop-time=$STOPTIME
+  ghdl -r \$STD --workdir=\$W $TB --ieee-asserts=disable --stop-time=$STOPTIME $GARGS
 "

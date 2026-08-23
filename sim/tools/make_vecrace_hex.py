@@ -33,11 +33,17 @@ def poke(byte_addr, *ws):
 E = 0x080000                     # extra-CPU image base
 
 # ---------------------------------------------------------------- video CPU
-# SSP = $3F7F00 (work RAM), PC = $400: park in a tight loop, IRQs masked
-# (reset SR = 2700, never lowered) - it only exercises bus arbitration.
+# SSP = $3F7F00 (work RAM), PC = $400: RELEASE THE EXTRA (360011 D0) then
+# park in a tight loop, IRQs masked (reset SR = 2700, never lowered).
+# ZEROWAIT-92: the release write is load-bearing - since the 87b
+# release-gated e_virq latch, a bench whose main never writes 360011
+# delivers ZERO extra-CPU interrupts (the 88-91 "IRQ matrix green" runs
+# were exactly that: iack_cyc=0, vacuous). dbg_force_extra only unresets
+# the CPU; it does not feed the latch.
 poke(0x0, 0x003F, 0x7F00)
 poke(0x4, 0x0000, 0x0400)
-poke(0x400, 0x60FE)                              # bra.s *
+poke(0x400, 0x13FC, 0x0001, 0x0036, 0x0011)      # move.b #1,$360011 (release)
+poke(0x408, 0x60FE)                              # bra.s *
 
 # ---------------------------------------------------------------- extra CPU
 # reset: SSP = $16FF00 (shared RAM), PC = $6000
@@ -94,21 +100,24 @@ poke(E + 0x6000,
      0x7E00,                                     # moveq #0,d7
      0x46FC, 0x2000,                             # move.w #$2000,SR (IRQs on)
      # loop (0x600C):
-     0x4EB9, 0x0000, 0x6030,                     # jsr sub1
+     0x4EB9, 0x0000, 0x6040,                     # jsr sub1
      0x3039, 0x0026, 0x0020,                     # move.w $260020.l,d0
      0x33C0, 0x0016, 0xF020,                     # move.w d0,$16F020.l
      0x5247,                                     # addq.w #1,d7
      0x33C7, 0x0016, 0xF010,                     # move.w d7,$16F010.l (heartbeat)
-     0x4EB9, 0x0000, 0x6044,                     # jsr sub2
-     0x60DE)                                     # bra.s loop (0x602E-0x22=0x600C)
-poke(E + 0x6030,                                 # sub1: stack churn + nested call
+     0x4EB9, 0x0000, 0x6060,                     # jsr sub2
+     0x4A39, 0x0016, 0xCCD6,                     # tst.b $16CCD6.l (ZEROWAIT-92:
+                                                 #  the real poll loop's flag read
+                                                 #  - arms EIRQ_MODE 2 delivery)
+     0x60D8)                                     # bra.s loop (0x6034-0x28=0x600C)
+poke(E + 0x6040,                                 # sub1: stack churn + nested call
      0x2F07,                                     # move.l d7,-(sp)
-     0x4EB9, 0x0000, 0x6044,                     # jsr sub2
+     0x4EB9, 0x0000, 0x6060,                     # jsr sub2
      0x3039, 0x0016, 0xF010,                     # move.w $16F010.l,d0
      0x2E1F,                                     # move.l (sp)+,d7
      0x4E75,                                     # rts
      0x4E71)                                     # nop (pad)
-poke(E + 0x6044,                                 # sub2: shared-RAM rmw
+poke(E + 0x6060,                                 # sub2: shared-RAM rmw
      0x3239, 0x0016, 0xF004,                     # move.w $16F004.l,d1
      0x5241,                                     # addq.w #1,d1
      0x33C1, 0x0016, 0xF006,                     # move.w d1,$16F006.l

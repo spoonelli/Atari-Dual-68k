@@ -8,7 +8,18 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-entity tb_escape_handshake is end tb_escape_handshake;
+entity tb_escape_handshake is
+    generic (
+        -- ZEROWAIT-92: the boot handshake must hold under the zero-wait
+        -- fastpath (device config) as well as the legacy arbiter. G_FPEN=1
+        -- with G_FP=1 models core_top's authentic one-clock cache fill;
+        -- G_FPEN=1/G_FP=0 is the never-wedge watchdog fallback; G_FPEN=0
+        -- is the pre-zerowait arbiter.
+        G_FPEN : integer := 1;
+        G_FP   : integer := 1;
+        G_EIRQ : integer := 2      -- escape_core EIRQ_MODE under test
+    );
+end tb_escape_handshake;
 
 architecture tb of tb_escape_handshake is
     signal clk    : std_logic := '0';
@@ -26,6 +37,12 @@ architecture tb of tb_escape_handshake is
     signal dbg_v, dbg_e : std_logic;
     signal romsrv_data, romsrv_data2 : std_logic_vector(15 downto 0);
     signal rom_addr2w : std_logic_vector(20 downto 0);
+    -- SDSCHED-88 fastpath port wiring (server model as in tb_escape_vecrace)
+    signal fast_v_addr, fast_e_addr : std_logic_vector(23 downto 0);
+    signal fast_v_spec, fast_e_spec : std_logic;
+    signal fast_v_data, fast_e_data : std_logic_vector(15 downto 0) := (others=>'0');
+    signal fast_v_ready, fast_e_ready : std_logic := '0';
+    signal fastv_q, faste_q : std_logic_vector(15 downto 0);
 begin
     clk    <= not clk after 5 ns when not done else '0';
     resetn <= '0', '1' after 205 ns;
@@ -33,13 +50,52 @@ begin
     rom_addr2w <= rom_addr(21 downto 2) & '1';
 
     uut : entity work.escape_core
-        generic map ( YM_ENABLE => 0, SHAD_EN => 0 )   -- GHDL: no jt51; shadows unfilled
+        generic map ( YM_ENABLE => 0, SHAD_EN => 0,    -- GHDL: no jt51; shadows unfilled
+                      FASTPATH_EN => G_FPEN, EIRQ_MODE => G_EIRQ )
         port map ( clk=>clk, reset_n=>resetn,
                    rom_addr=>rom_addr, rom_data=>rom_data, rom_par=>rom_par, rom_req=>rom_req, rom_ack=>rom_ack,
+                   fast_v_addr=>fast_v_addr, fast_v_spec=>fast_v_spec,
+                   fast_v_data=>fast_v_data, fast_v_ready=>fast_v_ready,
+                   fast_e_addr=>fast_e_addr, fast_e_spec=>fast_e_spec,
+                   fast_e_data=>fast_e_data, fast_e_ready=>fast_e_ready,
                    vblank_in=>vblank,
                    p1_buttons=>"0000", p2_buttons=>"0000",
                    alpha_vaddr=>alpha_vaddr, alpha_vdata=>alpha_vdata,
                    dbg_v_pc_fetch=>dbg_v, dbg_e_running=>dbg_e );
+
+    -- fastpath truth lookups (combinational sim ROM) + one-clock server
+    fastromv : entity work.rom_words
+        generic map ( hexfile => "sim/work/combined_words.hex", awidth => 21 )
+        port map ( addr => fast_v_addr(21 downto 1), data => fastv_q );
+    fastrome : entity work.rom_words
+        generic map ( hexfile => "sim/work/combined_words.hex", awidth => 21 )
+        port map ( addr => fast_e_addr(21 downto 1), data => faste_q );
+
+    fastsrv : process(clk)
+        variable vtag, etag : std_logic_vector(23 downto 0) := (others=>'1');
+        variable vcnt, ecnt : integer := 0;
+    begin
+        if rising_edge(clk) and G_FP > 0 then
+            if fast_v_spec='1' then
+                if fast_v_addr /= vtag then vtag := fast_v_addr; vcnt := G_FP; end if;
+                if vcnt > 0 then
+                    vcnt := vcnt - 1;
+                    if vcnt = 0 then
+                        fast_v_data <= fastv_q; fast_v_ready <= '1';
+                    else fast_v_ready <= '0'; end if;
+                else fast_v_ready <= '1'; end if;
+            else fast_v_ready <= '0'; end if;
+            if fast_e_spec='1' then
+                if fast_e_addr /= etag then etag := fast_e_addr; ecnt := G_FP; end if;
+                if ecnt > 0 then
+                    ecnt := ecnt - 1;
+                    if ecnt = 0 then
+                        fast_e_data <= faste_q; fast_e_ready <= '1';
+                    else fast_e_ready <= '0'; end if;
+                else fast_e_ready <= '1'; end if;
+            else fast_e_ready <= '0'; end if;
+        end if;
+    end process;
 
     romsrv : entity work.rom_words
         generic map ( hexfile => "sim/work/combined_words.hex", awidth => 21 )
