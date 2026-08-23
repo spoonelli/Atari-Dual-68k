@@ -50,7 +50,16 @@ import os
 
 here = os.path.dirname(os.path.abspath(__file__))
 repo = os.path.abspath(os.path.join(here, "..", ".."))
-dst = os.path.join(repo, "sim", "work", "tasrace_words.hex")
+# RELEASE=clr  : the game's own release, `clr.b` - which on the 68000 is
+#                ITSELF a read-modify-write (it reads before writing), so its
+#                read half is a second interlock point.
+# RELEASE=move : `move.b #0,addr` - a PURE write, one bus cycle, no read.
+#                This is the case that separates a real interlock from one
+#                that only withholds DTACK: the write strobe asserts on every
+#                clock of the stalled cycle, so DTACK alone cannot stop it.
+RELEASE = os.environ.get("RELEASE", "clr")
+NAME = "tasrace_words.hex" if RELEASE == "clr" else "tasrace_mv_words.hex"
+dst = os.path.join(repo, "sim", "work", NAME)
 os.makedirs(os.path.dirname(dst), exist_ok=True)
 
 PHASES  = int(os.environ.get("PHASES", "8"))
@@ -166,7 +175,10 @@ m.w(0x4EF0, 0x0000)                                   # jmp (a0,d0.w)
 m.label("SLED")
 for _ in range(PHASES):
     m.w(0x4E71)                                       # nop
-m.w(0x4239, *lw(LOCKB))                               # clr.b LOCKB  <-- THE RELEASE
+if RELEASE == "clr":
+    m.w(0x4239, *lw(LOCKB))                           # clr.b LOCKB  <-- THE RELEASE
+else:
+    m.w(0x13FC, 0x0000, *lw(LOCKB))                   # move.b #0,LOCKB <-- pure-write release
 m.w(0x323C, TMO)                                      # move.w #TMO,d1
 m.label("W1")
 m.w(0x4A79, *lw(DONE))                                # tst.w DONE
@@ -180,7 +192,10 @@ m.label("SWAL")
 m.w(0x5243)                                           # addq.w #1,d3  *** SWALLOW ***
 m.w(0x3E3C, RETRIES)                                  # move.w #RETRIES,d7
 m.label("RTRY")
-m.w(0x4239, *lw(LOCKB))                               # clr.b LOCKB (retry the release)
+if RELEASE == "clr":
+    m.w(0x4239, *lw(LOCKB))                           # clr.b LOCKB (retry the release)
+else:
+    m.w(0x13FC, 0x0000, *lw(LOCKB))                   # move.b #0,LOCKB (retry)
 m.w(0x323C, TMO)                                      # move.w #TMO,d1
 m.label("W2")
 m.w(0x4A79, *lw(DONE))                                # tst.w DONE
@@ -238,4 +253,4 @@ x.commit()
 with open(dst, "w") as f:
     for v in words:
         f.write("%04X\n" % v)
-print("wrote %s (%d words, %d phases)" % (dst, len(words), PHASES))
+print("wrote %s (%d words, %d phases, release=%s)" % (dst, len(words), PHASES, RELEASE))
