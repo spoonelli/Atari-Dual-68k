@@ -220,12 +220,16 @@ bound from `core_top.v`.
 
 ## 6. On-device test procedure
 
-Nothing extra to install. Build and package as usual
-(`./support/package.sh <bitstream.rbf_r>`) and merge onto the SD card; the ROM
-is still user-supplied and no ROM data is in the package. The save file is
-created by the Pocket itself at `/Saves/eprom/common/atari_escape.sav`, 512
-bytes. You do not have to create it - but if you already have a MAME `eprom`
-nvram dump you can drop it there and it will load.
+Nothing extra to install, but **the whole `Cores/` folder has to be copied, not
+just the bitstream** - the save slot is declared in `data.json`, and a core that
+does not know about slot 2 has nowhere to put high scores. Build and package as
+usual (`./support/package.sh <bitstream.rbf_r>`) and merge onto the SD card; the
+ROM is still user-supplied and no ROM data is in the package.
+
+The save file is created by the Pocket itself at
+`/Saves/eprom/common/atari_escape.sav`, 512 bytes. You do not have to create it
+- but if you already have a MAME `eprom` nvram dump you can drop it there and it
+will load.
 
 **The five-minute check:**
 
