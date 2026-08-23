@@ -1089,7 +1089,12 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg [1:0]  mo_nch_q;
     reg [23:0] mo_naddr_q;
     always @(posedge clk_sdram) begin
-        mo_pend_q  <= |mg_pend_w;
+        // gated by core_rstn_sd here (NOT in the reset-resync block below):
+        // one always block per net. SDSCHED-75 resyncs mg_req_last under
+        // reset; this keeps the registered pending bit from carrying a
+        // one-cycle stale "pending" across the release as the engine zeroes
+        // its request toggles.
+        mo_pend_q  <= core_rstn_sd && (|mg_pend_w);
         mo_nch_q   <= mg_pend_w[0] ? 2'd0 : mg_pend_w[1] ? 2'd1
                     : mg_pend_w[2] ? 2'd2 : 2'd3;
         mo_naddr_q <= mg_pend_w[0] ? mo_gfx_addr[23:0]
@@ -1469,11 +1474,11 @@ always @(posedge clk_sdram) begin
     // channel per reset. Track the live toggles while reset is held.
     if(!core_rstn_sd) begin
         mg_req_last <= mg_req_s;
-        // MOCHAN-4: the pre-decode is one cycle behind the resync above, so
-        // hold it low for the duration of reset rather than let a one-cycle
-        // stale "pending" launch a phantom serve as the engine zeroes its
-        // toggles. (SDSCHED-75 is the same lesson one stage further back.)
-        mo_pend_q <= 1'b0;
+        // MOCHAN-4: mo_pend_q is held low under reset too, but that has to be
+        // done in the pre-decode's OWN always block - it is a separate block
+        // and Quartus rejects two blocks driving one net ("Can't resolve
+        // multiple constant drivers"). iverilog accepts it silently, so this
+        // is not something the simulation benches can catch.
         vg_reqA_last <= vg_reqA_s;
         vg_reqB_last <= vg_reqB_s;
         // SDSCHED-88: fastpath caches die with the core - a re-download
