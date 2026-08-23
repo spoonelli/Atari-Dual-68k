@@ -1676,7 +1676,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3085;   // sdram-sched: bus-trace flight recorder + HUD trace view - screen shows '85'
+    localparam [15:0] BUILD_ID = 16'h3086;   // sdram-sched: trace view freezes ring on open (capture-on-demand) - screen shows '86'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2183,6 +2183,7 @@ escape_core #(.PAR4_EN(1)) ecore (
     .dbg_ewrong_cnt ( dbg_ewrong_cnt ),
     .dbg_ewrong_prev( dbg_ewrong_prev ),
     .trace_idx      ( trace_idx ),
+    .trace_hold     ( m_trace ),
     .trace_q        ( trace_q ),
     .trace_wp       ( trace_wp ),
     .trace_frozen   ( trace_frozen ),
