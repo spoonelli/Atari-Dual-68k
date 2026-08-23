@@ -20,6 +20,16 @@
 -- before releasing reset, so the dispatch chain is BRAM-shadow-served (the
 -- hardware path) while the 0x6000 main loop still fetches over SDRAM.
 --
+-- SDSCHED-88 RESULTS (2026-08-23, zerowait branch, GHDL mcode): fastpath
+-- matrix all green - FPEN=1/FP=1 SHAD=0 (2000 IRQs, PHOFF 0 and 307: full
+-- 613-phase sweep >3x through): 152,749 + 160,077 extra-CPU ROM cycles ALL
+-- exactly 4 clocks (MAXAS=2 armed, zero trips), zero corruption; SHAD=1:
+-- 104,565 non-shadow cycles all 4-clk; FP=3 (late ready): waitstate path,
+-- 5/6-clk, clean; FP=0: watchdog fallback, all 18-clk via legacy arbiter,
+-- clean; FPEN=0 LAT=2/LAT=0: legacy regression clean (LAT=2 histogram:
+-- 7..15 clk, mean 11.3 - the "before" this branch removes). march/extracpu/
+-- dualcpu green; Quartus 18.1 analysis+elaboration 0 errors.
+--
 -- RESULTS (2026-08-22, GHDL 1.0 mcode): 46,676 IRQs / ~2.06M verified reads
 -- across the full matrix - pre-fix (3ee6859) and sdram-sched-tip escape_core,
 -- SHAD_EN 0 and 1, rom latencies 2/3/4 and LFSR-jittered 1..16, phase offsets
