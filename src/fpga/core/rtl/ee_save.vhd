@@ -110,6 +110,15 @@ architecture rtl of ee_save is
     shared variable dlbuf : buf_t := (others => (others => '1'));
     shared variable ulbuf : buf_t := (others => (others => '1'));
 
+    -- BUILD 103: the design sits exactly at the Pocket Cyclone V's 308-M10K
+    -- ceiling, so these two 4 Kbit buffers MUST NOT infer block RAM -- doing so
+    -- is what failed the first 103 fit (Error 170048), the same wall that killed
+    -- builds 72/72b/72c. Force them into MLABs (ALM-based LUTRAM), which is a
+    -- resource class this design is not short of. 128x32 = 8 MLABs each.
+    attribute ramstyle : string;
+    attribute ramstyle of dlbuf : variable is "MLAB";
+    attribute ramstyle of ulbuf : variable is "MLAB";
+
     -- ---- bclk side
     signal dl_seen_b  : std_logic := '0';
     signal ul_raddr_b : std_logic_vector(6 downto 0)  := (others => '0');
