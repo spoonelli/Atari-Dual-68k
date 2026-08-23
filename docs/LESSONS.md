@@ -77,6 +77,23 @@ theories poison later reasoning.
   overflowed on this game's loud announcer. Validate donor cores against
   reference vectors for *your* workload.
 
+- **At the M10K ceiling, every new array is a fit failure until proven
+  otherwise.** The Pocket's Cyclone V gives 308 M10K blocks and this design
+  uses all of them, so any inferred block RAM -- however small -- fails the
+  fit with Error 170048. Builds 72/72b/72c died this way on a 4 KB shadow;
+  BUILD 103 died the same way on two 4 Kbit staging buffers. The fix is
+  usually not to shrink the array but to move it to a different resource
+  class: `attribute ramstyle ... is "MLAB"` puts it in ALM-based LUTRAM,
+  which this design has in abundance. Cost was 1.9 ns of slack, not silicon.
+  Add the attribute when you declare the array, not after CI rejects it.
+- **MLAB power-up contents are not guaranteed** (Warning 170052), so check
+  whether anything depends on an array's initial value before relocating it.
+  In `ee_save` nothing did -- the restore path is gated on a *flip-flop*
+  (`dl_seen_b`) set when APF actually delivers a save file, and the "virgin
+  FF" fill that makes the game write factory defaults lives in the EEPROM
+  block itself, not in the staging buffer. Had the gate been "does the buffer
+  read as all-FF", MLAB would have silently corrupted first-boot settings.
+
 ## Process rules that earned their keep
 
 - Every build bumps an on-screen build number; the screen must match the zip.
