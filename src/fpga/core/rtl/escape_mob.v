@@ -116,6 +116,14 @@ module escape_mob (
     reg [2:0]  row_in_tile;
     reg        gfx_doneA_last, gfx_doneB_last;
     reg        pendA, pendB;            // completion seen, not yet consumed
+    // MOFETCH-2: per-channel in-flight tracking. v87 resynced the done toggles
+    // on a line abort, which discards a completion that has ALREADY arrived -
+    // but a request issued before the abort and served after it still toggles
+    // done, sets pend, and gets consumed by the new line's first tile with the
+    // previous request's data. From then on every tile on that channel is
+    // paired with the wrong tile-row: real sprite art at the wrong X.
+    reg        inflA, inflB;            // issued, completion not yet seen
+    reg        discA, discB;            // swallow one completion (aborted line)
     reg [31:0] rowdata;
     reg [3:0]  blit_n;
     reg [8:0]  blit_x;
@@ -139,6 +147,11 @@ module escape_mob (
     wire [8:0] ydiff_e = (ly + e_y + {1'b0, e_h, 3'b000} + 9'd8) & 9'h1FF;
     wire       ymatch_e = ydiff_e < {e_h, 3'b000} + 9'd8;
 
+    // MOFETCH-2: completion edges as wires - the abort block below needs to
+    // know whether a completion is landing in the very cycle it aborts.
+    wire doneA_edge = (gfx_doneA != gfx_doneA_last);
+    wire doneB_edge = (gfx_doneB != gfx_doneB_last);
+
     // chunky pixel extract with hflip (declared before use for iverilog)
     wire [2:0] pn = hflip ? (3'd7 - blit_n[2:0]) : blit_n[2:0];
     reg  [3:0] pix_val;
@@ -156,6 +169,7 @@ module escape_mob (
             state <= S_IDLE;
             gfx_reqA <= 0; gfx_reqB <= 0;
             pendA <= 0; pendB <= 0;
+            inflA <= 0; inflB <= 0; discA <= 0; discB <= 0;
             wr_en <= 0;
             build_sel <= 0;
             built_ly0 <= 9'h1FF; built_ly1 <= 9'h1FF;
@@ -166,8 +180,16 @@ module escape_mob (
             gfx_doneB_last <= gfx_doneB;
             // completions can land while blitting: LATCH them (an edge is
             // visible for one cycle only - depth-2 lost edges without this)
-            if(gfx_doneA != gfx_doneA_last) pendA <= 1'b1;
-            if(gfx_doneB != gfx_doneB_last) pendB <= 1'b1;
+            // MOFETCH-2: a completion always retires the in-flight marker, but
+            // it only becomes a usable tile-row if it belongs to THIS line.
+            if(doneA_edge) begin
+                inflA <= 1'b0;
+                if(discA) discA <= 1'b0; else pendA <= 1'b1;
+            end
+            if(doneB_edge) begin
+                inflB <= 1'b0;
+                if(discB) discB <= 1'b0; else pendB <= 1'b1;
+            end
 
             // v85: the line trigger fires from ANY state - a build stalled
             // by fetch starvation previously missed the restart and kept
@@ -191,6 +213,14 @@ module escape_mob (
                 gfx_doneA_last <= gfx_doneA;
                 gfx_doneB_last <= gfx_doneB;
                 pendA <= 1'b0; pendB <= 1'b0;
+                // MOFETCH-2: v87 discarded completions that had already landed;
+                // this discards the one still in flight. A request outstanding
+                // right now belongs to the line being abandoned, so mark its
+                // completion to be swallowed rather than paired with the new
+                // line's first tile. If the completion is landing in THIS very
+                // cycle it is already being retired above, so no discard is due.
+                discA <= inflA && !doneA_edge;
+                discB <= inflB && !doneB_edge;
                 state <= S_CLEAR;
             end else
             case(state)
@@ -310,17 +340,26 @@ module escape_mob (
             // channel (even tiles on A, odd on B). Issue runs up to two
             // ahead of latch; per-tile cost = max(8-cycle blit, service/2).
             S_PRIME: begin
+                // MOFETCH-2: never issue on a channel that still has a request
+                // outstanding. Only reachable straight after a line abort (the
+                // steady-state loop refills a channel exactly when its
+                // completion is consumed), and the wait is bounded by the
+                // fetch service time, but issuing here would toggle req while
+                // the channel is busy and lose the request outright.
                 if(blit_n == 4'd15) begin
+                  if(!inflA && !(width_t != 3'd0 && inflB)) begin
                     // sprite start: issue tile 0 (A) and, if any, tile 1 (B)
                     gfx_addrA <= 24'h120000
                                 + { code_row, 5'd0 }
                                 + { row_in_tile, 2'd0 };
                     gfx_reqA  <= ~gfx_reqA;
+                    inflA     <= 1'b1;
                     if(width_t != 3'd0 && fetch_budget > 6'd1) begin
                         gfx_addrB <= 24'h120000
                                     + { (code_row + 15'd1), 5'd0 }
                                     + { row_in_tile, 2'd0 };
                         gfx_reqB  <= ~gfx_reqB;
+                        inflB     <= 1'b1;
                         tx_f <= 3'd2;
                         fetch_budget <= fetch_budget - 6'd2;
                     end else begin
@@ -328,6 +367,7 @@ module escape_mob (
                         fetch_budget <= fetch_budget - 6'd1;
                     end
                     blit_n <= 4'd14;
+                  end
                 end else if(tx[0] ? pendB : pendA) begin
                     // tile tx's data has landed on its parity channel
                     rowdata <= tx[0] ? gfx_dataB : gfx_dataA;
@@ -343,11 +383,13 @@ module escape_mob (
                                         + { (code_row + {12'b0, tx_f}), 5'd0 }
                                         + { row_in_tile, 2'd0 };
                             gfx_reqB  <= ~gfx_reqB;
+                            inflB     <= 1'b1;
                         end else begin
                             gfx_addrA <= 24'h120000
                                         + { (code_row + {12'b0, tx_f}), 5'd0 }
                                         + { row_in_tile, 2'd0 };
                             gfx_reqA  <= ~gfx_reqA;
+                            inflA     <= 1'b1;
                         end
                         fetch_budget <= fetch_budget - 6'd1;
                         tx_f <= tx_f + 3'd1;
