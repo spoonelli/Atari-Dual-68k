@@ -1,6 +1,11 @@
-# Dump the worst setup/hold paths so timing failures can be diagnosed from a
-# CI log instead of guessed at. Run with:
+# Dump the worst setup/hold paths so timing failures get diagnosed from data
+# instead of guessed at. Run with:
 #   quartus_sta -t timing_report.tcl Arcade-Escape
+#
+# Every report is wrapped in `catch` on purpose: a single unsupported option
+# would otherwise abort the whole script and cost a 30-minute CI round trip
+# for no information.
+
 project_open Arcade-Escape
 create_timing_netlist
 read_sdc
@@ -9,30 +14,24 @@ update_timing_netlist
 set core0 {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}
 set core1 {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}
 
-puts "=========== WORST SETUP PATHS (any clock) ==========="
-report_timing -setup -npaths 10 -detail summary -panel_name {} -stdout
+proc show {label args} {
+    puts "\n=========== $label ==========="
+    if {[catch {eval report_timing $args} err]} {
+        puts "report_timing failed: $err"
+    }
+}
 
-puts "=========== WORST SETUP: 7.16MHz -> 35.8MHz ==========="
-report_timing -setup -npaths 5 -detail full_path -stdout \
-    -from_clock [get_clocks $core0] -to_clock [get_clocks $core1]
-
-puts "=========== WORST SETUP: 35.8MHz -> 35.8MHz ==========="
-report_timing -setup -npaths 3 -detail summary -stdout \
-    -from_clock [get_clocks $core1] -to_clock [get_clocks $core1]
-
-puts "=========== WORST SETUP: SDRAM_CLK -> 35.8MHz ==========="
-report_timing -setup -npaths 3 -detail summary -stdout \
-    -from_clock [get_clocks SDRAM_CLK] -to_clock [get_clocks $core1]
-
-puts "=========== WORST HOLD PATHS (any clock) ==========="
-report_timing -hold -npaths 10 -detail summary -stdout
-
-puts "=========== WORST HOLD: SDRAM_CLK -> 35.8MHz ==========="
-report_timing -hold -npaths 5 -detail full_path -stdout \
-    -from_clock [get_clocks SDRAM_CLK] -to_clock [get_clocks $core1]
-
-puts "=========== WORST HOLD: 7.16MHz -> 35.8MHz ==========="
-report_timing -hold -npaths 5 -detail full_path -stdout \
-    -from_clock [get_clocks $core0] -to_clock [get_clocks $core1]
+show "WORST SETUP, ALL CLOCKS"          -setup -npaths 12 -detail summary -stdout
+show "WORST SETUP 7.16MHz -> 35.8MHz"   -setup -npaths 4 -detail full_path -stdout \
+        -from_clock [list $core0] -to_clock [list $core1]
+show "WORST SETUP 35.8MHz -> 35.8MHz"   -setup -npaths 3 -detail summary -stdout \
+        -from_clock [list $core1] -to_clock [list $core1]
+show "WORST SETUP SDRAM_CLK -> 35.8MHz" -setup -npaths 3 -detail summary -stdout \
+        -from_clock [list SDRAM_CLK] -to_clock [list $core1]
+show "WORST HOLD, ALL CLOCKS"           -hold  -npaths 12 -detail summary -stdout
+show "WORST HOLD SDRAM_CLK -> 35.8MHz"  -hold  -npaths 4 -detail full_path -stdout \
+        -from_clock [list SDRAM_CLK] -to_clock [list $core1]
+show "WORST HOLD 7.16MHz -> 35.8MHz"    -hold  -npaths 4 -detail full_path -stdout \
+        -from_clock [list $core0] -to_clock [list $core1]
 
 project_close
