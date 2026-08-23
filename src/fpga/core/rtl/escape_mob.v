@@ -8,8 +8,11 @@
 //        w3=y[15:7]|width[6:4]|height[2:0]|hflip[3]
 // Tiles walk row-major: code + ty*width + tx. Palette base 0x100.
 // MOPRI-1: prio (w2[6:4]) is now captured. MPR1:MPR0 ride with every written
-// pixel and leave via disp_prio for the priority comparator in escape_prio.v;
-// MPR2 (the "special rendering" flag) suppresses the write instead.
+// pixel and leave via disp_prio for the priority comparator in escape_prio.v.
+// MOSTAIN-1: MPR2 (the "special rendering" flag) rides with the pixel too. A
+// special pixel occupies its slot (masking normal sprites beneath it, as the
+// reference's single MO bitmap does) but never draws; its pen bits 1/2 leave
+// via disp_stain_s/disp_stain_e and drive the compositor's apply_stain pass.
 //
 `default_nettype none
 
@@ -52,7 +55,13 @@ module escape_mob (
     input  wire [8:0]  disp_x,
     output wire [7:0]  disp_pen,        // {color[3:0], pix[3:0]}
     output wire [1:0]  disp_prio,       // MPR1:MPR0 of the sprite that owns this pixel
-    output wire        disp_valid
+    output wire        disp_valid,
+    // MOSTAIN-1: the "special" (MPR2) pass. A special pixel never draws, but it
+    // OWNS its line-buffer slot (so it masks normal sprites under it, exactly
+    // like the reference's single motion-object bitmap) and its own pen bits 1
+    // and 2 are the START/END markers that drive apply_stain in the compositor.
+    output wire        disp_stain_s,    // special pixel here, pen bit 1 set
+    output wire        disp_stain_e     // special pixel here, pen bit 2 set
 );
 
     // MOCHAN-4: per-channel registers behind the packed ports. Keeping the
@@ -83,13 +92,21 @@ module escape_mob (
     // and floor debris (the real MOHLB self-clears on readout instead).
     // MOPRI-1: each entry now also carries the sprite's MO priority so the
     // compositor can run the real PF/M comparator (see docs/mo_priority.md).
-    // Only MPR1:MPR0 travel: MPR2 ("special", mopriority&4) is resolved at
-    // WRITE time by not writing the pixel at all, which is exactly what the
-    // reference does ("upper bit of MO priority signals special rendering and
-    // doesn't draw anything" -> `continue`). That keeps the entry at 20 bits,
-    // which is a native M10K geometry (512x20), so the widening from 18 bits
-    // costs ZERO extra blocks - important, the 308-M10K ceiling is spent.
-    reg [19:0] buf0 [0:511];            // {fpar, tag[8:0], prio[1:0], color[3:0], pix[3:0]}
+    // MOSTAIN-1: MPR2 ("special", mopriority&4) is now CARRIED as a flag rather
+    // than being thrown away at write time. Two things needed it:
+    //   1. the reference draws specials into the ONE motion-object bitmap like
+    //      any other sprite, so they mask normal sprites underneath; suppressing
+    //      the write let the sprite below show through;
+    //   2. the second pass (atarimo apply_stain) reads those very pixels and
+    //      ORs 0x400 into the finished picture under them - the FACTORY MAP's
+    //      "you are here" markers are drawn entirely by that pass.
+    // The flag is paid for by narrowing the line tag from ly[8:0] to ly[7:0]:
+    // one frame covers 240 scanlines, so two lines of the same frame can only
+    // collide in ly[7:0] if their ly differ by exactly 256 - impossible over a
+    // 240-line span - and cross-frame staleness is caught by fpar exactly as
+    // before. The entry therefore stays at 20 bits = the native M10K geometry
+    // (512x20), so this costs ZERO extra blocks: the 308-M10K ceiling is spent.
+    reg [19:0] buf0 [0:511];            // {fpar, tag[7:0], special, prio[1:0], color[3:0], pix[3:0]}
     reg [19:0] buf1 [0:511];
     // M10K comes up zeroed on the device; mirror that for simulation so the
     // occupancy probe below reads a defined value on the very first line
@@ -104,7 +121,7 @@ module escape_mob (
     always @(posedge clk)
         if(y_count == 10'd0 && x_count == 10'd0) fpar <= ~fpar;
     reg        build_sel;               // which buffer is being built
-    reg [8:0]  built_ly0, built_ly1;    // the ly each buffer was last built for
+    reg [7:0]  built_ly0, built_ly1;    // the ly each buffer was last built for
     reg [19:0] disp_q0, disp_q1;
     reg [8:0]  blit_x;                  // declared early: feeds the probe read
     // MOPLACE-2: the buffer being BUILT is not the one being displayed, so its
@@ -123,18 +140,28 @@ module escape_mob (
     // requiring pix != 0 makes an all-zero entry unrepresentable as a hit -
     // which is what a powered-up (or never-written) M10K location reads.
     // Without that, an untouched entry aliases the tag {fpar=0, ly=0}.
-    wire hit0 = (disp_q0[19:10] == {built_fp0, built_ly0}) && (disp_q0[3:0] != 4'd0);
-    wire hit1 = (disp_q1[19:10] == {built_fp1, built_ly1}) && (disp_q1[3:0] != 4'd0);
+    // "occupied" = a real pixel written for the line this buffer was built for,
+    // special or not. "hit" = one that is allowed to DRAW (i.e. not special).
+    wire occ0 = (disp_q0[19:11] == {built_fp0, built_ly0}) && (disp_q0[3:0] != 4'd0);
+    wire occ1 = (disp_q1[19:11] == {built_fp1, built_ly1}) && (disp_q1[3:0] != 4'd0);
+    wire hit0 = occ0 && !disp_q0[10];
+    wire hit1 = occ1 && !disp_q1[10];
 
     assign disp_pen   = build_sel ? disp_q0[7:0] : disp_q1[7:0];
     assign disp_prio  = build_sel ? disp_q0[9:8] : disp_q1[9:8];
     assign disp_valid = build_sel ? hit0 : hit1;
 
+    // MOSTAIN-1: the special-pass markers for the compositor's stain automaton.
+    wire       spc_hit = build_sel ? (occ0 && disp_q0[10]) : (occ1 && disp_q1[10]);
+    wire [3:0] spc_pen = build_sel ? disp_q0[3:0] : disp_q1[3:0];
+    assign disp_stain_s = spc_hit & spc_pen[1];
+    assign disp_stain_e = spc_hit & spc_pen[2];
+
     // Occupancy of the build buffer at the pixel wr_x/wr_en are aiming at: the
     // probe read and the wr_x/wr_en registers both sample blit_x in the same
     // cycle, and the buffer write commits one cycle later, so this is exactly
     // "what is already at wr_x, before this write".
-    wire bld_occupied = build_sel ? hit1 : hit0;
+    wire bld_occupied = build_sel ? occ1 : occ0;
 
     // write port
     reg  [8:0]  wr_x;
@@ -581,7 +608,7 @@ module escape_mob (
             pend <= 4'd0; infl <= 4'd0; disc <= 4'd0;
             wr_en <= 0;
             build_sel <= 0;
-            built_ly0 <= 9'h1FF; built_ly1 <= 9'h1FF;
+            built_ly0 <= 8'hFF; built_ly1 <= 8'hFF;
             gfx_done_last <= 4'd0;
         end else begin
             wr_en <= 0;
@@ -630,10 +657,10 @@ module escape_mob (
                 // tag bookkeeping: the buffer we are about to build will hold
                 // pixels for this ly (stale content mismatches by definition)
                 if(build_sel) begin
-                    built_ly0 <= (y_count - vbporch + 10'd1 + {1'b0, yscroll}) & 9'h1FF;
+                    built_ly0 <= (y_count - vbporch + 10'd1 + {1'b0, yscroll}) & 10'h0FF;
                     built_fp0 <= fpar;
                 end else begin
-                    built_ly1 <= (y_count - vbporch + 10'd1 + {1'b0, yscroll}) & 9'h1FF;
+                    built_ly1 <= (y_count - vbporch + 10'd1 + {1'b0, yscroll}) & 10'h0FF;
                     built_fp1 <= fpar;
                 end
                 wr_en <= 0;
@@ -909,14 +936,19 @@ module escape_mob (
                 // bld_occupied; this used to be last-wins, which handed
                 // overlapping sprites to the wrong object (16% of MO pixels in
                 // the reference frame).
-                // MOPRI-1: spr_prio[2] (mopriority & 4) = "special rendering,
-                // draws nothing" in the normal pass. The reference `continue`s
-                // on it; here we simply suppress the line-buffer write. Note
-                // this gates ONLY wr_en - the fetch budget, ring walk, blit
-                // loop and handshakes are untouched, so timing is unchanged.
-                if(pix_val != 4'd0 && !spr_prio[2] && blit_x < 9'd336+9'd0+9'd8) begin
+                // MOSTAIN-1: spr_prio[2] (mopriority & 4) = "special rendering".
+                // The reference `continue`s on it in the MERGE loop - but only
+                // there: atarimo's draw() has already put the pixel into the one
+                // motion-object bitmap, where it masks anything under it, and
+                // the second pass (apply_stain) reads it back. So the pixel IS
+                // written; it carries a special flag that stops it drawing and
+                // hands its marker bits to the compositor. Nothing else changes:
+                // the fetch budget, ring walk, blit loop and handshakes are
+                // untouched, so timing and throughput are exactly as before.
+                if(pix_val != 4'd0 && blit_x < 9'd336+9'd0+9'd8) begin
                     wr_x    <= blit_x;
-                    wr_data <= {fpar, ly, spr_prio[1:0], spr_color, pix_val};
+                    wr_data <= {fpar, ly[7:0], spr_prio[2], spr_prio[1:0],
+                                spr_color, pix_val};
                     wr_en   <= 1;
                 end
                 blit_x <= (blit_x + 9'd1) & 9'h1FF;

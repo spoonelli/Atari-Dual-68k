@@ -128,52 +128,37 @@ previously acknowledged in a comment and discarded). The line-buffer entry grew
 from 18 to 20 bits:
 
 ```
-{fpar, tag[8:0], prio[1:0], color[3:0], pix[3:0]}
+{fpar, tag[7:0], special, prio[1:0], color[3:0], pix[3:0]}
 ```
 
-Only `MPR1:MPR0` ride along. `MPR2` — the "special rendering" flag — is resolved
-at write time instead: `S_BLIT` suppresses the line-buffer write when
-`spr_prio[2]` is set, which is precisely what the reference's first pass does
-with `continue`. This keeps the entry at 20 bits, a native M10K geometry
-(512x20), so the widening costs **zero extra blocks**. That matters: the
-308-M10K ceiling is documented as fully spent (`escape_core.vhd`, "the 308-M10K
-ceiling is spent").
+`MPR1:MPR0` ride along for the comparator. **MOSTAIN-1**: `MPR2` — the "special
+rendering" flag — rides along too, in the `special` bit. The bit is paid for by
+narrowing the line tag from `ly[8:0]` to `ly[7:0]`: one frame spans 240
+scanlines, so two lines of the same frame can only collide in `ly[7:0]` if their
+`ly` differ by exactly 256, which a 240-line span cannot do; cross-frame
+staleness is still caught by `fpar`. The entry therefore stays at 20 bits, a
+native M10K geometry (512x20), so this costs **zero extra blocks**. That matters:
+the 308-M10K ceiling is documented as fully spent (`escape_core.vhd`).
 
-Only `wr_en` is gated. The fetch budget, SLIP walk, ring traversal, A/B fetch
-handshakes and blit loop are untouched, so MO scheduling and timing are
-bit-identical to before.
+A special pixel is written like any other, and then:
+
+* it never draws — `disp_valid` requires `special == 0`, so `escape_prio.v` sees
+  exactly what it saw before;
+* it **owns its column** — `bld_occupied` counts it, so under first-write-wins it
+  masks normal sprites beneath it, which is what the reference's single motion
+  object bitmap does;
+* its pen bits 1 and 2 leave as `disp_stain_s` / `disp_stain_e`, the START and
+  END markers `apply_stain` looks for.
+
+Nothing else changed. The fetch budget, SLIP walk, link scout, fetch handshakes
+and blit loop are untouched, so MO scheduling and timing are bit-identical to
+before — measured: `run_mob_cov.sh` reports the same 215/140/24/117 cycles/line
+split for the base and the changed engine on the same scene.
 
 ## What is approximated
 
-**The second MAME pass (`apply_stain`) is not implemented.** After the alpha
-layer is drawn, the reference walks the frame again and, for motion objects with
-`mopriority & 4` *and* pen bit 1 set, ORs `0x400` into the playfield pen from
-that X to the end of the line (or to a matching end-marker sprite), selecting the
-STAIN colour bank. This is a horizontally-propagating, order-dependent effect
-computed after the whole frame exists; a scanline pipeline that emits a pixel
-per clock has no second pass to run it in.
-
-Consequence: screen-wide "stain" tints (the wipe/flash effects the game builds
-out of marker sprites) do not appear. This is not a regression — the old
-compositor never addressed pens above `0x2FF` at all, so the STAIN bank
-(`3E0800-3E0FFF`) was already unreachable. What *does* change for those sprites
-is that they no longer draw as opaque blocks: previously a special sprite's
-pixels were composited like any other MO pixel, which is wrong in the reference
-too. Implementing stain properly would need a per-line "stain active from X"
-latch driven by marker sprites during the line build; that is a scheduling
-change and was deliberately left out of this one.
-
-**A special sprite no longer masks a normal sprite underneath it.** The
-reference keeps one MO bitmap: if a special object is drawn over a normal one,
-that pixel's value *is* the special one, so the merge skips it and the playfield
-shows through — the special sprite punches a hole in whatever MO pixel it
-covered. We resolve MPR2 at line-buffer write time instead, so the special
-sprite's pixels are simply never written and the normal sprite underneath
-survives. The two differ only where a special object overlaps a normal one.
-Special objects are rare (12 list entries across a 150-second attract+demo
-capture), and holding MPR2 in the buffer to reproduce the masking would cost a
-21st bit per entry — which does not fit the 512x20 M10K geometry and would
-double the line-buffer block count. Not worth it at the current ceiling.
+**`apply_stain` and special-sprite masking used to be omitted here; both are
+now implemented (MOSTAIN-1).** See "The stain pass" below.
 
 **`FORCEMC0`'s colour-clearing arm is omitted.** Because `FORCEMC0 == PF/M`, the
 signal is never asserted on the branch where the motion object wins, so the
@@ -281,3 +266,99 @@ without the line engine's own fidelity (fetch budget, links per line) in the way
 entry are free. **M10K delta: 0.** The comparator itself is ~20 LUTs of
 combinational logic feeding the already-registered `color_vaddr`, replacing a
 3-way mux on the same path — no new pipeline stage, no timing risk.
+
+
+## The stain pass (MOSTAIN-1)
+
+`screen_update_eprom` ends with a pass it introduces as *"now go back and process
+the upper bit of MO priority"*: for every motion-object pixel whose priority has
+bit 2 set **and** whose pen has bit 1 set, it calls `atarimo::apply_stain`, which
+ORs `0x400` into the **finished picture** — after the MO/PF merge and after the
+alpha tilemap — from that X rightwards until an end marker.
+
+```c
+// reference/atarimo.cpp
+const uint16_t START_MARKER = ((4 << PRIORITY_SHIFT) | 2);
+const uint16_t END_MARKER   = ((4 << PRIORITY_SHIFT) | 4);
+bool offnext = false;
+for ( ; x < bitmap.width(); x++) {
+    pf[x] |= 0x400;
+    if (offnext && ((mo[x] == 0xffff) || (mo[x] & START_MARKER) != START_MARKER))
+        break;
+    offnext = (mo[x] != 0xffff) && ((mo[x] & END_MARKER) == END_MARKER);
+}
+```
+
+That `0x400` is colour-RAM bit 10 — the top half of the 2048-entry colour RAM the
+core has always addressed (`color_vaddr` is 11 bits) and never used. **The
+FACTORY MAP inter-level screen's route markers are drawn entirely by this pass**:
+the "you are here" cube is a special sprite over an ordinary playfield block, and
+the grey cube MAME shows is that block re-read out of the stained bank. Without
+the pass the screen renders the raw un-recoloured art instead.
+
+### Why one flip-flop is enough
+
+The C loop restarts at *every* marker pixel, so what a scanline pipeline has to
+produce is the union of those walks. With
+
+* `S(x)` = "special pixel here whose pen has bit 1" (START_MARKER), and
+* `E(x)` = "special pixel here whose pen has bit 2" (END_MARKER),
+
+a walk that has reached `x-1` continues into `x` unless it broke, and it breaks
+at `x` exactly when `E(x-1) && !S(x)`. Since `pf[x] |= 0x400` happens *before*
+the break test, the breaking pixel is still stained. That collapses to
+
+```
+stain(x) = S(x) | alive(x-1)
+alive(x) = stain(x) & ~( E(x-1) & ~S(x) )
+```
+
+i.e. two flip-flops (`alive`, and `E` delayed by one pixel), cleared at the start
+of each line. A solid marker (pen 6 = both bits) stains its own silhouette plus
+one pixel past its right edge; a pen-2-only marker stains to the end of the line.
+Both match the C loop exactly. `core_top.v` runs this immediately before the
+colour-RAM address register, so the OR lands after alpha — where the reference
+puts it.
+
+### Measured
+
+Scenes are dumped from MAME with `sim/tools/scenedump2.lua` (or the poking
+variant in the session scratchpad) and replayed through the real RTL by
+`sim/run_mob_tb.sh`, then scored against MAME's own snapshot of the same frame by
+`sim/tools/render_scene.py`. `sim/tb/tb_mob.v` writes the special pass's pixels
+to `sim/build/mob_special.txt`, and `render_scene.py --no-stain` reproduces the
+old behaviour for A/B.
+
+| scene | before | after |
+|---|---|---|
+| FACTORY MAP inter-level screen | 80440/80640 = **99.75%** | 80640/80640 = **100.00%** |
+| same, marker widened to 8x8 tiles (5029 stained pixels) | 79681/80640 = **98.81%** | 80640/80640 = **100.00%** |
+| gameplay 79/162 | 98.24% | 98.24% |
+| gameplay 126/294 | 100.00% | 100.00% |
+| gameplay 337/173 | 99.38% | 99.38% |
+| gameplay 290/128 | 98.22% | 98.22% |
+
+The four gameplay frames contain no special sprites and are bit-identical either
+way (same MO pixel counts, same `MOB PRIO CHECK` 100.0000%), which is the
+regression guard: the tag narrowing and the entry-layout change move nothing.
+
+### Masking
+
+To exercise the masking half — which needs specials *overlapping* normals, a
+state the game only reaches on screens the bench cannot drive to — every third
+live list entry of a crowded gameplay frame was flipped to MPR2 in MAME, and MAME
+asked to render it. The engine is then scored against MAME's own frame:
+
+| scene | engine px | pixels given to the wrong sprite | exact-RGB |
+|---|---|---|---|
+| 126/294, every 3rd entry special — before | 7493 | **606** | 54661/80640 = 67.78% |
+| 126/294, every 3rd entry special — after | 6885 | **0** | 80640/80640 = **100.00%** |
+| 291/128, every 2nd entry special — before | 7275 | **244** | 60691/80640 = 75.26% |
+| 291/128, every 2nd entry special — after | 7008 | **0** | 79330/80640 = 98.38% |
+
+`sim/run_mob_cov.sh` on the same state scores the base engine at **608 spurious
+pixels** against its own golden model and the changed engine at **0**, with an
+identical 215/140/24/117 cycles/line split — the masking is free.
+(`sim/tools/mob_golden.py` was updated in the same change: special pixels claim a
+column without drawing in it. An oracle that has drifted from the engine it
+scores is this project's fourth recorded measurement bug.)
