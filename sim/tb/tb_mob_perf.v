@@ -142,6 +142,7 @@ module tb_mob_perf;
     integer n_lines, n_complete, n_aborted;      // build outcome per line
     integer n_ymatch, n_wren, n_wren_off, n_reqs;
     integer n_budget_out;                        // lines that hit fetch_budget==0
+    integer n_deadtile, n_blitpx;                // tile-rows blitted wholly offscreen
     integer px_seen;
     integer line_entries, max_entries, n_entries;
     reg [3:0] state_d = 0;
@@ -152,6 +153,7 @@ module tb_mob_perf;
         n_lines=0; n_complete=0; n_aborted=0;
         n_ymatch=0; n_wren=0; n_wren_off=0; n_reqs=0; n_budget_out=0;
         px_seen=0; line_entries=0; max_entries=0; n_entries=0;
+        n_deadtile=0; n_blitpx=0;
     end
 
     always @(posedge clk) if(measuring) begin
@@ -162,6 +164,13 @@ module tb_mob_perf;
             default: c_trav  = c_trav  + 1;
         endcase
         if(dut.wr_en) n_wren = n_wren + 1;
+        // tile-rows blitted entirely into the invisible 344..504 window: the
+        // whole 8 pixels are clipped away, so the fetch and the 8 blit cycles
+        // bought nothing. (505..511 wraps back into view, so it is NOT dead.)
+        if(dut.state == S_BLIT && dut.blit_n == 4'd0
+           && dut.blit_x >= 9'd344 && dut.blit_x <= 9'd504)
+            n_deadtile = n_deadtile + 1;
+        if(dut.state == S_BLIT) n_blitpx = n_blitpx + 1;
         // An entry visit == a rising edge of "word 0 of some entry is being
         // addressed". Every walk order reads w0 exactly once per entry, so this
         // stays valid across FSM revisions (the old FSM addresses 0,1,2,3; the
@@ -227,16 +236,20 @@ module tb_mob_perf;
         end
     end
     always @(posedge clk) begin
+        // Record FIRST, then swap. wr_en is registered, so the last blit cycle
+        // of a line lands its write during x_count==0 - after the abort has
+        // flipped build_sel but into the buffer that was being built, which is
+        // correct - and it belongs to the line that just finished.
+        if(dut.wr_en) begin
+            sh_pen[dut.wr_x] = dut.wr_data[7:0];
+            sh_val[dut.wr_x] = 1'b1;
+        end
         if(x_count == 10'd0 && y_count >= VID_V_BPORCH-1
            && y_count < VID_V_BPORCH+VID_V_ACTIVE-1) begin
             for(si = 0; si < 512; si = si + 1) begin
                 dsh_val[si] = sh_val[si]; dsh_pen[si] = sh_pen[si];
                 sh_val[si]  = 0;
             end
-        end
-        if(dut.wr_en) begin
-            sh_pen[dut.wr_x] = dut.wr_data[7:0];
-            sh_val[dut.wr_x] = 1'b1;
         end
     end
 
@@ -256,7 +269,8 @@ module tb_mob_perf;
                  px_seen, n_reqs, n_wren, n_entries, max_entries);
         $display("PERF lines=%0d complete=%0d aborted=%0d budget_exhausted=%0d",
                  n_lines, n_complete, n_aborted, n_budget_out);
-        $display("PERF pairing_slips=%0d", n_pairslip);
+        $display("PERF pairing_slips=%0d dead_tiles=%0d (%0d wasted blit cycles of %0d)",
+                 n_pairslip, n_deadtile, n_deadtile*8, n_blitpx);
         $display("PERF ghosts=%0d pen_mismatch=%0d  (stale-tag pixels this frame's build never wrote)",
                  n_ghost, n_mismatch);
         $display("PERF cycles idle=%0d traverse=%0d prime=%0d blit=%0d (per line: %0d/%0d/%0d/%0d)",
