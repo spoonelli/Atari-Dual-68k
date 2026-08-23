@@ -132,6 +132,8 @@ entity escape_core is
         -- LANE4k user audio mixer (Interact): 0=mute .. 7=unity
         uvol_ym    : in  std_logic_vector(2 downto 0) := "111";
         uvol_tms   : in  std_logic_vector(2 downto 0) := "111";
+        -- MIX-100: 8 x 3-bit per-FM-channel gains (channel 0 = low bits)
+        uvol_fm    : in  std_logic_vector(23 downto 0) := (others => '1');
 
         -- JSA-I audio out (signed 16-bit)
         audio_l    : out std_logic_vector(15 downto 0);
@@ -1626,7 +1628,7 @@ begin
                    snd_irq=>jsa_snd_irq,
                    coin1=>coin1, coin2=>coin2, test_mode=>not svc_n,
                    irq_strict=>irq_strict,
-                   uvol_ym=>uvol_ym, uvol_tms=>uvol_tms,
+                   uvol_ym=>uvol_ym, uvol_tms=>uvol_tms, uvol_fm=>uvol_fm,
                    audio_l=>audio_l, audio_r=>audio_r,
                    dbg_cpu_addr=>jsa_cpu_addr, dbg_cpu_sync=>open );
 

@@ -52,6 +52,11 @@ entity escape_jsa is
         -- LANE4k user audio mixer: 0 = mute, 7 = unity (x(n+1)/8)
         uvol_ym    : in  std_logic_vector(2 downto 0) := "111";
         uvol_tms   : in  std_logic_vector(2 downto 0) := "111";
+        -- MIX-100 per-channel FM mixer: 8 x 3-bit gains, channel 0 in the low
+        -- bits. 7 = unity (the authentic default), 0 = mute. Control surface
+        -- only - the shipped defaults leave the mix exactly as the board mixed
+        -- it; nothing is rebalanced.
+        uvol_fm    : in  std_logic_vector(23 downto 0) := (others => '1');
 
         -- audio out, signed
         audio_l   : out std_logic_vector(15 downto 0);
@@ -83,7 +88,8 @@ architecture rtl of escape_jsa is
             left   : out std_logic_vector(15 downto 0);
             right  : out std_logic_vector(15 downto 0);
             xleft  : out std_logic_vector(15 downto 0);
-            xright : out std_logic_vector(15 downto 0)
+            xright : out std_logic_vector(15 downto 0);
+            ch_gain: in  std_logic_vector(23 downto 0)
         );
     end component;
 
@@ -466,7 +472,8 @@ begin
                 left   => open,
                 right  => open,
                 xleft  => ym_xl,
-                xright => ym_xr );
+                xright => ym_xr,
+                ch_gain=> uvol_fm );
     end generate;
 
     ym_stub : if not YM_ENABLE generate           -- GHDL sim: silence, never busy
