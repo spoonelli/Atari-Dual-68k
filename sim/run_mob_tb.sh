@@ -39,3 +39,8 @@ docker run --rm -v "$REPO":/work -w /work "${IVERILOG_IMAGE:-hdlc/iverilog:lates
     src/fpga/core/rtl/escape_mob.v src/fpga/core/rtl/escape_prio.v sim/tb/tb_mob.v &&
   timeout 600 vvp sim/build/tb_mob.vvp"
 python3 sim/tools/check_mob_prio.py
+# MODEPTH-1: ...and score the MO layer itself against MAME's own atarimo
+# renderer. check_mob_prio above validates the PRIORITY decision; this
+# validates which SPRITE won each pixel, which is the only check that notices a
+# change in the order the engine reaches the linked list. See that file.
+python3 sim/tools/mob_vs_mame.py --xscroll "${XSCROLL:-123}" --yscroll "${YSCROLL:-253}"
