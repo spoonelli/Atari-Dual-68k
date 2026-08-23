@@ -172,6 +172,7 @@ entity escape_core is
         -- transactions, frozen when the wild-jump detector fires. Readout
         -- is combinational by index (same clock domain as the HUD).
         trace_idx       : in  std_logic_vector(6 downto 0) := (others=>'0');
+        trace_hold      : in  std_logic := '0';   -- SDSCHED-86: freeze on demand
         trace_q         : out std_logic_vector(42 downto 0);
         trace_wp        : out std_logic_vector(6 downto 0);
         trace_frozen    : out std_logic;
@@ -1108,8 +1109,12 @@ begin
                     tr_wp   <= tr_wp + 1;
                     tr_seen <= '1';
                 end if;
-                if e_in_tab='1' and boot_flag = x"01" then
+                if (e_in_tab='1' and boot_flag = x"01") or trace_hold='1' then
                     tr_froze <= '1';           -- crime scene preserved
+                end if;
+                if trace_hold='0' and e_in_tab='0' and tr_froze='1'
+                   and boot_flag /= x"01" then
+                    tr_froze <= '0';           -- rearm across reboots
                 end if;
             end if;
         end if;
