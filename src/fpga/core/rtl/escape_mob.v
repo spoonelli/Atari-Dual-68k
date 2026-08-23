@@ -204,7 +204,9 @@ module escape_mob (
     reg [9:0]  first_link, link;
     reg [9:0]  nlink;                   // MOFETCH-1: this entry's link, read early
     reg [6:0]  ent_count;
-    reg [15:0] w0, w1, w2, w3;
+    // MOCOV-1: w1 is gone - the blitter no longer reads the code word at all,
+    // the scout does (and turns it straight into pf_code_row).
+    reg [15:0] w0, w2, w3;
     reg [8:0]  spr_y;
     reg [3:0]  spr_color;
     reg [2:0]  spr_prio;                // w2[6:4] - MPR2:MPR0
