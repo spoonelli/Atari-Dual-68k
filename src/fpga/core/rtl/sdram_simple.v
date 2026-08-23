@@ -72,6 +72,7 @@ module sdram_simple (
     reg [3:0]  wait_ctr;
     reg [9:0]  refresh_ctr;
     reg        refresh_due;
+    reg [5:0]  refresh_age;    // SDSCHED-88: clocks spent due (deferral bound)
     reg [23:0] word;
     reg        is_write;
     reg [31:0] wdata_l;
@@ -101,14 +102,19 @@ module sdram_simple (
             rd_ack     <= 1'b0;
             refresh_ctr<= 10'd0;
             refresh_due<= 1'b0;
+            refresh_age<= 6'd0;
             cmd(CMD_NOP);
         end else begin
             cmd(CMD_NOP);
             refresh_ctr <= refresh_ctr + 10'd1;
-            if (refresh_ctr == 10'd250) begin      // ~7us @ 35.8MHz (spec: <7.8us)
+            if (refresh_ctr == 10'd250) begin      // 2.9us @ 85.909MHz (spec: <7.8us/row)
                 refresh_due <= 1'b1;
                 refresh_ctr <= 10'd0;
             end
+            if (refresh_due) begin
+                if (refresh_age != 6'd63) refresh_age <= refresh_age + 6'd1;
+            end else
+                refresh_age <= 6'd0;
 
             case (state)
             S_INIT: begin
@@ -134,7 +140,13 @@ module sdram_simple (
                 dq_oe <= 1'b0;
                 if (wr_ack && ~wr_req) wr_ack <= 1'b0;      // finish 4-phase
                 else if (rd_ack && ~rd_req) rd_ack <= 1'b0;
-                else if (refresh_due) begin
+                // SDSCHED-88: a refresh DEFERS (bounded) to a pending read -
+                // the zero-wait CPU fastpath budgets ~24 spare clocks per bus
+                // cycle and a 10-clk tRFC in front of the fill blows it. The
+                // 250-clk interval is 2.9us against the 7.8us/row spec, so
+                // even the 63-clk deferral cap keeps >2x margin; sustained
+                // read pressure defers to the cap, never past it.
+                else if (refresh_due && (!(rd_req && ~rd_ack) || refresh_age >= 6'd48)) begin
                     cmd(CMD_REFRESH);
                     refresh_due <= 1'b0;
                     wait_ctr <= 4'd9;                        // tRFC
