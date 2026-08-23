@@ -12,7 +12,14 @@ STOPTIME="${2:-500us}"
 if [ "$TB" = "tb_escape_adc" ]; then
   python3 "$REPO_ROOT/sim/tools/make_adc_hex.py" >/dev/null
 fi
-exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work -w /work "$IMAGE" bash -c "
+# worktrees carry an empty third_party submodule: mount the main checkout's
+# copy read-only in that case (same pattern as run_vecrace.sh)
+TPMOUNT=()
+if [ ! -d "$REPO_ROOT/third_party/Arcade-Atari-system1_MiSTer/rtl" ]; then
+  MAIN="$(git -C "$REPO_ROOT" worktree list --porcelain | head -1 | sed 's/^worktree //')"
+  TPMOUNT=(-v "$MAIN/third_party:/work/third_party:ro")
+fi
+exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}" -w /work "$IMAGE" bash -c "
   set -e
   STD='--std=08 -fsynopsys -frelaxed'; W=sim/build
   rm -rf \$W; mkdir -p \$W
