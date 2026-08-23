@@ -966,7 +966,13 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     // 7.159 side consumes them through escape_core's registered v_di_r/
     // e_di_r capture (SDSCHED-83), so data is stable long before the CPU
     // takes it.
-    localparam FASTPATH_EN = 1;
+    // BISECT-93: fastpath OFF. Device evidence beats bench greens: coin-in
+    // worked on '88 (pre-zerowait) and fails on '90-'92, and speech now
+    // cuts out mid-phrase - BOTH are JSA-subsystem symptoms that the
+    // interrupt work never touched but the zero-wait merge did (constant
+    // speculative fills = far more SDRAM traffic; refresh deferral). This
+    // build isolates: legacy memory path + the '92 armed-IRQ fix.
+    localparam FASTPATH_EN = 0;
     wire [23:0] fpv_addr_w, fpe_addr_w;      // escape_core exports (7.159 dom)
     wire        fpv_spec_w, fpe_spec_w;
     reg  [23:0] fpv_addr_s, fpe_addr_s;      // 85.9-domain samples
@@ -1767,7 +1773,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3092;   // zerowait: ARMED extra-vblank latch (POST-derail + lost-wakeup fix) - screen shows '92'
+    localparam [15:0] BUILD_ID = 16'h3093;   // bisect: FASTPATH OFF + armed IRQ (isolating the JSA/coin symptom) - screen shows '93'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
