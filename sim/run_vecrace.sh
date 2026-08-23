@@ -8,6 +8,11 @@
 #   BASE=n        base IRQ period in clks (default 900)
 #   SWEEP=n       phase modulus (default 613)
 #   LAT=n         rom service latency clks (default 2)
+#   FPEN=0|1      escape_core FASTPATH_EN (default 1; 0 = legacy arbiter)
+#   FP=n          fastpath server model: 0 = none (watchdog fallback path),
+#                 1 = authentic one-clock fill (default), n>1 = n-clk fill
+#   MAXAS=n       >0: fail any extra-CPU ROM cycle with AS low > n clks
+#                 (2 = assert the authentic 4-clock cycle; default 0 = off)
 #   FIXED=0|1     1 = substitute the main checkout's escape_core.vhd (the
 #                 SDSCHED-78 address-qualified-waitstate fix) for this tree's
 #   DIAG=1        per-clock trace of FC=111 cycles (small NIRQ runs)
@@ -27,7 +32,10 @@ LAT="${LAT:-2}"
 FIXED="${FIXED:-0}"
 PHOFF="${PHOFF:-0}"
 DIAG="${DIAG:-0}"
-TAG="${TAG:-shad$SHAD-p$PHOFF}"
+FPEN="${FPEN:-1}"
+FP="${FP:-1}"
+MAXAS="${MAXAS:-0}"
+TAG="${TAG:-shad$SHAD-fp$FPEN$FP-p$PHOFF}"
 WAVE="${WAVE:-}"
 STOPTIME="${STOPTIME:-2sec}"
 
@@ -70,5 +78,6 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W tb_escape_vecrace >/dev/null
   ghdl -r \$STD --workdir=\$W tb_escape_vecrace $RUNFLAGS \
-    -gG_SHAD=$SHAD -gG_NIRQ=$NIRQ -gG_BASE=$BASE -gG_SWEEP=$SWEEP -gG_LAT=$LAT -gG_PHOFF=$PHOFF -gG_DIAG=$DIAG
+    -gG_SHAD=$SHAD -gG_NIRQ=$NIRQ -gG_BASE=$BASE -gG_SWEEP=$SWEEP -gG_LAT=$LAT -gG_PHOFF=$PHOFF -gG_DIAG=$DIAG \
+    -gG_FPEN=$FPEN -gG_FP=$FP -gG_MAXAS=$MAXAS
 "
