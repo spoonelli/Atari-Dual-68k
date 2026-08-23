@@ -121,6 +121,7 @@ architecture tb of tb_escape_worldwake is
     signal ack_sum      : integer := 0;   -- accumulated vblank->ack delays
     signal ack_n        : integer := 0;
     signal rel_seen     : boolean := false;
+    signal reldrop_cnt  : integer := 0;   -- release drops (stops/restarts)
 
     function hex16(v : std_logic_vector(15 downto 0)) return string is
         variable s : string(1 to 4);
@@ -286,7 +287,8 @@ begin
         variable frames_rdy : integer := 0;
         variable wake_prev  : integer := 0;
         variable stall_frm  : integer := 0;
-        variable init_done  : boolean := false;   -- extra wrote flag (runtime)
+        variable init_done  : boolean := false;   -- extra runtime init proven
+        variable erel_d     : std_logic := '0';
         variable a          : std_logic_vector(23 downto 0);
     begin
         if rising_edge(clk) and resetn='1' then
@@ -303,7 +305,9 @@ begin
                 iack_frame := 0;
                 if ready_seen then
                     frames_rdy := frames_rdy + 1;
-                    if wake_cnt = wake_prev then
+                    if not init_done then
+                        stall_frm := 0;   -- extra is re-POSTing (restart)
+                    elsif wake_cnt = wake_prev then
                         stall_frm := stall_frm + 1;
                         if stall_frm >= 4 and m_erel='1' then
                             report "WORLDWAKE LOST WAKEUP: no poll-loop wake for "
@@ -321,6 +325,17 @@ begin
             end if;
             vb_d := vblank;
 
+            -- release drops (supervision restart OR wave-transition pulse)
+            -- reset the extra: its runtime init is gone until re-proven
+            if m_erel='0' and erel_d='1' then
+                init_done := false;
+                reldrop_cnt <= reldrop_cnt + 1;
+                report "worldwake: extra STOPPED (release drop " &
+                       integer'image(reldrop_cnt + 1) & ", frame " &
+                       integer'image(frame_i) & ")";
+            end if;
+            erel_d := m_erel;
+
             -- video-CPU writes
             if m_vas='0' and m_vrw='0' and not vin then
                 a := m_vaddr(23 downto 0);
@@ -335,9 +350,7 @@ begin
                                integer'image(frame_i);
                     end if;
                 elsif a = x"3F7F20" then
-                    restart_cnt <= restart_cnt + 1;
-                    -- a restart resets the extra: its runtime init is gone
-                    init_done := false;
+                    restart_cnt <= restart_cnt + 1;   -- supervision timeout
                 end if;
                 vin := true;
             end if;
@@ -407,6 +420,7 @@ begin
                "  iacks " & integer'image(iack_cnt) &
                "  premature " & integer'image(prem_cnt) &
                "  restarts " & integer'image(restart_cnt) &
+               "  reldrops " & integer'image(reldrop_cnt) &
                "  storm_max " & integer'image(storm_max) &
                "  failpark " & integer'image(fail_park) &
                "  ackdly_avg " &
