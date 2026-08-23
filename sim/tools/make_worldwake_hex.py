@@ -148,6 +148,14 @@ m.w(0x13FC, 0x0001, 0x0036, 0x0011)                 # re-release
 m.bra_s("WAIT")
 m.label("RUN")
 m.w(0x5279, 0x003F, 0x7F10)                         # addq.w #1,$3F7F10 heartbeat
+# authentic wave-transition restart, once: at heartbeat 0x2000 (~frame 170)
+# stop and re-release the extra (it re-POSTs, re-handshakes, re-enters the
+# poll loop) - proves EIRQ_MODE 2's disarm -> re-arm path end to end
+m.w(0x3039, 0x003F, 0x7F10)                         # move.w $3F7F10.l,d0
+m.w(0x0C40, 0x2000)                                 # cmpi.w #$2000,d0
+m.bne_s("RUN")
+m.w(0x13FC, 0x0000, 0x0036, 0x0011)                 # stop extra
+m.w(0x13FC, 0x0001, 0x0036, 0x0011)                 # re-release
 m.bra_s("RUN")
 
 m.org(0x500)                                        # main vblank ISR:
