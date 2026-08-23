@@ -6,9 +6,13 @@ that instantiates **the identical RTL the Pocket build uses** — `escape_core`,
 glue around it. Nothing in the machine is forked; if you fix a bug in
 `src/fpga/core/rtl/`, both platforms get it.
 
-> **Status: first compilable port, never run on hardware by its author.**
-> Read [What is verified / what is not](#what-is-verified--what-is-not) before
-> you assume anything works.
+> **Status: compiles clean for the DE10-Nano — non-negative setup and hold
+> slack on every analysed clock — and has never been run on hardware.**
+> Rebased on `tas-atomic` at BUILD 105. Read
+> [What is verified / what is not](#what-is-verified--what-is-not) before you
+> assume anything works, and
+> [Top three things most likely broken on first flash](#top-three-things-most-likely-broken-on-first-flash)
+> before you debug it.
 
 ---
 
@@ -533,28 +537,43 @@ power cycle. Save states are explicitly out of scope for this port.
 
 ### Verified here
 
+* **It compiles for the DE10-Nano with non-negative slack on every analysed
+  clock**, checked by a gate that has been **proven able to fail** (see
+  "Timing" above — `check_slack.py` was run against the known-bad report and
+  correctly named both violations before being trusted).
 * **The ROM path, end to end and byte-exact.** The `.mra` was assembled with the
-  real `mra` tool against a real `eprom.zip`; the loader's invert + planar→chunky
-  transform was replayed over the output in Python; the result matched
-  `support/build_rom.py`'s CRC-verified image across all 2,228,224 bytes.
+  real `sebdel/mra-tools-c` tool against a real `eprom.zip`; the loader's
+  invert + planar→chunky transform was replayed over the output in Python; the
+  result matched `support/build_rom.py`'s CRC-verified image across all
+  2,228,224 bytes. Re-verified after the BUILD 105 rebase.
+* **The Verilog→VHDL boundary**, mechanically: `check_ports.py` confirms all 57
+  connected ports exist on the `escape_core` entity and that no mandatory input
+  is unconnected. Also proven able to fail (renaming `.vblank_in` makes it
+  name both halves of the mistake).
 * **The MRA conventions** (`map="01"` byte lane, index numbering, SD-card paths,
   file naming) against MiSTer's firmware source and the reference core's shipped
   MRAs — see *Sources*.
 * **Which clock configuration the Pocket actually ships** — 35.795455 MHz, 5× CPU.
-  Several comments in `core_top.v`, `sdram_simple.v` and the project brief say
-  "85.909 MHz, 12:1". That is **stale**; the PLL IP has said 5× since commit
-  *"v22: SDRAM 42.95 → 35.8 MHz"*. Read the PLL, not the comments.
+  Several comments in `core_top.v`, `sdram_simple.v` and the original porting
+  brief say "85.909 MHz, 12:1". That is **stale**; the PLL IP has said 5× since
+  commit *"v22: SDRAM 42.95 → 35.8 MHz"*. Read the PLL, not the comments.
 
 ### Not verified — nobody has run this on a DE10-Nano
 
-* That it boots, draws, or makes a sound on real hardware.
-* SDRAM bandwidth with the playfield added (see above) — the estimate is
-  arithmetic only.
+* That it boots, draws, or makes a sound on real hardware. **Nothing below this
+  line has been observed, only reasoned about.**
+* SDRAM bandwidth with the playfield added and the BUILD 104 4-channel motion
+  object engine — the ~71%-of-a-line figure is arithmetic from `sdram_simple`'s
+  FSM, not measurement. This is the single most likely thing to be visibly
+  wrong.
 * SDRAM read capture on the DE10-Nano's SDRAM module. The clock/phase pair is
-  the Pocket's, but it is a different board and a different memory module.
-* HSync/VSync placement, and therefore HDMI centring and 15 kHz output.
+  the Pocket's proven one, but it is a different board and a different part.
+* HSync/VSync placement, and therefore HDMI centring and 15 kHz output. The
+  positions are invented, not transcribed from the schematic.
 * Any control mapping. None of it has been pressed.
 * Audio levels through the MiSTer audio path.
+* EEPROM persistence — deliberately not wired (see BUILD 103 above); high
+  scores do not survive a power cycle on MiSTer.
 
 ### Top three things most likely broken on first flash
 
