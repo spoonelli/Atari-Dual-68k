@@ -1364,7 +1364,15 @@ begin
                 vblank_d <= vblank_in;
                 if vblank_in='1' and vblank_d='0' then
                     v_virq <= '1';
-                    e_virq <= '1';
+                    -- 87b: only latch for a RUNNING extra CPU. A stale
+                    -- pending vblank from before release fired the instant
+                    -- POST unmasked - derailing the Second Processor
+                    -- handshake (boot hang, no coin-in). The old shared
+                    -- latch was accidentally boot-safe because the main's
+                    -- acks kept clearing it.
+                    if extra_release='1' then
+                        e_virq <= '1';
+                    end if;
                     xscroll <= xs_pend;       -- v83: frame-latched scroll
                     yscroll <= ys_pend;
                 end if;
@@ -1378,10 +1386,27 @@ begin
                 -- CPU's ack - runaway exception frames, stack death, wild PC
                 -- (the frozen mode-2 reading). Boot/self-test are IRQ-masked
                 -- which is why the handshake always worked.
+                -- SDSCHED-89: the extra's RUNTIME ISR never writes 360000
+                -- (flight-recorder truth: its handler at 0x908-0x93C has no
+                -- 36xxxx store - the ROM relied on the MAIN's ack clearing
+                -- the shared latch). '87/'88's per-CPU latch therefore
+                -- never cleared: infinite IRQ storm, world engine drowned
+                -- (boots, coins, no demo Jake, no join). Exactly-once
+                -- delivery instead: pending survives the main's ack (the
+                -- lost-wakeup fix) and clears the moment the extra TAKES
+                -- the interrupt - its IACK cycle (FC=111), the hardware's
+                -- own announcement. Its 360000 write (self-test path,
+                -- LANE3l) still clears too.
+                if e_fc = "111" and e_as_n='0' then
+                    e_virq <= '0';                                     -- taken: IACK
+                end if;
                 if e_as_n='0' and e_rw_n='0'
                    and e_addr(23 downto 16) = x"36" and e_addr(5 downto 4) = "00"
                    and e_addr(3 downto 1) = "000" then                 -- LANE4j: exact
-                    e_virq <= '0';                                     -- extra acks ITS latch
+                    e_virq <= '0';                                     -- explicit ack
+                end if;
+                if extra_release='0' then
+                    e_virq <= '0';                                     -- no pending across reset
                 end if;
 
                 if v_as_n='0' and v_rw_n='0' and v_sel_vctl='1' then
