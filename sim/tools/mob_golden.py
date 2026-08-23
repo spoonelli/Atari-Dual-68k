@@ -3,11 +3,32 @@
 
 This is deliberately NOT a MAME model: it reproduces exactly what
 src/fpga/core/rtl/escape_mob.v would emit for a scene if it had unlimited
-time per scanline (same geometry, same clip, same last-write-wins order,
+time per scanline (same geometry, same clip, same FIRST-write-wins order,
 same list terminator).  Divergence from MAME (reverse render order, the
 64-entry cap, the first_link terminator) is deliberately preserved so that
 any difference between this model and a bench run is *time starvation*,
 which is what MOFETCH is optimising, and nothing else.
+
+MOCOV-0: this model had drifted from the RTL it scores, and the drift was
+silently costing ~52 points of apparent coverage.  Two fixes, both making the
+MODEL match the engine (no RTL semantics were changed):
+
+  * first-write-wins.  MOPLACE-3 made the engine refuse to overwrite a pixel
+    already written for this line (eprom renders the list in reverse, so the
+    HEAD entry wins); this model still did last-write-wins, so every
+    overlapping pixel scored as "wrong".
+  * the ly<->display-row mapping.  The engine builds, during raster line Y,
+    the line that is DISPLAYED on line Y+1, so the buffer on screen at
+    visible row vy was built during raster line vy+vbporch-1 and carries
+        ly = (vy+vbporch-1) - vbporch + 1 + yscroll = vy + yscroll.
+    The model used vy + 1 + yscroll, i.e. it scored every dumped row against
+    the neighbouring row of the scene.  That extra +1 dates from the
+    pre-MOPLACE-1 engine (which really did build one row ahead) and was never
+    re-derived after MOPLACE-1 fixed the offset.
+
+With both corrected the model reproduces the engine EXACTLY on a line the
+engine has time to finish - scene 123/253 at lat8 scores wrong=0 spurious=0 -
+which is the property that makes "coverage" mean starvation and nothing else.
 
 Usage:
   mob_golden.py --xscroll 50 --yscroll 157 [--budget 62]
@@ -66,6 +87,7 @@ def build_line(mo, cfg, gfx, ly, xscroll, budget):
         hflip = (w3 >> 3) & 1
         spr_color = w2 & 0xF
         spr_x = (w2 >> 7) & 0x1FF
+        spr_prio = (w2 >> 4) & 7
 
         ydiff = (ly + spr_y + height_t * 8 + 8) & 0x1FF
         if ydiff < height_t * 8 + 8 and rows_left > 0:
@@ -82,13 +104,24 @@ def build_line(mo, cfg, gfx, ly, xscroll, budget):
                     rowdata = bytes(4)
                 shift = (width_t - tx) * 8 if hflip else tx * 8
                 bx = (spr_x + shift - xscroll) & 0x1FF
+                # MPR2 ("special rendering") draws nothing: the engine gates
+                # only the line-buffer write, so the tile still costs its fetch
+                # and its budget slot - which is why this sits AFTER rows_left
+                # was decremented, and why it does not claim the columns (a
+                # later sprite may still win them).
+                if spr_prio & 4:
+                    continue
                 for n in range(8):
                     pn = 7 - n if hflip else n
                     byte = rowdata[pn >> 1]
                     pix = (byte >> 4) if (pn & 1) == 0 else (byte & 0xF)
                     x = (bx + n) & 0x1FF
                     if pix != 0 and x < VID_H_ACTIVE + 8:
-                        out[x] = (spr_color << 4) | pix
+                        # first-write-wins (MOPLACE-3): earliest entry keeps
+                        # the pixel, which is what reverse-order rendering of
+                        # a head-first walk comes out to.
+                        if x not in out:
+                            out[x] = (spr_color << 4) | pix
         nxt = w0 & 0x3FF
         if nxt == first_link or ent == 63 or rows_left == 0:
             break
@@ -103,7 +136,9 @@ def golden_frame(xscroll, yscroll, budget, work):
     gfx = load_gfx(os.path.join(work, 'image_bytes.hex'))
     frame = {}
     for vy in range(VID_V_ACTIVE):
-        ly = (vy + 1 + yscroll) & 0x1FF
+        # see module docstring: the row on screen at vy was built one raster
+        # line earlier and carries ly = vy + yscroll (NOT vy + 1 + yscroll).
+        ly = (vy + yscroll) & 0x1FF
         for x, pen in build_line(mo, cfg, gfx, ly, xscroll, budget).items():
             if x < VID_H_ACTIVE:
                 frame[(x, vy)] = pen

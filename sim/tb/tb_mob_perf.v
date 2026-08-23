@@ -147,20 +147,47 @@ module tb_mob_perf;
     integer line_entries, max_entries, n_entries;
     reg [3:0] state_d = 0;
     reg [9:0] mo_vaddr_d = 0;
+    // MOCOV: how many SPRITES were loaded, and how wide were they. The split of
+    // S_PRIME between "per-sprite startup latency" and "steady-state tile
+    // pipelining" decides which lever is worth pulling, and it is entirely a
+    // question of tiles-per-sprite: a 1-tile sprite can never amortise a fetch.
+    integer n_sprites, n_tilerows;
+    // ...and WHERE in S_PRIME the engine waits:
+    //   issue   - blit_n==15: the sprite-start issue cycle, or blocked on a
+    //             channel still in flight after a line abort
+    //   startup - blit_n==14 && tx==0: waiting for THIS sprite's FIRST tile.
+    //             Unavoidable per-sprite latency unless the fetch is issued
+    //             before the blitter reaches the sprite (MOCOV-1).
+    //   steady  - blit_n==14 && tx!=0: waiting for a later tile of a sprite
+    //             already in progress. This is what more channels in flight
+    //             would shorten - and a 1-tile sprite never gets here.
+    integer c_pr_issue, c_pr_start, c_pr_steady;
 
     initial begin
         c_idle=0; c_trav=0; c_prime=0; c_blit=0;
         n_lines=0; n_complete=0; n_aborted=0;
         n_ymatch=0; n_wren=0; n_wren_off=0; n_reqs=0; n_budget_out=0;
         px_seen=0; line_entries=0; max_entries=0; n_entries=0;
-        n_deadtile=0; n_blitpx=0;
+        n_deadtile=0; n_blitpx=0; n_sprites=0; n_tilerows=0;
+        c_pr_issue=0; c_pr_start=0; c_pr_steady=0;
     end
 
     always @(posedge clk) if(measuring) begin
+        // a sprite LOAD == entering S_E0 (the blitter taking a parked hit)
+        if(dut.state == 4'd4 && state_d != 4'd4) n_sprites = n_sprites + 1;
+        // a tile-row BLIT == entering S_BLIT at blit_n==0
+        if(dut.state == S_BLIT && state_d != S_BLIT && dut.blit_n == 4'd0)
+            n_tilerows = n_tilerows + 1;
+        state_d <= dut.state;
         case(dut.state)
             S_IDLE:  c_idle  = c_idle  + 1;
             S_BLIT:  c_blit  = c_blit  + 1;
-            S_PRIME: c_prime = c_prime + 1;
+            S_PRIME: begin
+                c_prime = c_prime + 1;
+                if(dut.blit_n == 4'd15)     c_pr_issue  = c_pr_issue  + 1;
+                else if(dut.tx == 3'd0)     c_pr_start  = c_pr_start  + 1;
+                else                        c_pr_steady = c_pr_steady + 1;
+            end
             default: c_trav  = c_trav  + 1;
         endcase
         if(dut.wr_en) n_wren = n_wren + 1;
@@ -207,10 +234,14 @@ module tb_mob_perf;
     integer n_pairslip;
     initial n_pairslip = 0;
     always @(posedge clk) if(measuring) begin
-        if(dut.state == S_PRIME && dut.blit_n != 4'd15
-           && (dut.tx[0] ? dut.pendB : dut.pendA)) begin
-            if((dut.tx[0] ? gfx_dataB : gfx_dataA) !== exp_data)
-                n_pairslip = n_pairslip + 1;
+        // Checked at the point of USE rather than at the channel mux: when the
+        // first pixel of tile tx is about to be blitted, the row the engine
+        // latched must be the row at the address its own code_row/tx name.
+        // Deliberately phrased without naming a channel - MOCOV-1 made the
+        // tile->channel map pf_ch ^ tx[0] instead of tx[0], and this bench has
+        // to keep scoring the pre-MOCOV engine too.
+        if(dut.state == S_BLIT && dut.blit_n == 4'd0) begin
+            if(dut.rowdata !== exp_data) n_pairslip = n_pairslip + 1;
         end
     end
 
@@ -255,8 +286,13 @@ module tb_mob_perf;
 
     // ---------------- frame dump
     integer fd;
+    // MOCOV: +out=<path> so a sweep can run its cells in PARALLEL - they used
+    // to all write sim/build/mob_perf_pixels.txt and clobber each other.
+    reg [1023:0] outpath;
     initial begin
-        fd = $fopen("sim/build/mob_perf_pixels.txt", "w");
+        if(!$value$plusargs("out=%s", outpath))
+            outpath = "sim/build/mob_perf_pixels.txt";
+        fd = $fopen(outpath, "w");
         @(posedge rstn);
         repeat (2 * VID_V_TOTAL * VID_H_TOTAL) @(posedge clk);
         @(negedge clk);
@@ -273,6 +309,15 @@ module tb_mob_perf;
                  n_pairslip, n_deadtile, n_deadtile*8, n_blitpx);
         $display("PERF ghosts=%0d pen_mismatch=%0d  (stale-tag pixels this frame's build never wrote)",
                  n_ghost, n_mismatch);
+        $display("PERF sprites=%0d tilerows=%0d tiles_per_sprite=%0d.%02d prime_per_sprite=%0d.%02d",
+                 n_sprites, n_tilerows,
+                 n_sprites ? n_tilerows/n_sprites : 0,
+                 n_sprites ? (100*n_tilerows/n_sprites)%100 : 0,
+                 n_sprites ? c_prime/n_sprites : 0,
+                 n_sprites ? (100*c_prime/n_sprites)%100 : 0);
+        $display("PERF prime_split issue=%0d startup=%0d steady=%0d (startup is %0d%% of prime)",
+                 c_pr_issue, c_pr_start, c_pr_steady,
+                 c_prime ? (100*c_pr_start)/c_prime : 0);
         $display("PERF cycles idle=%0d traverse=%0d prime=%0d blit=%0d (per line: %0d/%0d/%0d/%0d)",
                  c_idle, c_trav, c_prime, c_blit,
                  c_idle/240, c_trav/240, c_prime/240, c_blit/240);
