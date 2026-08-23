@@ -86,6 +86,9 @@ module tb_mob_perf;
     // measurement window flag - declared early, the gfx model's concurrency
     // census below needs it
     reg measuring = 0, dumping = 0;
+    // the line-abort/restart cycle, exactly as escape_mob tests for it
+    wire abort_now = (x_count == 10'd0 && y_count >= VID_V_BPORCH-1
+                      && y_count < VID_V_BPORCH+VID_V_ACTIVE-1);
 
     // ---------------- gfx model: real chunky image bytes, GFX_LAT latency
     reg [7:0] gfx [0:(1<<22)-1];        // image bytes 0..0x220000
@@ -183,15 +186,48 @@ module tb_mob_perf;
     // pipelining" decides which lever is worth pulling, and it is entirely a
     // question of tiles-per-sprite: a 1-tile sprite can never amortise a fetch.
     integer n_sprites, n_tilerows;
-    // MOCHAN-4 diagnostics for the STARTUP term (which is a pure latency and
-    // does NOT divide by channel count, unlike the steady-state term):
+    // MOCHAN-4/MODEPTH-1 diagnostics for the STARTUP term (which is a pure
+    // latency and does NOT divide by channel count, unlike the steady-state
+    // term):
     //   n_pfhit    - sprites loaded with tile 0 already in flight
-    //   c_sc_block - cycles the scout wanted to prefetch but its rotation slot
-    //                was still busy
-    //   c_sc_noarm - cycles the blitter was idle-in-prime with no parked hit to
-    //                prefetch at all (the scout had not walked far enough)
+    //   c_sc_block - cycles the scout wanted to prefetch but could not spare a
+    //                channel (fewer than two free)
+    //   c_sc_noarm - cycles with nothing parked to prefetch at all (the scout
+    //                had not walked far enough)
+    //   c_sc_done  - cycles with every parked entry already prefetched
     integer n_pfhit, c_sc_block, c_sc_noarm, c_sc_done, n_leadsum, n_leadn;
     integer pf_issue_t, now_t;
+`ifndef MOB_BASE
+    // MODEPTH-1: THE POSITIVE EXERCISE METRIC for prefetch depth. If the park
+    // queue never reaches 2, or if n_pf_b is 0, the second slot is not being
+    // used and any coverage change came from somewhere else.
+    //   c_q0/1/2   - cycles at each queue occupancy
+    //   n_pf_a/b   - prefetches issued for the head slot / the second slot
+    //   c_sc_room  - cycles the scout was stalled with the queue FULL. This is
+    //                the number that says whether a THIRD slot would pay.
+    //   c_sc_walk  - cycles the scout spent actually walking the list
+    //   c_yield    - cycles the walk gave the MO RAM port back to the blitter
+    //   n_chclash  - a fetch issued to a channel that was still busy. MUST be 0:
+    //                it is the invariant the rotation used to provide and the
+    //                free list now provides, and it is what makes the two-deep
+    //                queue safe rather than merely lucky.
+    integer c_qd [0:8];          // cycles at each park-queue occupancy
+    integer n_pf_slot [0:8];     // prefetches issued for each queue slot
+    integer c_sc_room, c_sc_walk, c_yield;
+    integer n_chclash, qk;
+    // lead time per slot, shadowing the queue's own shift
+    integer pf_t [0:8];
+`endif
+    // DRAW-ORDER PROOF. The sequence of sprites the blitter loads, per built
+    // line, dumped so the depth engine can be diffed against the depth-1 one:
+    // both walk the list head-first, so the shorter run must be a strict PREFIX
+    // of the longer. Uses only signals every revision has - at S_WAIT, mo_vaddr
+    // still holds w2's address of the entry just loaded.
+    integer ofd;
+    reg [1023:0] ordpath;
+    integer n_orderslip;
+    integer ord_q [0:1023];
+    integer ord_h, ord_t;
     // ...and WHERE in S_PRIME the engine waits:
     //   issue   - blit_n==15: the sprite-start issue cycle, or blocked on a
     //             channel still in flight after a line abort
@@ -212,6 +248,13 @@ module tb_mob_perf;
         c_pr_issue=0; c_pr_start=0; c_pr_steady=0;
         n_pfhit=0; c_sc_block=0; c_sc_noarm=0; c_sc_done=0; n_leadsum=0; n_leadn=0;
         pf_issue_t=0; now_t=0;
+`ifndef MOB_BASE
+        for(qk = 0; qk < 9; qk = qk + 1) begin
+            c_qd[qk]=0; n_pf_slot[qk]=0; pf_t[qk]=0;
+        end
+        c_sc_room=0; c_sc_walk=0; c_yield=0; n_chclash=0;
+`endif
+        n_orderslip=0; ord_h=0; ord_t=0;
     end
 
     // MOCHAN-4: the pump issues in parallel with S_PRIME/S_BLIT, so the old
@@ -222,25 +265,81 @@ module tb_mob_perf;
         now_t = now_t + 1;
         if(dut.state == 4'd4 && state_d != 4'd4) begin
             n_sprites = n_sprites + 1;
+`ifdef MOB_BASE
             if(dut.sc_pf_valid) begin
                 n_pfhit = n_pfhit + 1;
-                // LEAD TIME: cycles between the prefetch going out and the
-                // blitter adopting it. This must reach GFX_LAT for the
-                // per-sprite startup wait to be fully hidden.
                 n_leadsum = n_leadsum + (now_t - pf_issue_t);
                 n_leadn   = n_leadn + 1;
             end
+`else
+            if(dut.q_pf[0]) begin
+                n_pfhit = n_pfhit + 1;
+                // LEAD TIME: cycles between the prefetch going out and the
+                // blitter adopting it. This must reach GFX_LAT for the
+                // per-sprite startup wait to be fully hidden. With a queue the
+                // timestamp travels with the slot, so it is shadowed below.
+                n_leadsum = n_leadsum + (now_t - pf_t[0]);
+                n_leadn   = n_leadn + 1;
+            end
+`endif
         end
+`ifdef MOB_BASE
         if(dut.iss_en && !dut.pump_want) pf_issue_t = now_t;
-        // Split the scout's idle window three ways - which one dominates
-        // decides whether MORE CHANNELS or a DEEPER prefetch queue is the
-        // next lever.
         if(dut.pump_live && !dut.pump_ready) begin
             if(dut.sc_pf_valid)            c_sc_done  = c_sc_done  + 1;
             else if(!dut.hit_pending || !dut.pf_armed)
                                            c_sc_noarm = c_sc_noarm + 1;
             else if(dut.busy_iss)          c_sc_block = c_sc_block + 1;
         end
+`else
+        // ---- MODEPTH-1 census ----------------------------------------------
+        // where the scout's time goes, and how deep the queue actually gets
+        c_qd[dut.q_cnt] = c_qd[dut.q_cnt] + 1;
+        if(dut.sstate == 4'd7) c_sc_room = c_sc_room + 1;              // SC_ROOM
+        if(dut.sstate >= 4'd1 && dut.sstate <= 4'd6) c_sc_walk = c_sc_walk + 1;
+        if(dut.blit_port && dut.sstate >= 4'd1 && dut.sstate <= 4'd4)
+            c_yield = c_yield + 1;
+        // why the scout is NOT prefetching, over the same window the MOCHAN-4
+        // bench measured (the blitter in prime/blit with all its tiles issued)
+        if(dut.pump_live && !dut.pump_ready) begin
+            if(!dut.sc_want)           c_sc_done  = c_sc_done  + 1;
+            else if(dut.q_cnt == 3'd0) c_sc_noarm = c_sc_noarm + 1;
+            else if(!dut.ch_two)       c_sc_block = c_sc_block + 1;
+        end
+        // CHANNEL EXCLUSIVITY. The free list must never hand out a channel that
+        // still has a fetch outstanding or an unconsumed completion on it -
+        // that is the whole basis of the two-deep queue's deadlock argument.
+        if(dut.iss_en && (dut.infl[dut.ch_pick] || dut.pend[dut.ch_pick]))
+            n_chclash = n_chclash + 1;
+        // prefetch bookkeeping, shadowing the queue's own shift so a lead time
+        // follows its slot down
+        if(dut.iss_scout) begin
+            n_pf_slot[dut.sc_sel] = n_pf_slot[dut.sc_sel] + 1;
+            pf_t[dut.sc_sel] = now_t;
+        end
+`endif
+`ifndef MOB_BASE
+        // ---- DRAW-ORDER INVARIANT, checked in the bench's own FIFO ----------
+        // The scout pushes parked entries in list-walk order and the blitter
+        // pops them; if a queue ever reordered or dropped one, the sprite that
+        // wins an overlapping pixel would change. Model the FIFO independently
+        // and check the link the blitter actually loads against it.
+        if(abort_now) begin
+            ord_h = 0; ord_t = 0;              // the line abort flushes the queue
+        end else begin
+            if(dut.q_pop) begin
+                if(ord_h == ord_t)                     n_orderslip = n_orderslip + 1;
+                else begin
+                    if(ord_q[ord_h % 1024] != dut.q_link[0])
+                                                       n_orderslip = n_orderslip + 1;
+                    ord_h = ord_h + 1;
+                end
+                // ...and the lead-time shadow shifts with the slots
+                for(qk = 0; qk < 8; qk = qk + 1) pf_t[qk] = pf_t[qk+1];
+            end
+            if(dut.q_push) begin ord_q[ord_t % 1024] = dut.s_link; ord_t = ord_t + 1; end
+        end
+`endif
         // a tile-row BLIT == entering S_BLIT at blit_n==0
         if(dut.state == S_BLIT && state_d != S_BLIT && dut.blit_n == 4'd0)
             n_tilerows = n_tilerows + 1;
@@ -284,6 +383,18 @@ module tb_mob_perf;
             line_entries = 0;
         end
     end
+    // ---------------- sprite LOAD ORDER dump
+    // At S_WAIT the blitter has just driven w2's address of the sprite it is
+    // loading, so mo_vaddr[11:2] IS that sprite's link - true of every revision
+    // of this engine, which is what makes the dump comparable across them.
+    // One line per sprite load: "<ly> <link>", in load order, per built line.
+    reg [3:0] ostate_d = 0;
+    always @(posedge clk) begin
+        if(measuring && ofd && dut.state == 4'd10 && ostate_d != 4'd10)
+            $fwrite(ofd, "%0d %0d\n", dut.ly, dut.mo_vaddr[11:2]);
+        ostate_d <= dut.state;
+    end
+
     reg [3:0] req_cnt_d = 4'd0;
     always @(posedge clk) begin
         if(measuring)
@@ -308,12 +419,22 @@ module tb_mob_perf;
     // sprite's tile. The invariant that forbids it: when a sprite is loaded,
     // no channel holds an unconsumed completion except the one the scout
     // prefetched tile 0 onto. Checked directly rather than argued.
+    // MODEPTH-1: the allowance widens to the queued prefetches. A landed
+    // completion belonging to a sprite still sitting in the park queue is
+    // exactly what prefetch depth buys, so it is legal; ANY OTHER unconsumed
+    // completion is still a stale pend and would be blitted as this sprite's
+    // tile. The check stays strict, it just knows about the queue now.
     integer n_stalepend;
     reg [3:0] pf_hit_mask;
     integer n_pairslip;
     initial begin n_pairslip = 0; n_stalepend = 0; end
     always @(posedge clk) if(measuring && dut.state == 4'd9) begin   // S_FETCH
         pf_hit_mask = dut.pf_hit ? (4'b0001 << dut.pf_ch) : 4'b0000;
+`ifndef MOB_BASE
+        for(qk = 0; qk < 8; qk = qk + 1)
+            if(dut.q_cnt > qk && qk < dut.QDEPTH && dut.q_pf[qk] && !dut.q_got[qk])
+                pf_hit_mask = pf_hit_mask | (4'b0001 << dut.q_ch[qk]);
+`endif
         if((dut.pend & ~pf_hit_mask) != 4'd0) n_stalepend = n_stalepend + 1;
     end
     always @(posedge clk) if(measuring) begin
@@ -376,6 +497,12 @@ module tb_mob_perf;
         if(!$value$plusargs("out=%s", outpath))
             outpath = "sim/build/mob_perf_pixels.txt";
         fd = $fopen(outpath, "w");
+        // +ord=<path> writes the per-line sprite LOAD ORDER. Both the depth-1
+        // and the depth-2 engine can emit it (it reads only mo_vaddr and ly at
+        // S_WAIT), which is what lets sim/tools/mob_order_check.py prove the
+        // deeper queue did not reorder anything - see that file.
+        ofd = 0;
+        if($value$plusargs("ord=%s", ordpath)) ofd = $fopen(ordpath, "w");
         @(posedge rstn);
         repeat (2 * VID_V_TOTAL * VID_H_TOTAL) @(posedge clk);
         @(negedge clk);
@@ -384,6 +511,7 @@ module tb_mob_perf;
         @(negedge clk);
         measuring = 0; dumping = 0;
         $fclose(fd);
+        if(ofd) $fclose(ofd);
         $display("PERF pixels=%0d gfx_reqs=%0d wren=%0d entries=%0d max_entries_line=%0d",
                  px_seen, n_reqs, n_wren, n_entries, max_entries);
         $display("PERF lines=%0d complete=%0d aborted=%0d budget_exhausted=%0d",
@@ -405,6 +533,13 @@ module tb_mob_perf;
                  n_pfhit, n_sprites, c_sc_block, c_sc_noarm, c_sc_done,
                  n_leadn ? n_leadsum/n_leadn : 0,
                  n_leadn ? (100*n_leadsum/n_leadn)%100 : 0);
+`ifndef MOB_BASE
+        $display("PERF depth QDEPTH=%0d qdepth=%0d/%0d/%0d/%0d/%0d/%0d pf_by_slot=%0d/%0d/%0d/%0d/%0d",
+                 dut.QDEPTH, c_qd[0], c_qd[1], c_qd[2], c_qd[3], c_qd[4], c_qd[5],
+                 n_pf_slot[0], n_pf_slot[1], n_pf_slot[2], n_pf_slot[3], n_pf_slot[4]);
+        $display("PERF scout walk=%0d queue_full=%0d port_yield=%0d chan_clash=%0d order_slips=%0d",
+                 c_sc_walk, c_sc_room, c_yield, n_chclash, n_orderslip);
+`endif
         $display("PERF prime_split issue=%0d startup=%0d steady=%0d (startup is %0d%% of prime)",
                  c_pr_issue, c_pr_start, c_pr_steady,
                  c_prime ? (100*c_pr_start)/c_prime : 0);
