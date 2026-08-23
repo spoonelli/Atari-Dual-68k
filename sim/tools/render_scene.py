@@ -92,6 +92,56 @@ def build_alpha(al, rom):
     return out
 
 
+def load_special(path):
+    """MOSTAIN-1: the RTL's special-pass pixels, {(x, y): (S, E)}.
+
+    Written by sim/tb/tb_mob.v as "<x> <y> <S> <E>"; S/E are the START/END
+    markers atarimo's apply_stain looks for (pen bits 1 and 2 of a sprite whose
+    MO priority has bit 2 set).
+    """
+    spc = {}
+    if not os.path.exists(path):
+        return spc
+    with open(path) as fh:
+        for line in fh:
+            t = line.split()
+            if len(t) < 4:
+                continue
+            x, y = int(t[0]), int(t[1])
+            if 0 <= x < W and 0 <= y < H:
+                spc[(x, y)] = (int(t[2]), int(t[3]))
+    return spc
+
+
+def apply_stain(idx, spc):
+    """reference/atarimo.cpp apply_stain, driven from the finished picture.
+
+    The reference restarts the walk at every START_MARKER pixel, so this is the
+    union of those walks.  Called AFTER the alpha layer, exactly where
+    screen_update_eprom calls it ("now go back and process the upper bit of MO
+    priority"), and it ORs 0x400 - colour RAM bit 10 - into whatever is there.
+    """
+    n = 0
+    for y in range(H):
+        row = idx[y]
+        for x in range(W):
+            m = spc.get((x, y))
+            if m is None or not m[0]:
+                continue
+            xx = x
+            offnext = False
+            while xx < W:
+                if not (row[xx] & 0x400):
+                    n += 1
+                row[xx] |= 0x400
+                q = spc.get((xx, y))
+                if offnext and (q is None or not q[0]):
+                    break
+                offnext = q is not None and bool(q[1])
+                xx += 1
+    return n
+
+
 def load_mo(path):
     """RTL line-engine output: {(x, y): (pen, prio)}."""
     mo = {}
@@ -154,6 +204,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('dump')
     ap.add_argument('--mo', default='sim/build/mob_pixels.txt')
+    ap.add_argument('--special', default='sim/build/mob_special.txt',
+                    help='RTL special-pass pixels (MOSTAIN-1); the mame MO '
+                         'source derives them from the model instead')
+    ap.add_argument('--no-stain', action='store_true',
+                    help='skip the apply_stain second pass (the pre-MOSTAIN-1 '
+                         'behaviour, for before/after comparison)')
     ap.add_argument('--rom', default='sim/work/atari_escape.rom')
     ap.add_argument('--intensity', type=int, default=0)
     ap.add_argument('--mo-source', choices=('rtl', 'mame'), default='rtl',
@@ -185,16 +241,26 @@ def main():
         slip = words(os.path.join(a.dump, 'scene_slip.bin'))
         bm = mame_mo_model.draw(moram, slip, rom, xs, ys, W, H)
         mo = {}
+        spc = {}
         for y in range(H):
             for x in range(W):
                 v = bm[y][x]
-                if v != mame_mo_model.TRANSPARENT:
+                if v == mame_mo_model.TRANSPARENT:
+                    continue
+                if ((v >> 12) & 4):
+                    spc[(x, y)] = ((v >> 1) & 1, (v >> 2) & 1)
+                else:
                     mo[(x, y)] = (v & 0xFF, (v >> 12) & 7)
     else:
         mo = load_mo(a.mo)
+        spc = load_special(a.special)
 
     new = composite(pfmap, alpha, mo, True)
     old = composite(pfmap, alpha, mo, False)
+    nstain = 0
+    if not a.no_stain:
+        nstain = apply_stain(new, spc)
+        apply_stain(old, spc)
 
     from PIL import Image
     im_new = to_image(new, rgb)
@@ -216,6 +282,8 @@ def main():
     dif.save(os.path.join(a.dump, 'render_diff.png'))
 
     print('MO pixels from RTL      : %d' % len(mo))
+    print('special (MPR2) pixels   : %d' % len(spc))
+    print('pixels stained (|0x400) : %d' % nstain)
     print('pixels changed by rule  : %d (%.2f%% of frame, %.2f%% of MO pixels)'
           % (ndiff, 100.0 * ndiff / (W * H),
              100.0 * ndiff / len(mo) if mo else 0.0))
