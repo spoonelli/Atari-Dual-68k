@@ -63,7 +63,7 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}
   RTL=third_party/Arcade-Atari-system1_MiSTer/rtl
   SIMLIB=\$(find sim/lib -iname '*.vhd' | sort)
   OURS=\$(find src/fpga/core/rtl -iname '*.vhd' ! -iname 'escape_jsa.vhd' 2>/dev/null | sort)
-  FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' ! -iname 'TMS5220.vhd' | sort) \$OURS sim/tb/escape_jsa_vecstub.vhd sim/tb/tb_escape_worldwake.vhd\"
+  FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' ! -iname 'TMS5220.vhd' ! -iname 'TG68K.vhd' ! -iname 'TG68KdotC_Kernel.vhd' | sort) \$OURS sim/tb/escape_jsa_vecstub.vhd sim/tb/tb_escape_worldwake.vhd\"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W tb_escape_worldwake >/dev/null
   ghdl -r \$STD --workdir=\$W tb_escape_worldwake $RUNFLAGS \

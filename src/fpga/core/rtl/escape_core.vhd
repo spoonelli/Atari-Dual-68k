@@ -58,7 +58,19 @@ entity escape_core is
         --       the main stops the extra. Zero premature delivery, zero
         --       lost wakeup. (Flag address is game code, not board
         --       hardware: revisit for Klax/Guts variants.)
-        EIRQ_MODE : integer := 2
+        EIRQ_MODE : integer := 2;
+        -- TASLOCK-102 SHARED-RAM READ-MODIFY-WRITE INTERLOCK.
+        --   0 = OFF: shared RAM is plain dual-port, no serialisation (the
+        --       pre-102 design; kept so a bench can reproduce the bug and so
+        --       the fix can be A/B'd on device without a second branch).
+        --   1 = ON (ship): while either CPU has an RMW operand access in
+        --       flight (TG68K's new LOCK output - see rtl/tg68kv/), the OTHER
+        --       CPU is held off that exact byte, write strobe AND DTACK.
+        --   2 = DTACK-ONLY (diagnostic, DO NOT SHIP): withholds DTACK but
+        --       leaves the write strobe live. Exists only to demonstrate in
+        --       the bench that a DTACK-only interlock does NOT work, because
+        --       we_shr_a/we_shr_b assert on every clock of a stalled cycle.
+        TASLOCK_EN : integer := 1
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -217,6 +229,15 @@ entity escape_core is
         -- red panel on device is either those writes missing (game-logic
         -- divergence) or written-but-not-rendered. One HUD reading decides.
         dbg_awr         : out std_logic_vector(15 downto 0);
+        -- TASLOCK-102 proof counters. {writes-blocked, total-blocked}, each
+        -- an 8-bit saturating count of bus cycles the RMW interlock ACTUALLY
+        -- held off (a genuine cross-port collision on the same shared byte
+        -- while the other CPU's read-modify-write was in flight), plus the
+        -- byte address of the first such collision (0000 = never happened).
+        -- Non-zero writes-blocked with an address in the $CC00-$CCFF lock
+        -- page is the swallowed-release mechanism caught in the act.
+        dbg_tas_cnt     : out std_logic_vector(15 downto 0);
+        dbg_tas_addr    : out std_logic_vector(15 downto 0);
         -- SDSCHED-76: impostor word served at extra 0x80E (0 = never) and
         -- how many times (saturates at 15)
         dbg_ewrong      : out std_logic_vector(15 downto 0);
@@ -458,6 +479,25 @@ architecture rtl of escape_core is
     signal shr_a_uds, shr_a_lds : std_logic;
     signal v_addr_q, e_addr_q : std_logic_vector(23 downto 1) := (others=>'0');
     signal e_bus_yield : std_logic := '0';   -- BUS-99 arbitration wait
+    ----------------------------------------------------------------------
+    -- TASLOCK-102: shared-RAM read-modify-write interlock. See the big
+    -- block comment at the tas_lock process for the design and its bound.
+    ----------------------------------------------------------------------
+    constant TL_TTL_MAX : natural := 63;         -- window watchdog, in clks
+    -- '1' = interlock live at all; tl_wgate '1' = it also gates write strobes
+    -- (both are generic-derived, so synthesis folds them to constants)
+    signal tl_on, tl_wgate : std_logic;
+    signal v_lock, e_lock   : std_logic;     -- TG68K RMW-in-flight (LOCK)
+    signal tl_owner : std_logic_vector(1 downto 0) := "00";  -- 00 free 01 V 10 E
+    signal tl_addr  : std_logic_vector(14 downto 0) := (others=>'0');
+    signal tl_lane  : std_logic_vector(1 downto 0) := "00";  -- (uds,lds) hi-active
+    signal tl_ttl   : unsigned(5 downto 0) := (others=>'0');
+    signal tl_v_inh, tl_e_inh : std_logic := '0';   -- post-timeout re-arm block
+    signal v_hold, e_hold, v_hold_d, e_hold_d : std_logic := '0';
+    signal v_ack_ram, e_ack_ram, e_yield_req  : std_logic;
+    signal v_lane, e_lane : std_logic_vector(1 downto 0);
+    signal tas_hits, tas_wrhits : unsigned(7 downto 0) := (others=>'0');
+    signal tas_first : std_logic_vector(15 downto 0) := (others=>'0');
     -- SDSCHED-83: registered CPU read-data capture. Both captured impostor
     -- words (080C, 08C4) were recent STACK content served into dispatch
     -- reads of a DIFFERENT memory - the read mux presenting the wrong
@@ -496,7 +536,8 @@ begin
         port map ( CLK=>clk, RESET=>reset_n, HALT=>reset_n, BERR=>'0', IPL=>v_ipl,
                    ADDR=>v_addr, FC=>v_fc, DATAI=>v_di_r, DATAO=>v_do,
                    AS=>v_as_n, UDS=>v_uds_n, LDS=>v_lds_n, RW=>v_rw_n,
-                   DTACK=>v_dtack_n, E=>open, VPA=>v_vpa_n, VMA=>open );
+                   DTACK=>v_dtack_n, E=>open, VPA=>v_vpa_n, VMA=>open,
+                   LOCK=>v_lock );
 
     e_resn <= reset_n and (extra_release or dbg_force_extra);
     -- also a 68000 (same schematic-vs-board story as the video CPU)
@@ -504,7 +545,8 @@ begin
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>e_ipl,
                    ADDR=>e_addr, FC=>e_fc, DATAI=>e_di_r, DATAO=>e_do,
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,
-                   DTACK=>e_dtack_n, E=>open, VPA=>e_vpa_n, VMA=>open );
+                   DTACK=>e_dtack_n, E=>open, VPA=>e_vpa_n, VMA=>open,
+                   LOCK=>e_lock );
 
     -- IPL active low: sound /SINT = IRQ6 (vector 0x78 -> $134C), vblank =
     -- IRQ4. Re-enabled in v49: the v37 mask was diagnostic; the scattered
@@ -786,9 +828,18 @@ begin
     -- (dtack-extended) cycle, so excluding the first edge loses nothing.
     v_wr     <= '1' when v_as_n='0' and v_rw_n='0'
                          and v_addr(23 downto 1) = v_addr_q else '0';
-    we_shr_a <= '1' when dbg_shr_we='1' else (v_wr and v_sel_ram);
+    -- TASLOCK-102: the write strobes MUST be gated by the interlock, not just
+    -- DTACK. They are level-per-clock by design (see the SDSCHED-80 note
+    -- above), so a cycle stalled by withheld DTACK still writes on every one
+    -- of its clocks - an interlock that only holds DTACK would let the
+    -- intruding write land exactly as before and the bug would survive.
+    -- Holding the strobe loses nothing: it re-asserts the moment the hold
+    -- clears, on the same clock DTACK is granted.
+    we_shr_a <= '1' when dbg_shr_we='1' else
+                (v_wr and v_sel_ram and not (v_hold and tl_wgate));
     we_shr_b <= '1' when e_as_n='0' and e_rw_n='0' and e_sel_ram='1'
-                         and e_addr(23 downto 1) = e_addr_q else '0';
+                         and e_addr(23 downto 1) = e_addr_q
+                         and (e_hold and tl_wgate) = '0' else '0';
     -- sim backdoor mux on port A (dbg_shr_we tied '0' on hardware -> collapses away)
     shr_a_addr <= dbg_shr_addr    when dbg_shr_we='1' else v_addr(15 downto 1);
     shr_a_din  <= dbg_shr_din     when dbg_shr_we='1' else v_do;
@@ -801,6 +852,168 @@ begin
                    we_a=>we_shr_a, uds_a_n=>shr_a_uds, lds_a_n=>shr_a_lds, q_a=>shr_qa,
                    addr_b=>e_addr(15 downto 1), din_b=>e_do,
                    we_b=>we_shr_b, uds_b_n=>e_uds_n, lds_b_n=>e_lds_n, q_b=>shr_qb );
+
+    ------------------------------------------------------------------------
+    -- TASLOCK-102: SHARED-RAM READ-MODIFY-WRITE INTERLOCK
+    --
+    -- THE BUG. Both CPUs take inter-CPU mutexes with TAS over shared RAM
+    -- (extra acquire $9B4, release $9F2; main acquire $40644, release
+    -- $40682; lock table $16CCC6-$16CCCD, plus the ISR re-entrancy byte
+    -- $16CC00). On the real part that works because /AS stays asserted
+    -- across the whole read-modify-write - M68000UM Rev 9 section 5.1.3
+    -- p.53, "The address strobe (AS) remains asserted throughout the entire
+    -- cycle, making the cycle indivisible" - and the board's shared RAM is
+    -- two SINGLE-PORTED 32Kx8 SRAMs behind one /AS-level ownership mux
+    -- (SP-332 sheet 5, 40M/50M steered by 30M LS158A on EWAI, loser held in
+    -- waits by 30D/30L counters), so ownership cannot flip mid-TAS.
+    -- TG68K releases /AS between the two halves (TobiFlex/TG68K.C issue #22)
+    -- and our shared RAM is TRUE DUAL-PORT with no interlock whatsoever, so
+    -- one CPU's `clr.b` release can land between the other's TAS read and
+    -- its write-back. TAS writes bit 7 back unconditionally
+    -- (TG68K_ALU.vhd:215, ALUout(7) <= OP1in(7) OR exec_tas), so the release
+    -- is overwritten with $80: the lock is SET WITH NO OWNER and every later
+    -- acquirer on BOTH CPUs spins forever. That is the build-101 freeze
+    -- (scratchpad/FREEZE-101-ANALYSIS.md).
+    --
+    -- THE INTERLOCK. Not a heuristic: TG68K's kernel already knows when an
+    -- RMW is in flight (exec_write_back), and the vendored core exports it
+    -- as LOCK. One GLOBAL window at a time, keyed on the byte being
+    -- modified:
+    --   OPEN  when a CPU asserts LOCK during a stable shared-RAM cycle and
+    --         no window is open. Video CPU wins a same-clock tie (it owns
+    --         the bus by default on the real board - it drives the run/halt
+    --         latch; same precedence as the BUS-99 yield below).
+    --   HOLD  the OTHER CPU off that exact word address, on the lanes the
+    --         owner is using: its write strobe is suppressed AND its DTACK
+    --         withheld, so the cycle simply takes longer and completes
+    --         intact. Nothing else in the machine is touched - other
+    --         addresses, the other memories, ROM fetches all run unchanged.
+    --   CLOSE when the owner's LOCK drops (the write-back has been
+    --         DTACK-accepted; clkena only advances the kernel on completed
+    --         bus cycles, so this is strictly after the data landed), or on
+    --         the TL_TTL_MAX watchdog.
+    --
+    -- WHY IT CANNOT WEDGE. (1) Only one window exists at a time and the
+    -- owner is never itself held - v_hold needs tl_owner="10", e_hold needs
+    -- "01" - so the owner always runs to its write-back and closes the
+    -- window. (2) The held CPU is granted on the very first clock tl_owner
+    -- reads "00": its ws/address state is untouched while it waits, so the
+    -- ack is immediate. (3) TL_TTL_MAX force-closes any window that overstays,
+    -- and tl_v_inh/tl_e_inh then bar THAT CPU from re-opening until its LOCK
+    -- drops, so a stuck LOCK cannot re-arm the window in a loop. Hence the
+    -- hard bound: ANY bus cycle can be delayed by at most TL_TTL_MAX+1 = 64
+    -- clocks = 8.9 us at 7.159 MHz. One video frame is 16.7 ms and the
+    -- watchdog is 8 frames, so the worst case is ~1900x shorter than a frame
+    -- and ~15000x shorter than the shortest thing that can reset the
+    -- machine. Measured real window (tb_escape_tasrace): 14 clocks.
+    --
+    -- SCOPE. Deliberately the WHOLE shared RAM, not just the lock bytes:
+    -- the window is keyed on the address the CPU is actually modifying, so
+    -- there is no address table to get wrong and $16CC00 (a second, equally
+    -- exposed TAS mutex) is covered for free. No game-specific knowledge.
+    -- Cost is zero except on a genuine same-byte collision.
+    ------------------------------------------------------------------------
+    tl_on    <= '1' when TASLOCK_EN /= 0 else '0';
+    tl_wgate <= '1' when TASLOCK_EN  = 1 else '0';
+    v_lane <= (not v_uds_n) & (not v_lds_n);
+    e_lane <= (not e_uds_n) & (not e_lds_n);
+
+    -- Held-off conditions. Only ever true for a stable, decoded shared-RAM
+    -- cycle aimed at the very word the other CPU's RMW owns, on an
+    -- overlapping byte lane. Both depend only on registered window state,
+    -- so there is no combinational path from one CPU's DTACK to the other's.
+    v_hold <= '1' when tl_on='1' and tl_owner="10" and v_sel_ram='1'
+                       and v_addr(23 downto 1) = v_addr_q
+                       and v_addr(15 downto 1) = tl_addr
+                       and (v_lane and tl_lane) /= "00" else '0';
+    e_hold <= '1' when tl_on='1' and tl_owner="01" and e_sel_ram='1'
+                       and e_addr(23 downto 1) = e_addr_q
+                       and e_addr(15 downto 1) = tl_addr
+                       and (e_lane and tl_lane) /= "00" else '0';
+
+    -- The single source of truth for "this shared-RAM cycle is acked this
+    -- clock", used both by dtack_gen and by the window FSM so the two can
+    -- never drift apart. e_yield_req is the BUS-99 one-cycle yield.
+    e_yield_req <= '1' when e_sel_ram='1' and v_sel_ram='1' and v_as_n='0'
+                            and e_bus_yield='0' else '0';
+    v_ack_ram <= '1' when v_as_n='0' and v_sel_ram='1' and v_ws='1'
+                          and v_addr(23 downto 1) = v_addr_q
+                          and v_hold='0' else '0';
+    e_ack_ram <= '1' when e_as_n='0' and e_sel_ram='1' and e_ws='1'
+                          and e_addr(23 downto 1) = e_addr_q
+                          and e_hold='0' and e_yield_req='0' else '0';
+
+    tas_lock : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                tl_owner <= "00"; tl_ttl <= (others=>'0');
+                tl_addr  <= (others=>'0'); tl_lane <= "00";
+                tl_v_inh <= '0'; tl_e_inh <= '0';
+                v_hold_d <= '0'; e_hold_d <= '0';
+                -- NOTE: tas_hits / tas_wrhits / tas_first are deliberately
+                -- NOT cleared here. reset_n is pulsed by the watchdog and by
+                -- the deadlock rescue, and the whole point of these counters
+                -- is that the owner can photograph them after a long play
+                -- session that may have included a reboot. They power up at
+                -- zero from their declared initial values, exactly like the
+                -- other survive-the-reset forensics.
+            elsif tl_on='1' then
+                -- (generic-gated so TASLOCK_EN=0 prunes the whole block away
+                --  and gives an exact, same-tree A/B baseline for resources)
+                -- re-arm inhibits clear as soon as that CPU's RMW is over
+                if v_lock='0' then tl_v_inh <= '0'; end if;
+                if e_lock='0' then tl_e_inh <= '0'; end if;
+
+                if tl_owner = "00" then
+                    -- OPEN. Video CPU has priority on a same-clock tie.
+                    if v_lock='1' and tl_v_inh='0' and v_sel_ram='1'
+                       and v_addr(23 downto 1) = v_addr_q then
+                        tl_owner <= "01";
+                        tl_addr  <= v_addr(15 downto 1);
+                        tl_lane  <= v_lane;
+                        tl_ttl   <= to_unsigned(TL_TTL_MAX, tl_ttl'length);
+                    elsif e_lock='1' and tl_e_inh='0' and e_sel_ram='1'
+                          and e_addr(23 downto 1) = e_addr_q then
+                        tl_owner <= "10";
+                        tl_addr  <= e_addr(15 downto 1);
+                        tl_lane  <= e_lane;
+                        tl_ttl   <= to_unsigned(TL_TTL_MAX, tl_ttl'length);
+                    end if;
+                else
+                    -- CLOSE on the owner finishing its write-back, else count
+                    if (tl_owner="01" and v_lock='0')
+                       or (tl_owner="10" and e_lock='0') then
+                        tl_owner <= "00";
+                    elsif tl_ttl = 0 then
+                        tl_owner <= "00";           -- watchdog: never wedge
+                        if tl_owner="01" then tl_v_inh <= '1';
+                                         else tl_e_inh <= '1'; end if;
+                    else
+                        tl_ttl <= tl_ttl - 1;
+                    end if;
+                end if;
+
+                -- PROOF COUNTERS: one count per bus cycle actually held off
+                -- (rising edge of a hold), not per clock and not per window
+                -- opened. A window that never collides costs nothing and
+                -- counts nothing.
+                v_hold_d <= v_hold; e_hold_d <= e_hold;
+                if (v_hold='1' and v_hold_d='0') or (e_hold='1' and e_hold_d='0') then
+                    if tas_hits /= x"FF" then tas_hits <= tas_hits + 1; end if;
+                    if (v_hold='1' and v_hold_d='0' and v_rw_n='0')
+                       or (e_hold='1' and e_hold_d='0' and e_rw_n='0') then
+                        if tas_wrhits /= x"FF" then tas_wrhits <= tas_wrhits + 1; end if;
+                    end if;
+                    if tas_first = x"0000" then
+                        tas_first <= tl_addr & '0';
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process;
+    dbg_tas_cnt  <= std_logic_vector(tas_wrhits) & std_logic_vector(tas_hits);
+    dbg_tas_addr <= tas_first;
 
     -- snoop handshake mailbox writes (0x16FFE0..EA) from either CPU port, for HUD
     mbox_snoop : process(clk)
@@ -1831,7 +2044,17 @@ begin
                             v_dtack_n <= '0';
                         end if;
                     elsif v_ws='1' then
-                        v_dtack_n <= '0';
+                        -- TASLOCK-102: shared-RAM cycles ack through
+                        -- v_ack_ram, which is '0' while the extra CPU's
+                        -- read-modify-write owns this byte. v_ws and the
+                        -- address stay put, so the ack lands on the first
+                        -- clock the window closes. Everything else
+                        -- (work/video RAM, IO, shadows) is unchanged.
+                        if v_sel_ram='1' then
+                            if v_ack_ram='1' then v_dtack_n <= '0'; end if;
+                        else
+                            v_dtack_n <= '0';
+                        end if;
                     else
                         v_ws <= '1';
                     end if;
@@ -1864,9 +2087,16 @@ begin
                         -- bus by default on the real board - it drives the
                         -- run/halt latch). Costs ~1 clk on contended accesses
                         -- only; breaks lockstep the way the hardware does.
-                        if e_sel_ram='1' and v_sel_ram='1' and v_as_n='0'
-                           and e_bus_yield='0' then
-                            e_bus_yield <= '1';                -- wait one cycle
+                        -- TASLOCK-102 folds in ahead of the BUS-99 yield:
+                        -- e_ack_ram already carries both the yield term and
+                        -- the RMW hold, so this is bit-identical to the
+                        -- pre-102 behaviour whenever e_hold='0'.
+                        if e_sel_ram='1' then
+                            if e_ack_ram='1' then
+                                e_dtack_n <= '0'; e_bus_yield <= '0';
+                            elsif e_hold='0' and e_yield_req='1' then
+                                e_bus_yield <= '1';            -- wait one cycle
+                            end if;
                         else
                             e_dtack_n   <= '0';
                             e_bus_yield <= '0';

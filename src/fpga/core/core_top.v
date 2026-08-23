@@ -985,6 +985,12 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     // speculative fills = far more SDRAM traffic; refresh deferral). This
     // build isolates: legacy memory path + the '92 armed-IRQ fix.
     localparam FASTPATH_EN = 1;   // 95: back ON, now with authentic SCOM link timing
+    // TASLOCK-102: shared-RAM read-modify-write interlock (the TAS-atomicity
+    // fix). 1 = on (ship). 0 = off, i.e. exactly the pre-102 shared RAM, and
+    // the whole block prunes - that is the A/B baseline for resources and the
+    // one-line revert if the device ever disagrees. 2 = DTACK-only, a bench
+    // diagnostic that is deliberately broken; never ship it.
+    localparam TASLOCK_EN  = 1;
     wire [23:0] fpv_addr_w, fpe_addr_w;      // escape_core exports (7.159 dom)
     wire        fpv_spec_w, fpe_spec_w;
     reg  [23:0] fpv_addr_s, fpe_addr_s;      // 85.9-domain samples
@@ -1684,9 +1690,21 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     end
     // LANE4a page-2 forensics fields (see mux comment below)
     wire [15:0] pg2_f1 = (crash_pc != 16'd0) ? crash_pc : vpc_fr;
-    // LANE4m: page-2 idle fields become CRAM sums (sign / robot) until a fault
-    wire [15:0] pg2_f2 = (crash_pc != 16'd0) ? crash_data : cst0_px;
-    wire [15:0] pg2_f3 = (crash_pc != 16'd0) ? {dbg_vec[7:0], wdog_rst_cnt} : cst1_px;
+    // LANE4m: page-2 idle fields were the CRAM sums (sign / robot).
+    // TASLOCK-102: those retired - they have read E789/2D55 through every
+    // freeze since the '73 session, i.e. long-since proven, and the sim
+    // benches cover the CRAM path. Page 2's two idle fields now carry the
+    // TAS-interlock evidence instead:
+    //   group 2 = {writes blocked, bus cycles blocked}, 8 bits each,
+    //             saturating. NON-ZERO = the interlock really engaged; the
+    //             left pair non-zero = a WRITE was held off, which is the
+    //             swallowed-release case that wedged the machine.
+    //   group 3 = byte address of the FIRST collision (0000 = never).
+    //             CCCC / CC00 / CCC6-CCCD are the inter-CPU mutex bytes.
+    // The fault latches are untouched: a non-zero crash_pc still overrides
+    // both fields exactly as before, and trace view (L2) is not involved.
+    wire [15:0] pg2_f2 = (crash_pc != 16'd0) ? crash_data : dbg_tas_cnt;
+    wire [15:0] pg2_f3 = (crash_pc != 16'd0) ? {dbg_vec[7:0], wdog_rst_cnt} : dbg_tas_addr;
 
     // LANE4f page-1 forensics: live extra-CPU PC until its first genuine
     // exception, then LOCK the faulting PC; field2 shows the last mailbox
@@ -1785,7 +1803,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3101;   // coverage: scout prefetches each sprite's first tile-row - screen shows '01'
+    localparam [15:0] BUILD_ID = 16'h3102;   // TASLOCK: shared-RAM RMW interlock + collision counters - screen shows '02'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2166,6 +2184,11 @@ escape_prio uprio (
     wire [15:0] dbg_ewild;                        // LANE4s wild-jump source PC
     wire        dbg_eintab;                       // extra executing data table now
     wire [15:0] dbg_awr;                          // SDSCHED-75 alpha writes/frame
+    // TASLOCK-102 proof counters: {writes-blocked, cycles-blocked} and the
+    // byte address of the first cross-port collision on an in-flight
+    // read-modify-write. Both saturate; both survive everything but a real
+    // reset. Shown on HUD page 2 (see the hex_digit mux).
+    wire [15:0] dbg_tas_cnt, dbg_tas_addr;
     wire [15:0] dbg_ewrong;                       // SDSCHED-76 impostor 0x80E word
     wire [3:0]  dbg_ewrong_cnt;
     wire [15:0] dbg_ewrong_prev;                  // SDSCHED-81 predecessor read addr
@@ -2253,7 +2276,8 @@ hall_stick hall_p2 (
 // the hardware does not have - they are kept only for A/B. The entity's own
 // default is still 2 and is overridden here; read THIS line, not the default.
 // (The previous comment here claimed mode 2 while the line passed 0.)
-escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0)) ecore (
+escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
+              .TASLOCK_EN(TASLOCK_EN)) ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
     .rom_addr   ( core_rom_addr ),
@@ -2332,6 +2356,8 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0)) ecore (
     .dbg_ewild      ( dbg_ewild ),
     .dbg_eintab     ( dbg_eintab ),
     .dbg_awr        ( dbg_awr ),
+    .dbg_tas_cnt    ( dbg_tas_cnt ),
+    .dbg_tas_addr   ( dbg_tas_addr ),
     .dbg_ewrong     ( dbg_ewrong ),
     .dbg_ewrong_cnt ( dbg_ewrong_cnt ),
     .dbg_ewrong_prev( dbg_ewrong_prev ),

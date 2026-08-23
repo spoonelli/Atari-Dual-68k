@@ -32,11 +32,13 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}
   OURS=\$(find src/fpga/core/rtl -iname '*.vhd' 2>/dev/null | sort)
   # TMS5220.vhd excluded from the submodule tree: our patched copy lives in
   # src/fpga/core/rtl/ (LANE3z lattice wrap fix) and would collide with it.
+  # TASLOCK-102: same for TG68K.vhd / TG68KdotC_Kernel.vhd - vendored into
+  # src/fpga/core/rtl/tg68kv/ with the added LOCK (RMW window) output.
   # escape_jsa_vecstub excluded: it redefines entity escape_jsa, and with
   # both files imported the real architecture can bind against the stub's
   # entity (no numeric_std in its context) and fail analysis; the stub
   # belongs to run_vecrace.sh, which excludes the real file instead.
-  FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' ! -iname 'TMS5220.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd | grep -v escape_jsa_vecstub)\"
+  FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' ! -iname 'TMS5220.vhd' ! -iname 'TG68K.vhd' ! -iname 'TG68KdotC_Kernel.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd | grep -v escape_jsa_vecstub)\"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W $TB >/dev/null
   ghdl -r \$STD --workdir=\$W $TB --ieee-asserts=disable --stop-time=$STOPTIME $GARGS
