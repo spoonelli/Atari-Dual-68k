@@ -1,0 +1,993 @@
+//============================================================================
+// Atari "Escape from the Planet of the Robot Monsters" - MiSTer machine
+// assembly.
+//
+// This is the MiSTer equivalent of the portable half of the Pocket's
+// src/fpga/core/core_top.v.  It instantiates the SAME machine RTL:
+//
+//     escape_core   (src/fpga/core/rtl/escape_core.vhd)  - dual 68000 + JSA
+//     escape_mob    (src/fpga/core/rtl/escape_mob.v)     - motion objects
+//     escape_prio   (src/fpga/core/rtl/escape_prio.v)    - MO/PF priority
+//     hall_stick    (src/fpga/core/rtl/hall_stick.v)     - analog stick model
+//     sdram_simple  (src/fpga/core/rtl/sdram_simple.v)   - SDRAM controller
+//
+// Nothing in the machine is forked.  What lives here is platform glue:
+// the ROM download writer, the SDRAM arbiter, the raster generator, and the
+// playfield / alphanumerics scanout pipelines.
+//
+// ---------------------------------------------------------------------------
+// DIFFERENCES FROM THE POCKET BUILD - read these before debugging hardware
+// ---------------------------------------------------------------------------
+// 1. NO SECOND MEMORY BUS.  The Pocket serves playfield graphics from its
+//    CRAM/PSRAM chip and only the CPUs + motion objects from SDRAM.  The
+//    DE10-Nano has one SDRAM and no PSRAM, so the playfield graphics channel
+//    (vg A/B) has been moved onto the SDRAM arbiter alongside the motion
+//    objects.  PF and MO share the lowest priority tier round-robin.
+//
+// 2. SDRAM CLOCK IS UNCHANGED at 35.795455 MHz (5 x CPU) with the same +90
+//    degree chip-clock phase the Pocket ships.  It is tempting to raise it to
+//    pay for (1), but sdram_simple's CL2 read FSM captures on a fixed cycle
+//    count and its margin was tuned empirically against THIS frequency and
+//    THIS phase - raising one without re-tuning the other is how you get
+//    reads that return the right-looking wrong data.  The cost is that the
+//    playfield now competes for a bus that was already the tightest resource
+//    in the design.  THIS IS THE #1 THING TO WATCH ON FIRST FLASH.
+//
+// 3. PF reads are issued with rd_pre = 0 (the controller's documented
+//    "video read" fast path).  CPU and MO reads keep rd_pre = 1, exactly as
+//    the Pocket ships them.  A wrong-row serve on a PF read is one wrong tile
+//    row for one frame; on a CPU read it is a wrong instruction, which is why
+//    the CPU path keeps its armor.
+//
+// 4. No debug HUD, no Interact menu, no test-tone, no layer isolation.  The
+//    Pocket's forensics tooling is deliberately absent.
+//
+// 5. Sprite graphics arrive from the MRA as four interleaved bit-planes and
+//    are converted to the chunky 4bpp layout the machine expects by the
+//    download writer below (see the SPRITE REPACK block).  The Pocket does
+//    the same transform offline in support/build_rom.py.
+//============================================================================
+`default_nettype none
+
+module escape_mister (
+    input  wire        clk_sys,      //  7.159091 MHz - CPU + pixel domain
+    input  wire        clk_sdram,    // 35.795455 MHz - SDRAM controller domain
+    input  wire        pll_locked,
+    input  wire        reset,        // active high, async-ish (from sys_top)
+
+    // ---- ROM download (MiSTer ioctl, clk_sdram domain) --------------------
+    input  wire        ioctl_download,
+    input  wire        ioctl_wr,
+    input  wire [24:0] ioctl_addr,
+    input  wire [7:0]  ioctl_dout,
+    output wire        ioctl_wait,
+
+    // ---- SDRAM chip -------------------------------------------------------
+    output wire [12:0] SDRAM_A,
+    output wire [1:0]  SDRAM_BA,
+    inout  wire [15:0] SDRAM_DQ,
+    output wire        SDRAM_DQML,
+    output wire        SDRAM_DQMH,
+    output wire        SDRAM_nCS,
+    output wire        SDRAM_nCAS,
+    output wire        SDRAM_nRAS,
+    output wire        SDRAM_nWE,
+    output wire        SDRAM_CKE,
+
+    // ---- video (clk_sys domain, one pixel per clock) ----------------------
+    output reg  [7:0]  VGA_R,
+    output reg  [7:0]  VGA_G,
+    output reg  [7:0]  VGA_B,
+    output reg         HSync,
+    output reg         VSync,
+    output reg         HBlank,
+    output reg         VBlank,
+
+    // ---- audio ------------------------------------------------------------
+    output wire [15:0] audio_l,
+    output wire [15:0] audio_r,
+
+    // ---- controls (any domain; synchronised inside) -----------------------
+    input  wire        p1_up, p1_down, p1_left, p1_right,
+    input  wire        p1_fire, p1_jump, p1_duck, p1_bomb,
+    input  wire        p2_up, p2_down, p2_left, p2_right,
+    input  wire        p2_fire, p2_jump, p2_duck, p2_bomb,
+    input  wire [15:0] p1_analog,   // {y[15:8], x[7:0]}, 0x80 centred
+    input  wire [15:0] p2_analog,
+    input  wire        p1_has_analog,
+    input  wire        p2_has_analog,
+    input  wire        coin1,
+    input  wire        coin2,
+    input  wire        start1,      // doubles as the self-test step/continue key
+    input  wire        service,     // active high = service mode
+    input  wire        skip_test,
+
+    // ---- status -----------------------------------------------------------
+    output wire        rom_ready    // SDRAM up, image loaded, self-check done
+);
+
+// ===========================================================================
+// raster generator - identical geometry to the Pocket build
+//   456 x 262 total, 336 x 240 active, 7.159091 MHz -> 59.9227 Hz
+// ===========================================================================
+localparam VID_V_BPORCH = 10'd12;
+localparam VID_V_ACTIVE = 10'd240;
+localparam VID_V_TOTAL  = 10'd262;
+localparam VID_H_BPORCH = 10'd60;
+localparam VID_H_ACTIVE = 10'd336;
+localparam VID_H_TOTAL  = 10'd456;
+// sync pulses live in the front porch (active .. front porch .. sync .. back
+// porch).  The Pocket emitted 1-clock pulses, which the APF scaler accepts;
+// MiSTer's scandoubler/ascal need real widths.
+localparam HS_START = 10'd404, HS_END = 10'd436;   // 32 clocks
+localparam VS_START = 10'd254, VS_END = 10'd257;   // 3 lines
+
+reg [9:0] x_count = 10'd0;
+reg [9:0] y_count = 10'd0;
+
+wire [9:0] visible_x = x_count - VID_H_BPORCH;
+wire [9:0] visible_y = y_count - VID_V_BPORCH;
+wire [9:0] vis_x     = x_count - VID_H_BPORCH;     // alias used by the pipelines
+
+wire h_active = (x_count >= VID_H_BPORCH) && (x_count < VID_H_BPORCH + VID_H_ACTIVE);
+wire v_active = (y_count >= VID_V_BPORCH) && (y_count < VID_V_BPORCH + VID_V_ACTIVE);
+wire vblank_w = ~v_active;                          // what escape_core sees
+
+always @(posedge clk_sys) begin
+    x_count <= x_count + 10'd1;
+    if (x_count == VID_H_TOTAL - 10'd1) begin
+        x_count <= 10'd0;
+        y_count <= (y_count == VID_V_TOTAL - 10'd1) ? 10'd0 : y_count + 10'd1;
+    end
+end
+
+// ===========================================================================
+// reset / core release
+// ===========================================================================
+wire        sdram_init_done;
+reg         chk_done  = 1'b0;
+reg         chk_ok    = 1'b0;
+reg         chk2_ok   = 1'b0;
+wire        sdram_init_done_s, chk_done_s, dl_idle_s;
+
+sync2 s_sid (clk_sys, sdram_init_done, sdram_init_done_s);
+sync2 s_cdn (clk_sys, chk_done,        chk_done_s);
+sync2 s_dli (clk_sys, ~ioctl_download, dl_idle_s);
+
+assign rom_ready = sdram_init_done_s & chk_done_s & dl_idle_s;
+
+// watchdog / freeze rescue - kept from the Pocket build.  A watchdog timeout,
+// a dead extra CPU or a wedged inter-CPU mailbox reboots the machine instead
+// of leaving a frozen screen.
+wire wdog_expired, e_dead, mbox_dead;
+reg [22:0] wdog_rst_ctr = 23'd0;
+reg        wdog_exp_d   = 1'b0;
+reg        reset_s_1 = 1'b1, reset_s = 1'b1;
+always @(posedge clk_sys) begin
+    reset_s_1 <= reset;
+    reset_s   <= reset_s_1;
+    wdog_exp_d <= wdog_expired | e_dead | mbox_dead;
+    if (reset_s) begin
+        wdog_rst_ctr <= 23'd0;
+    end else if ((wdog_expired || e_dead || mbox_dead) && !wdog_exp_d) begin
+        wdog_rst_ctr <= 23'd1;
+    end else if (wdog_rst_ctr != 23'd0) begin
+        wdog_rst_ctr <= wdog_rst_ctr + 23'd1;   // ~1.17 s pulse @ 7.16 MHz
+    end
+end
+wire wdog_rst = (wdog_rst_ctr != 23'd0);
+
+wire core_reset_n = ~reset_s & rom_ready & ~wdog_rst;
+reg  core_rstn_sd = 1'b0;
+always @(posedge clk_sdram) core_rstn_sd <= core_reset_n;
+
+// ===========================================================================
+// ROM DOWNLOAD WRITER (clk_sdram domain - hps_io runs on clk_sdram)
+//
+// Stream layout produced by the .mra (see src/mister/releases/*.mra):
+//   0x000000  0x080000  maincpu, 68000 even/odd interleaved
+//   0x080000  0x020000  extra CPU own program
+//   0x0A0000  0x040000  filler
+//   0x0E0000  0x020000  shared program copy (extra CPU view of 0x60000)
+//   0x100000  0x010000  JSA 6502 program + TMS5220 speech
+//   0x110000  0x004000  alphanumerics
+//   0x114000  0x00C000  filler
+//   0x120000  0x100000  sprite/tile graphics, FOUR INTERLEAVED BIT-PLANES
+//
+// Everything below 0x120000 is written through unchanged.  The sprite region
+// is repacked byte-for-byte into the chunky 4bpp form the machine reads.
+// ===========================================================================
+localparam [24:0] SPR_BASE = 25'h0120000;
+
+reg  [7:0]  dlb0, dlb1, dlb2;      // first three bytes of the current group
+reg  [24:0] dl_addr_q;
+reg  [31:0] dl_data_q;
+reg         dl_req      = 1'b0;    // level request into the writer FSM
+reg         dl_pending  = 1'b0;
+reg         dl_taken    = 1'b0;    // writer FSM finished the queued group
+// SDRAM write port (driven by the writer FSM further down)
+reg         sd_wr_req = 1'b0;
+reg  [24:0] sd_wr_addr;
+reg  [31:0] sd_wr_data;
+wire        sd_wr_ack;
+reg  [1:0]  dl_phase = 2'd0;
+
+// ---- SPRITE REPACK --------------------------------------------------------
+// b0..b3 are the four bit-planes for one tile-row byte index, ALREADY in
+// stream order (the .mra interleaves them).  MAME declares this region
+// ROMREGION_INVERT, so every byte is complemented first; then plane bits are
+// gathered into 4-bit pixels, two per output byte, plane0 = MSB.
+// This is exactly what support/build_rom.py does offline for the Pocket.
+function [7:0] chunky2;
+    input [7:0] b0, b1, b2, b3;
+    input [2:0] n0;                 // bit index of the first of the two pixels
+    begin
+        chunky2 = { b0[3'd7-n0], b1[3'd7-n0], b2[3'd7-n0], b3[3'd7-n0],
+                    b0[3'd6-n0], b1[3'd6-n0], b2[3'd6-n0], b3[3'd6-n0] };
+    end
+endfunction
+
+wire [7:0] iv0 = ~dlb0, iv1 = ~dlb1, iv2 = ~dlb2, iv3 = ~ioctl_dout;
+wire [31:0] spr_word = { chunky2(iv0, iv1, iv2, iv3, 3'd0),
+                         chunky2(iv0, iv1, iv2, iv3, 3'd2),
+                         chunky2(iv0, iv1, iv2, iv3, 3'd4),
+                         chunky2(iv0, iv1, iv2, iv3, 3'd6) };
+wire [31:0] raw_word = { dlb0, dlb1, dlb2, ioctl_dout };
+wire        in_spr   = (ioctl_addr >= SPR_BASE);
+
+always @(posedge clk_sdram) begin
+    if (ioctl_wr && ioctl_download) begin
+        case (ioctl_addr[1:0])
+            2'd0: dlb0 <= ioctl_dout;
+            2'd1: dlb1 <= ioctl_dout;
+            2'd2: dlb2 <= ioctl_dout;
+            default: begin
+                dl_addr_q  <= {ioctl_addr[24:2], 2'b00};
+                dl_data_q  <= in_spr ? spr_word : raw_word;
+                dl_req     <= 1'b1;
+                dl_pending <= 1'b1;
+            end
+        endcase
+    end
+    if (dl_taken) begin dl_req <= 1'b0; dl_pending <= 1'b0; end
+    if (!ioctl_download) begin dl_req <= 1'b0; dl_pending <= 1'b0; end
+end
+
+// backpressure: hold the HPS off while a group is still queued or the PLL is
+// not up.  A group is 4 bytes and a burst write is ~10 clocks at 35.8 MHz, so
+// this only ever throttles at the very top of the HPS transfer rate.  Three
+// bytes of slack exist by construction: only the 4th byte of a group latches
+// the request, so up to three in-flight bytes after ioctl_wait rises are
+// still captured correctly.
+assign ioctl_wait = ~pll_locked | dl_pending;
+
+// v58 hot-code shadow fill: escape_core keeps a 64 KB BRAM shadow per CPU
+// covering its low address space, filled from this same stream.
+reg [23:0] shad_waddr = 24'd0;
+reg [15:0] shad_wdata = 16'd0;
+reg        shad_we    = 1'b0;
+reg [15:0] shad_pend  = 16'd0;
+reg        shad_second= 1'b0;
+
+always @(posedge clk_sdram) begin
+    dl_taken <= 1'b0;
+    if (shad_second) begin
+        shad_waddr  <= shad_waddr + 24'd2;
+        shad_wdata  <= shad_pend;
+        shad_we     <= 1'b1;
+        shad_second <= 1'b0;
+    end else begin
+        shad_we <= 1'b0;
+    end
+    case (dl_phase)
+    2'd0: if (dl_req) begin
+        sd_wr_addr <= dl_addr_q;
+        sd_wr_data <= dl_data_q;
+        sd_wr_req  <= 1'b1;
+        dl_phase   <= 2'd1;
+        shad_waddr <= dl_addr_q[23:0];
+        shad_wdata <= dl_data_q[31:16];
+        shad_we    <= 1'b1;
+        shad_pend  <= dl_data_q[15:0];
+        shad_second<= 1'b1;
+    end
+    2'd1: if (sd_wr_ack) begin
+        sd_wr_req <= 1'b0;
+        dl_phase  <= 2'd2;
+    end
+    2'd2: if (!sd_wr_ack) begin
+        dl_taken <= 1'b1;
+        dl_phase <= 2'd0;
+    end
+    default: dl_phase <= 2'd0;
+    endcase
+end
+
+// ===========================================================================
+// SDRAM read clients
+// ===========================================================================
+wire [23:0] core_rom_addr;
+wire        core_rom_req;
+reg  [31:0] core_rom_data;
+reg         core_rom_par;
+reg  [3:0]  core_rom_par4;
+reg         core_rom_ack_85 = 1'b0;
+wire [31:0] sd_rd_data;
+reg         sd_rd_req = 1'b0;
+reg  [24:0] rd_addr_q;
+reg         rd_pre_q  = 1'b1;
+wire        sd_rd_ack;
+
+// single-FF crossings: the two clocks are same-PLL siblings (5:1) and the SDC
+// declares them one synchronous group, so these are timed paths.  This is the
+// Pocket build's SDSCHED-73/74 arrangement, unchanged.
+reg core_rom_req_s_q;
+always @(posedge clk_sdram)  core_rom_req_s_q <= core_rom_req;
+wire core_rom_req_s = core_rom_req_s_q;
+reg core_rom_ack_s_q;
+always @(posedge clk_sys)    core_rom_ack_s_q <= core_rom_ack_85;
+wire core_rom_ack_s = core_rom_ack_s_q;
+
+// ---- zero-wait per-CPU fastpath caches (SDSCHED-88) -----------------------
+localparam FASTPATH_EN = 1;
+localparam TASLOCK_EN  = 1;
+wire [23:0] fpv_addr_w, fpe_addr_w;
+wire        fpv_spec_w, fpe_spec_w;
+reg  [23:0] fpv_addr_s, fpe_addr_s;
+reg         fpv_spec_s = 1'b0, fpe_spec_s = 1'b0;
+always @(posedge clk_sdram) begin
+    fpv_addr_s <= fpv_addr_w;  fpv_spec_s <= fpv_spec_w;
+    fpe_addr_s <= fpe_addr_w;  fpe_spec_s <= fpe_spec_w;
+end
+reg  [23:0] fpv_tag, fpe_tag;
+reg         fpv_valid = 1'b0, fpe_valid = 1'b0;
+reg         fpv_vpre  = 1'b0, fpe_vpre  = 1'b0;
+reg  [15:0] fpv_data,  fpe_data;
+reg         fpv_owner = 1'b0, fpe_owner = 1'b0;
+reg         fpv_ready_q = 1'b0, fpe_ready_q = 1'b0;
+reg         fp_last_v = 1'b0;
+wire fpv_want = FASTPATH_EN && core_rstn_sd && fpv_spec_s && !fpv_owner
+                && !fpv_vpre && !(fpv_valid && fpv_tag == fpv_addr_s);
+wire fpe_want = FASTPATH_EN && core_rstn_sd && fpe_spec_s && !fpe_owner
+                && !fpe_vpre && !(fpe_valid && fpe_tag == fpe_addr_s);
+always @(posedge clk_sdram) begin
+    fpv_ready_q <= FASTPATH_EN && fpv_valid && fpv_spec_s && (fpv_tag == fpv_addr_s);
+    fpe_ready_q <= FASTPATH_EN && fpe_valid && fpe_spec_s && (fpe_tag == fpe_addr_s);
+end
+
+// ---- motion-object gfx channels (A/B ping-pong) ---------------------------
+wire        mo_gfx_reqA, mo_gfx_reqB;
+wire [23:0] mo_gfx_addrA, mo_gfx_addrB;
+reg         mgA_req_last, mgB_req_last;
+reg         mgA_done_85 = 1'b0, mgB_done_85 = 1'b0;
+reg  [31:0] mg_dataA, mg_dataB;
+reg         mo_owner = 1'b0, mo_sd_ch = 1'b0;
+reg mgA_req_s_q, mgB_req_s_q;
+always @(posedge clk_sdram) begin
+    mgA_req_s_q <= mo_gfx_reqA;
+    mgB_req_s_q <= mo_gfx_reqB;
+end
+wire mgA_req_s = mgA_req_s_q, mgB_req_s = mgB_req_s_q;
+reg mgA_done_s_q, mgB_done_s_q;
+always @(posedge clk_sys) begin
+    mgA_done_s_q <= mgA_done_85;
+    mgB_done_s_q <= mgB_done_85;
+end
+wire mgA_done_s = mgA_done_s_q, mgB_done_s = mgB_done_s_q;
+
+// ---- playfield gfx channels (A/B ping-pong) - SDRAM on MiSTer -------------
+reg         vg_reqA_px = 1'b0, vg_reqB_px = 1'b0;
+reg  [23:0] vg_addrA_px, vg_addrB_px;
+reg         vg_reqA_last, vg_reqB_last;
+reg         vg_doneA_85 = 1'b0, vg_doneB_85 = 1'b0;
+reg  [31:0] vg_dataA, vg_dataB;
+reg         pf_owner = 1'b0, pf_sd_ch = 1'b0;
+reg vg_reqA_s_q, vg_reqB_s_q;
+always @(posedge clk_sdram) begin
+    vg_reqA_s_q <= vg_reqA_px;
+    vg_reqB_s_q <= vg_reqB_px;
+end
+wire vg_reqA_s = vg_reqA_s_q, vg_reqB_s = vg_reqB_s_q;
+reg vg_doneA_s_q, vg_doneB_s_q;
+always @(posedge clk_sys) begin
+    vg_doneA_s_q <= vg_doneA_85;
+    vg_doneB_s_q <= vg_doneB_85;
+end
+wire vg_doneA_s = vg_doneA_s_q, vg_doneB_s = vg_doneB_s_q;
+
+wire mo_pend = (mgA_req_s != mgA_req_last) || (mgB_req_s != mgB_req_last);
+wire pf_pend = (vg_reqA_s != vg_reqA_last) || (vg_reqB_s != vg_reqB_last);
+reg  vid_last_pf = 1'b0;      // round-robin between the two video clients
+
+// ---- char ROM DMA + SDRAM self-check --------------------------------------
+reg [3:0]  chk_state = 4'd0;
+reg [13:0] chr_dma_word = 14'd0;
+reg        chr_we = 1'b0;
+reg [15:0] chr_wdata;
+reg [23:0] recheck_ctr = 24'd0;
+reg        cpu_owner = 1'b0;
+
+always @(posedge clk_sdram) begin
+    case (chk_state)
+    4'd0: if (sdram_init_done && !ioctl_download && !dl_pending) begin
+        sd_rd_req <= 1'b1;  chk_state <= 4'd1;      // probe0 @ 0x000000
+    end
+    4'd1: if (sd_rd_ack) begin
+        chk_ok    <= (sd_rd_data[31:16] == 16'h003F);   // high word of reset SP
+        sd_rd_req <= 1'b0;  chk_state <= 4'd2;
+    end
+    4'd2: if (!sd_rd_ack) begin sd_rd_req <= 1'b1; chk_state <= 4'd3; end
+    4'd3: if (sd_rd_ack) begin sd_rd_req <= 1'b0; chk_state <= 4'd4; end
+    4'd4: if (!sd_rd_ack) begin sd_rd_req <= 1'b1; chk_state <= 4'd5; end
+    4'd5: if (sd_rd_ack) begin
+        chk2_ok   <= (sd_rd_data[31:16] == 16'h3388);   // char ROM landmark
+        sd_rd_req <= 1'b0;  chk_state <= 4'd6;
+    end
+    4'd6: if (!sd_rd_ack) begin chr_dma_word <= 14'd0; chk_state <= 4'd7; end
+    4'd7: begin
+        chr_we <= 1'b0;
+        if (!sd_rd_ack) begin sd_rd_req <= 1'b1; chk_state <= 4'd8; end
+    end
+    4'd8: if (sd_rd_ack) begin
+        sd_rd_req <= 1'b0;
+        chr_wdata <= sd_rd_data[31:16];
+        chr_we    <= 1'b1;
+        chk_state <= 4'd9;
+    end
+    4'd9: begin
+        chr_we <= 1'b0;
+        if (chr_dma_word == 14'd8191) begin
+            chk_done  <= 1'b1;
+            chk_state <= 4'd10;
+        end else begin
+            chr_dma_word <= chr_dma_word + 14'd1;
+            chk_state    <= 4'd7;
+        end
+    end
+    4'd10: begin
+        // ---- steady state: strict-priority read arbiter -------------------
+        // fastpath fills > legacy CPU fetch > {PF, MO} round-robin.
+        if ((fpv_want || fpe_want)
+            && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
+            && !fpv_owner && !fpe_owner) begin
+            if (fpv_want && (!fpe_want || !fp_last_v)) begin
+                fpv_tag   <= fpv_addr_s;
+                fpv_valid <= 1'b0;
+                rd_addr_q <= {1'b0, fpv_addr_s};
+                rd_pre_q  <= 1'b1;
+                sd_rd_req <= 1'b1;
+                fpv_owner <= 1'b1;
+                fp_last_v <= 1'b1;
+            end else begin
+                fpe_tag   <= fpe_addr_s;
+                fpe_valid <= 1'b0;
+                rd_addr_q <= {1'b0, fpe_addr_s};
+                rd_pre_q  <= 1'b1;
+                sd_rd_req <= 1'b1;
+                fpe_owner <= 1'b1;
+                fp_last_v <= 1'b0;
+            end
+        end
+        if (fpv_owner && sd_rd_req && sd_rd_ack) begin
+            sd_rd_req <= 1'b0; fpv_owner <= 1'b0;
+            fpv_data  <= sd_rd_data[31:16]; fpv_vpre <= 1'b1;
+        end
+        if (fpe_owner && sd_rd_req && sd_rd_ack) begin
+            sd_rd_req <= 1'b0; fpe_owner <= 1'b0;
+            fpe_data  <= sd_rd_data[31:16]; fpe_vpre <= 1'b1;
+        end
+        if (fpv_vpre) begin fpv_valid <= 1'b1; fpv_vpre <= 1'b0; end
+        if (fpe_vpre) begin fpe_valid <= 1'b1; fpe_vpre <= 1'b0; end
+
+        // legacy CPU fetch (the never-wedge fallback behind the fastpath)
+        if (core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack
+            && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want
+            && !mo_owner && !pf_owner) begin
+            sd_rd_req <= 1'b1;
+            rd_addr_q <= {1'b0, core_rom_addr};
+            rd_pre_q  <= 1'b1;
+            cpu_owner <= 1'b1;
+        end
+        if (cpu_owner && sd_rd_req && sd_rd_ack) begin
+            sd_rd_req     <= 1'b0;
+            cpu_owner     <= 1'b0;
+            core_rom_data <= sd_rd_data;
+            core_rom_par  <= ^sd_rd_data;
+            core_rom_par4 <= {^sd_rd_data[31:24], ^sd_rd_data[23:16],
+                              ^sd_rd_data[15:8],  ^sd_rd_data[7:0]};
+            core_rom_ack_85 <= 1'b1;
+        end
+        if (!core_rom_req_s) core_rom_ack_85 <= 1'b0;
+
+        // video tier: playfield and motion objects, round-robin.
+        // CPUs always outrank both; a video read is ~10 clocks at 35.8 MHz,
+        // i.e. about two 7.16 MHz CPU cycles at worst.
+        if ((pf_pend || mo_pend)
+            && !(core_rom_req_s && !core_rom_ack_85)
+            && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
+            && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want) begin
+            if (pf_pend && (!mo_pend || vid_last_pf == 1'b0)) begin
+                if (vg_reqA_s != vg_reqA_last) begin
+                    vg_reqA_last <= vg_reqA_s;
+                    rd_addr_q    <= {1'b0, vg_addrA_px};
+                    pf_sd_ch     <= 1'b0;
+                end else begin
+                    vg_reqB_last <= vg_reqB_s;
+                    rd_addr_q    <= {1'b0, vg_addrB_px};
+                    pf_sd_ch     <= 1'b1;
+                end
+                rd_pre_q    <= 1'b0;        // video fast path (see header note 3)
+                sd_rd_req   <= 1'b1;
+                pf_owner    <= 1'b1;
+                vid_last_pf <= 1'b1;
+            end else begin
+                if (mgA_req_s != mgA_req_last) begin
+                    mgA_req_last <= mgA_req_s;
+                    rd_addr_q    <= {1'b0, mo_gfx_addrA};
+                    mo_sd_ch     <= 1'b0;
+                end else begin
+                    mgB_req_last <= mgB_req_s;
+                    rd_addr_q    <= {1'b0, mo_gfx_addrB};
+                    mo_sd_ch     <= 1'b1;
+                end
+                rd_pre_q    <= 1'b1;        // MO keeps the Pocket's armor
+                sd_rd_req   <= 1'b1;
+                mo_owner    <= 1'b1;
+                vid_last_pf <= 1'b0;
+            end
+        end
+        if (pf_owner && sd_rd_req && sd_rd_ack) begin
+            sd_rd_req <= 1'b0;
+            pf_owner  <= 1'b0;
+            if (pf_sd_ch) begin vg_dataB <= sd_rd_data; vg_doneB_85 <= ~vg_doneB_85; end
+            else          begin vg_dataA <= sd_rd_data; vg_doneA_85 <= ~vg_doneA_85; end
+        end
+        if (mo_owner && sd_rd_req && sd_rd_ack) begin
+            sd_rd_req <= 1'b0;
+            mo_owner  <= 1'b0;
+            if (mo_sd_ch) begin mg_dataB <= sd_rd_data; mgB_done_85 <= ~mgB_done_85; end
+            else          begin mg_dataA <= sd_rd_data; mgA_done_85 <= ~mgA_done_85; end
+        end
+
+        // SDRAM canary: while the deep probe fails, re-probe + re-DMA
+        recheck_ctr <= recheck_ctr + 24'd1;
+        if (!chk2_ok && recheck_ctr == 24'hFFFFFF && !sd_rd_req && !sd_rd_ack
+            && !core_rom_ack_85) chk_state <= 4'd2;
+    end
+    default: chk_state <= 4'd10;
+    endcase
+
+    // resync the fetch trackers whenever the machine is held in reset - the
+    // mob zeroes its request toggles there, and a stale tracker is one
+    // phantom serve per channel per reset (SDSCHED-75).
+    if (!core_rstn_sd) begin
+        mgA_req_last <= mgA_req_s;
+        mgB_req_last <= mgB_req_s;
+        vg_reqA_last <= vg_reqA_s;
+        vg_reqB_last <= vg_reqB_s;
+        fpv_valid <= 1'b0; fpe_valid <= 1'b0;
+        fpv_vpre  <= 1'b0; fpe_vpre  <= 1'b0;
+    end
+    if (ioctl_download) begin
+        chk_state <= 4'd0;
+        chk_done  <= 1'b0;
+        sd_rd_req <= 1'b0;
+    end
+end
+
+sdram_simple sdr (
+    .clk        ( clk_sdram ),
+    .reset_n    ( pll_locked ),
+    .dram_a     ( SDRAM_A ),
+    .dram_ba    ( SDRAM_BA ),
+    .dram_dq    ( SDRAM_DQ ),
+    .dram_dqm   ( {SDRAM_DQMH, SDRAM_DQML} ),
+    .dram_cas_n ( SDRAM_nCAS ),
+    .dram_ras_n ( SDRAM_nRAS ),
+    .dram_we_n  ( SDRAM_nWE ),
+    .dram_cke   ( SDRAM_CKE ),
+    .wr_req     ( sd_wr_req ),
+    .wr_ack     ( sd_wr_ack ),
+    .wr_addr    ( sd_wr_addr ),
+    .wr_data    ( sd_wr_data ),
+    .rd_req     ( sd_rd_req ),
+    .rd_ack     ( sd_rd_ack ),
+    .rd_pre     ( (chk_state == 4'd10) ? rd_pre_q : 1'b1 ),
+    .rd_addr    ( (chk_state == 4'd10) ? rd_addr_q :
+                  (chk_state == 4'd1)  ? 25'd0 :
+                  (chk_state == 4'd3)  ? 25'h0110400 :
+                  (chk_state == 4'd5)  ? 25'h0110410 :
+                  (chk_state == 4'd8 || chk_state == 4'd7)
+                        ? (25'h0110000 + {10'd0, chr_dma_word, 1'b0}) :
+                  {1'b0, core_rom_addr} ),
+    .rd_data    ( sd_rd_data ),
+    .init_done  ( sdram_init_done )
+);
+
+// MiSTer's SDRAM module has a chip select; the Pocket's does not.
+assign SDRAM_nCS = 1'b0;
+
+// ===========================================================================
+// char ROM BRAM (8192 x 16), written by the DMA above, read by the scanout
+// ===========================================================================
+reg [15:0] chr_ram [0:8191];
+always @(posedge clk_sdram) if (chr_we) chr_ram[chr_dma_word] <= chr_wdata;
+reg  [15:0] chr_q;
+reg  [12:0] chr_raddr;
+always @(posedge clk_sys) chr_q <= chr_ram[chr_raddr];
+
+// ===========================================================================
+// playfield pipeline (pixel domain) - unchanged from the Pocket build except
+// that the fetch requests now go to the SDRAM arbiter above.
+// ===========================================================================
+reg  [11:0] pf_vaddr;
+wire [15:0] pf_vdata, pfx_vdata;
+wire [8:0]  xscroll, yscroll;
+
+wire [8:0] pf_y  = visible_y[8:0] + yscroll;
+wire [8:0] pf_x2 = vis_x[8:0] + 9'd16 + 9'd16 + xscroll;   // LANE3p world align (+32)
+
+reg [4:0]  pfcol_q0, pfcol_q1, pfcol_q2, pfcol_q3, pfcol_show, pfcol_next;
+reg [31:0] pf_next;
+reg        inflA = 1'b0, inflB = 1'b0;
+reg [31:0] pf_show;
+reg [31:0] pfring0, pfring1, pfring2, pfring3;
+reg [1:0]  pf_wp = 2'd0, pf_inflA = 2'd0, pf_inflB = 2'd0, pf_rp = 2'd0;
+reg [23:0] pfq_addr0, pfq_addr1, pfq_addr2, pfq_addr3;
+reg [1:0]  pfq_slot0, pfq_slot1, pfq_slot2, pfq_slot3;
+reg [2:0]  pfq_count = 3'd0;
+reg [1:0]  pfq_wr = 2'd0, pfq_rd = 2'd0;
+reg        vg_doneA_last = 1'b0, vg_doneB_last = 1'b0;
+
+wire [23:0] pf_fetch_addr = 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
+
+always @(posedge clk_sys) begin
+    case (vis_x[2:0])
+        3'd0: begin
+            // column-major map scan (MAME SCAN_COLS semantics)
+            pf_vaddr  <= {pf_x2[8:3], pf_y[8:3]};
+            pfcol_q3  <= pfcol_q2;
+            pfcol_q2  <= pfcol_q1;
+            pfcol_q1  <= pfcol_q0;
+        end
+        3'd3: begin
+            if (y_count >= VID_V_BPORCH - 10'd2
+                && y_count < VID_V_BPORCH + VID_V_ACTIVE
+                && pfq_count != 3'd4) begin
+                case (pfq_wr)
+                    2'd0: begin pfq_addr0 <= pf_fetch_addr; pfq_slot0 <= pf_wp; end
+                    2'd1: begin pfq_addr1 <= pf_fetch_addr; pfq_slot1 <= pf_wp; end
+                    2'd2: begin pfq_addr2 <= pf_fetch_addr; pfq_slot2 <= pf_wp; end
+                    default: begin pfq_addr3 <= pf_fetch_addr; pfq_slot3 <= pf_wp; end
+                endcase
+                pfq_wr    <= pfq_wr + 2'd1;
+                pfq_count <= pfq_count + 3'd1;
+                pf_wp     <= pf_wp + 2'd1;
+            end
+            pfcol_q0 <= {pf_vdata[15], pfx_vdata[11:8]};
+        end
+        3'd7: begin
+            case (pf_rp)
+                2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
+                2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
+            endcase
+            case (pf_rp + 2'd1)
+                2'd0: pf_next <= pfring0;  2'd1: pf_next <= pfring1;
+                2'd2: pf_next <= pfring2;  default: pf_next <= pfring3;
+            endcase
+            pf_rp      <= pf_rp + 2'd1;
+            pfcol_show <= pfcol_q3;
+            pfcol_next <= pfcol_q2;
+        end
+        default: ;
+    endcase
+
+    vg_doneA_last <= vg_doneA_s;
+    if (vg_doneA_s != vg_doneA_last) begin
+        case (pf_inflA)
+            2'd0: pfring0 <= vg_dataA;  2'd1: pfring1 <= vg_dataA;
+            2'd2: pfring2 <= vg_dataA;  default: pfring3 <= vg_dataA;
+        endcase
+        inflA <= 1'b0;
+    end
+    vg_doneB_last <= vg_doneB_s;
+    if (vg_doneB_s != vg_doneB_last) begin
+        case (pf_inflB)
+            2'd0: pfring0 <= vg_dataB;  2'd1: pfring1 <= vg_dataB;
+            2'd2: pfring2 <= vg_dataB;  default: pfring3 <= vg_dataB;
+        endcase
+        inflB <= 1'b0;
+    end
+    if (pfq_count != 3'd0) begin
+        if (!inflA && !(vg_doneA_s != vg_doneA_last)) begin
+            case (pfq_rd)
+                2'd0: begin vg_addrA_px <= pfq_addr0; pf_inflA <= pfq_slot0; end
+                2'd1: begin vg_addrA_px <= pfq_addr1; pf_inflA <= pfq_slot1; end
+                2'd2: begin vg_addrA_px <= pfq_addr2; pf_inflA <= pfq_slot2; end
+                default: begin vg_addrA_px <= pfq_addr3; pf_inflA <= pfq_slot3; end
+            endcase
+            vg_reqA_px <= ~vg_reqA_px;
+            inflA      <= 1'b1;
+            pfq_rd     <= pfq_rd + 2'd1;
+            pfq_count  <= pfq_count - 3'd1;
+        end else if (!inflB && !(vg_doneB_s != vg_doneB_last)) begin
+            case (pfq_rd)
+                2'd0: begin vg_addrB_px <= pfq_addr0; pf_inflB <= pfq_slot0; end
+                2'd1: begin vg_addrB_px <= pfq_addr1; pf_inflB <= pfq_slot1; end
+                2'd2: begin vg_addrB_px <= pfq_addr2; pf_inflB <= pfq_slot2; end
+                default: begin vg_addrB_px <= pfq_addr3; pf_inflB <= pfq_slot3; end
+            endcase
+            vg_reqB_px <= ~vg_reqB_px;
+            inflB      <= 1'b1;
+            pfq_rd     <= pfq_rd + 2'd1;
+            pfq_count  <= pfq_count - 3'd1;
+        end
+    end
+    if (x_count == 10'd0) begin
+        pf_rp     <= pf_wp;
+        pfq_count <= 3'd0;
+        pfq_rd    <= pfq_wr;
+    end
+end
+
+// chunky-nibble pixel extraction with horizontal fine scroll (SDSCHED-84)
+wire        pf_cross = pf_x2[2:0] < visible_x[2:0];
+wire [31:0] pf_word  = pf_cross ? pf_next    : pf_show;
+wire [4:0]  pf_att   = pf_cross ? pfcol_next : pfcol_show;
+wire [2:0]  pf_n     = pf_att[4] ? (3'd7 - pf_x2[2:0]) : pf_x2[2:0];
+reg  [3:0]  pf_pix;
+always @(*) case (pf_n)
+    3'd0: pf_pix = pf_word[31:28]; 3'd1: pf_pix = pf_word[27:24];
+    3'd2: pf_pix = pf_word[23:20]; 3'd3: pf_pix = pf_word[19:16];
+    3'd4: pf_pix = pf_word[15:12]; 3'd5: pf_pix = pf_word[11:8];
+    3'd6: pf_pix = pf_word[7:4];   default: pf_pix = pf_word[3:0];
+endcase
+
+// ===========================================================================
+// motion objects
+// ===========================================================================
+wire [11:0] mo_vaddr;
+wire [15:0] mo_vdata;
+wire [6:0]  cfg_vaddr;
+wire [15:0] cfg_vdata;
+wire [7:0]  mo_pen;
+wire [1:0]  mo_prio;
+wire        mo_valid;
+
+escape_mob umob (
+    .clk       ( clk_sys ),
+    .reset_n   ( core_reset_n ),
+    .x_count   ( x_count ),
+    .y_count   ( y_count ),
+    .vbporch   ( VID_V_BPORCH ),
+    .vactive   ( VID_V_ACTIVE ),
+    .hbporch   ( VID_H_BPORCH ),
+    .xscroll   ( xscroll ),
+    .yscroll   ( yscroll ),
+    .mo_vaddr  ( mo_vaddr ),
+    .mo_vdata  ( mo_vdata ),
+    .cfg_vaddr ( cfg_vaddr ),
+    .cfg_vdata ( cfg_vdata ),
+    .gfx_reqA  ( mo_gfx_reqA ),
+    .gfx_reqB  ( mo_gfx_reqB ),
+    .gfx_addrA ( mo_gfx_addrA ),
+    .gfx_addrB ( mo_gfx_addrB ),
+    .gfx_doneA ( mgA_done_s ),
+    .gfx_doneB ( mgB_done_s ),
+    .gfx_dataA ( mg_dataA ),
+    .gfx_dataB ( mg_dataB ),
+    .disp_x    ( visible_x[8:0] ),
+    .disp_pen  ( mo_pen ),
+    .disp_prio ( mo_prio ),
+    .disp_valid( mo_valid )
+);
+
+// ===========================================================================
+// alphanumerics scanout
+// ===========================================================================
+wire [10:0] alpha_vaddr;
+wire [15:0] alpha_vdata;
+reg  [10:0] color_vaddr;
+wire [15:0] color_vdata;
+wire [3:0]  eintensity;
+wire        evideo_off;
+
+reg [15:0] a_word;
+reg [5:0]  a_color;
+reg [15:0] r_row;
+reg [5:0]  r_color;
+reg        r_opaque;
+
+wire [9:0] next_x   = vis_x + 10'd8;
+wire [5:0] cell_col = next_x[8:3];
+wire [4:0] cell_row = visible_y[7:3];
+assign alpha_vaddr = {cell_row, cell_col};
+
+always @(posedge clk_sys) begin
+    case (vis_x[2:0])
+        3'd5: a_word <= alpha_vdata;
+        3'd6: begin
+            chr_raddr <= {alpha_vdata[9:0], visible_y[2:0]};
+            a_color   <= {alpha_vdata[14], 1'b0, alpha_vdata[13:10]};
+        end
+        3'd0: begin
+            r_row    <= chr_q;
+            r_color  <= a_color;
+            r_opaque <= a_word[15];
+        end
+        default: ;
+    endcase
+end
+
+wire [2:0]  pxn = visible_x[2:0];
+wire [15:0] act_row = (pxn == 3'd0) ? chr_q : r_row;
+wire        msb = pxn[2] ? act_row[7  - pxn[1:0]] : act_row[15 - pxn[1:0]];
+wire        lsb = pxn[2] ? act_row[3  - pxn[1:0]] : act_row[11 - pxn[1:0]];
+wire [1:0]  pix = {msb, lsb};
+wire [5:0]  act_color  = (pxn == 3'd0) ? a_color   : r_color;
+wire        act_opaque = (pxn == 3'd0) ? a_word[15]: r_opaque;
+wire        alpha_vis  = (pix != 2'b00) || act_opaque;
+
+// MO / playfield priority comparator (docs/mo_priority.md)
+wire        pr_mo_win, pr_shade, pr_m7, pr_pfm, pr_forcemc0;
+wire [10:0] pr_pen;
+escape_prio uprio (
+    .mo_valid ( mo_valid ),
+    .mo_prio  ( mo_prio ),
+    .mo_color ( mo_pen[7:4] ),
+    .mo_pix   ( mo_pen[3:0] ),
+    .pf_color ( pf_att[3:0] ),
+    .pf_pix   ( pf_pix ),
+    .forcemc0 ( pr_forcemc0 ),
+    .shade    ( pr_shade ),
+    .m7       ( pr_m7 ),
+    .pfm      ( pr_pfm ),
+    .mo_win   ( pr_mo_win ),
+    .pen      ( pr_pen )
+);
+
+always @(posedge clk_sys)
+    color_vaddr <= alpha_vis ? {3'b000, act_color, pix} : pr_pen;
+
+// palette: IRGB4444 with the 360010 intensity latch
+wire [3:0]  ints  = (eintensity > 4'd4) ? 4'd4 : eintensity;
+wire [6:0]  ifac  = ({3'd0, color_vdata[15:12]} + 7'd1) * (7'd4 - {5'd0, ints[2:0]});
+wire [10:0] r_m   = color_vdata[11:8] * ifac;
+wire [10:0] g_m   = color_vdata[7:4]  * ifac;
+wire [10:0] b_m   = color_vdata[3:0]  * ifac;
+wire [7:0]  pal_r = (r_m[10:2] > 9'd255) ? 8'd255 : r_m[9:2];
+wire [7:0]  pal_g = (g_m[10:2] > 9'd255) ? 8'd255 : g_m[9:2];
+wire [7:0]  pal_b = (b_m[10:2] > 9'd255) ? 8'd255 : b_m[9:2];
+
+// ---- video output registers ----------------------------------------------
+// The colour path is two clocks behind the raster counters (color_vaddr is
+// registered, then the colour RAM read is registered), so the sync/blank
+// flags are delayed to match.
+reg [1:0] de_d, hs_d, vs_d, hb_d, vb_d;
+wire cur_hs = (x_count >= HS_START) && (x_count < HS_END);
+wire cur_vs = (y_count >= VS_START) && (y_count < VS_END);
+always @(posedge clk_sys) begin
+    hs_d <= {hs_d[0], cur_hs};
+    vs_d <= {vs_d[0], cur_vs};
+    hb_d <= {hb_d[0], ~h_active};
+    vb_d <= {vb_d[0], ~v_active};
+    HSync  <= hs_d[1];
+    VSync  <= vs_d[1];
+    HBlank <= hb_d[1];
+    VBlank <= vb_d[1];
+    if (hb_d[1] || vb_d[1] || evideo_off) begin
+        VGA_R <= 8'd0; VGA_G <= 8'd0; VGA_B <= 8'd0;
+    end else begin
+        VGA_R <= pal_r; VGA_G <= pal_g; VGA_B <= pal_b;
+    end
+end
+
+// ===========================================================================
+// controls
+// ===========================================================================
+wire [7:0] adc_p1x, adc_p1y, adc_p2x, adc_p2y;
+
+hall_stick hall_p1 (
+    .clk ( clk_sys ),
+    .inv_x ( 1'b0 ), .inv_y ( 1'b0 ), .swap_xy ( 1'b0 ), .deadzone ( 5'd8 ),
+    .has_analog ( p1_has_analog ),
+    .up ( p1_up ), .down ( p1_down ), .left ( p1_left ), .right ( p1_right ),
+    .joy_x ( p1_analog[7:0] ), .joy_y ( p1_analog[15:8] ),
+    .adc_x ( adc_p1x ), .adc_y ( adc_p1y )
+);
+hall_stick hall_p2 (
+    .clk ( clk_sys ),
+    .inv_x ( 1'b0 ), .inv_y ( 1'b0 ), .swap_xy ( 1'b0 ), .deadzone ( 5'd8 ),
+    .has_analog ( p2_has_analog ),
+    .up ( p2_up ), .down ( p2_down ), .left ( p2_left ), .right ( p2_right ),
+    .joy_x ( p2_analog[7:0] ), .joy_y ( p2_analog[15:8] ),
+    .adc_x ( adc_p2x ), .adc_y ( adc_p2y )
+);
+
+// Button word is {duck, spare, fire, jump} = schematic CD11..CD8.
+// The dedicated BOMB button asserts all three at once - this is how the game
+// implements the smart bomb, and the reason the core needs a single button
+// that presses Jump+Fire+Duck simultaneously (see docs/CONTROLS.md).
+wire coin1_s, coin2_s, start1_s, service_s, skip_s;
+sync2 s_c1 (clk_sys, coin1,   coin1_s);
+sync2 s_c2 (clk_sys, coin2,   coin2_s);
+sync2 s_st (clk_sys, start1,  start1_s);
+sync2 s_sv (clk_sys, service, service_s);
+sync2 s_sk (clk_sys, skip_test, skip_s);
+
+wire [3:0] p1_btn = {p1_duck | p1_bomb, 1'b0, p1_fire | p1_bomb, p1_jump | p1_bomb};
+wire [3:0] p2_btn = {p2_duck | p2_bomb, 1'b0, p2_fire | p2_bomb, p2_jump | p2_bomb};
+
+// ===========================================================================
+// the machine
+// ===========================================================================
+escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
+              .TASLOCK_EN(TASLOCK_EN)) ecore (
+    .clk        ( clk_sys ),
+    .reset_n    ( core_reset_n ),
+    .rom_addr   ( core_rom_addr ),
+    .rom_data   ( core_rom_data ),
+    .rom_par    ( core_rom_par ),
+    .rom_par4   ( core_rom_par4 ),
+    .rom_req    ( core_rom_req ),
+    .rom_ack    ( core_rom_ack_s ),
+    .fast_v_addr ( fpv_addr_w ),
+    .fast_v_spec ( fpv_spec_w ),
+    .fast_v_data ( fpv_data ),
+    .fast_v_ready( fpv_ready_q ),
+    .fast_e_addr ( fpe_addr_w ),
+    .fast_e_spec ( fpe_spec_w ),
+    .fast_e_data ( fpe_data ),
+    .fast_e_ready( fpe_ready_q ),
+    .shad_wclk  ( clk_sdram ),
+    .shad_waddr ( shad_waddr ),
+    .shad_wdata ( shad_wdata ),
+    .shad_we    ( shad_we ),
+    .vblank_in  ( vblank_w ),
+    .p1_buttons ( p1_btn ),
+    .p2_buttons ( p2_btn ),
+    .adc_p1x    ( adc_p1x ),
+    .adc_p1y    ( adc_p1y ),
+    .adc_p2x    ( adc_p2x ),
+    .adc_p2y    ( adc_p2y ),
+    .svc_n      ( ~service_s ),
+    .coin1      ( coin1_s ),
+    .coin2      ( coin2_s ),
+    .step_btn   ( start1_s ),
+    .skip_test  ( skip_s ),
+    .irq_strict ( 1'b0 ),
+    .uvol_ym    ( 3'b111 ),
+    .uvol_tms   ( 3'b111 ),
+    .uvol_fm    ( 24'hFFFFFF ),
+    .audio_l    ( audio_l ),
+    .audio_r    ( audio_r ),
+    .alpha_vaddr( alpha_vaddr ),
+    .alpha_vdata( alpha_vdata ),
+    .color_vaddr( color_vaddr ),
+    .color_vdata( color_vdata ),
+    .pf_vaddr   ( pf_vaddr ),
+    .pf_vdata   ( pf_vdata ),
+    .pfx_vaddr  ( pf_vaddr ),
+    .pfx_vdata  ( pfx_vdata ),
+    .mo_vaddr   ( mo_vaddr ),
+    .mo_vdata   ( mo_vdata ),
+    .cfg_vaddr  ( cfg_vaddr ),
+    .cfg_vdata  ( cfg_vdata ),
+    .xscroll_out( xscroll ),
+    .yscroll_out( yscroll ),
+    .intensity_out( eintensity ),
+    .video_off_out( evideo_off ),
+    .e_dead       ( e_dead ),
+    .mbox_dead    ( mbox_dead ),
+    .wdog_expired ( wdog_expired )
+);
+
+endmodule
+
+// 2-flop synchroniser for slow control signals.
+module sync2 (input wire clk, input wire d, output reg q = 1'b0);
+    reg m = 1'b0;
+    always @(posedge clk) begin m <= d; q <= m; end
+endmodule
+
+`default_nettype wire

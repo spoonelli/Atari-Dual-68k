@@ -1,0 +1,71 @@
+# Atari Escape - MiSTer file list.
+#
+# Paths are relative to this .qip, i.e. to src/mister/.  The machine RTL is
+# NOT copied here: every file below src/fpga/core/rtl is the same source the
+# Pocket build compiles.
+#
+# VENDORING RULES (identical to src/fpga/ap_core.qsf - see its comments):
+#   * jt51.v and jt51_acc.v are VENDORED into core/rtl/jt51v/ (per-channel
+#     user gain).  The rest of jt51 comes from the pristine submodule.  The
+#     submodule's own jt51.qip must NOT be included - it would pull duplicate
+#     definitions of the two vendored modules.
+#   * TG68K.vhd and TG68KdotC_Kernel.vhd are VENDORED into core/rtl/tg68kv/
+#     (added LOCK output for the TASLOCK-102 read-modify-write interlock).
+#     Only TG68K_ALU.vhd and TG68K_Pack.vhd come from the submodule.
+#   * T65 comes from the Arcade-Atari-system1_MiSTer submodule untouched.
+
+set_global_assignment -name SYSTEMVERILOG_FILE Arcade-Escape.sv
+set_global_assignment -name VERILOG_FILE rtl/escape_mister.v
+set_global_assignment -name QIP_FILE pll.qip
+
+# ---- shared machine RTL (same files as the Pocket build) -------------------
+set_global_assignment -name VERILOG_FILE ../fpga/core/rtl/sdram_simple.v
+set_global_assignment -name VERILOG_FILE ../fpga/core/rtl/escape_mob.v
+set_global_assignment -name VERILOG_FILE ../fpga/core/rtl/escape_prio.v
+set_global_assignment -name VERILOG_FILE ../fpga/core/rtl/hall_stick.v
+set_global_assignment -name VHDL_FILE ../fpga/core/rtl/escape_core.vhd
+set_global_assignment -name VHDL_FILE ../fpga/core/rtl/TMS5220.vhd
+set_global_assignment -name VHDL_FILE ../fpga/core/rtl/escape_jsa.vhd
+set_global_assignment -name VHDL_FILE ../fpga/core/rtl/dpram_dc.vhd
+set_global_assignment -name VHDL_FILE ../fpga/core/rtl/escape_decode.vhd
+set_global_assignment -name VHDL_FILE ../fpga/core/rtl/spram_bytelane.vhd
+set_global_assignment -name VHDL_FILE ../fpga/core/rtl/dpram_bytelane_syn.vhd
+
+# ---- jt51 (YM2151): two vendored files + pristine submodule ---------------
+set_global_assignment -name VERILOG_FILE ../fpga/core/rtl/jt51v/jt51.v
+set_global_assignment -name VERILOG_FILE ../fpga/core/rtl/jt51v/jt51_acc.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_csr_op.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_eg.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_exp2lin.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_exprom.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_kon.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_lfo.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_lin2exp.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_mmr.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_mod.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_noise.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_noise_lfsr.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_op.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_pg.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_phinc_rom.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_phrom.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_pm.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_reg.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_reg_ch.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_sh.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_timers.v
+
+# ---- T65 (JSA 6502) -------------------------------------------------------
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65_Pack.vhd
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65_MCode.vhd
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65_ALU.vhd
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65.vhd
+
+# ---- TG68K (both 68000s): two vendored files + pristine submodule ---------
+set_global_assignment -name VHDL_FILE ../fpga/core/rtl/tg68kv/TG68K.vhd
+set_global_assignment -name VHDL_FILE ../fpga/core/rtl/tg68kv/TG68KdotC_Kernel.vhd
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/TG68K/TG68K_ALU.vhd
+set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/TG68K/TG68K_Pack.vhd
+
+# ---- constraints ----------------------------------------------------------
+set_global_assignment -name SDC_FILE escape.sdc
