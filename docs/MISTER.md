@@ -213,21 +213,75 @@ visible artefacts while a mistimed read returns plausible-looking wrong data.
 * Nothing inside `sdram_simple` was modified. Refresh interval, tRCD/tRP/tRFC
   waits and the CL2 mode word are as validated on the Pocket.
 
-### Rough budget
+### Bandwidth budget, and why it is the headline risk
 
-One scanline is 456 pixel clocks = 2280 SDRAM clocks. A playfield line needs
-~42 tile-row fetches; an unarmored fetch is ~10 clocks, so ~420 clocks, about
-18% of the line. The remaining ~82% is what the two CPUs and the motion-object
-engine already share on the Pocket. The 64 KB per-CPU hot-code shadows inside
-`escape_core` keep most instruction fetches off SDRAM entirely, which is why
-that budget closes at all. **This is an arithmetic estimate, not a measurement.**
+One scanline is 456 pixel clocks = **2280 SDRAM clocks** at 35.795455 MHz.
 
-And it starts from a bus that is *already* tight: the Pocket build's own known
-issues list "dense sprite crowds can drop scanlines (bandwidth work in
-progress)" — with the playfield on a separate chip. Adding the playfield to
-the same bus can only make that worse, not better. Expect the MiSTer build to
-show the Pocket's sprite-bandwidth artefacts sooner and more often, and treat
-that as the first thing to measure rather than a surprise.
+Cost of one read, counted out of `sdram_simple`'s FSM (not estimated):
+
+| | states | + handshake teardown | total |
+|---|---|---|---|
+| Armored (`rd_pre=1`, CPU and MO) | 15 | ~3 | **~18 clocks** |
+| Video fast path (`rd_pre=0`, PF) | 11 | ~3 | **~14 clocks** |
+
+Structural ceilings per line:
+
+| Client | Fetches/line (max) | Clocks | Share of the line |
+|---|---|---|---|
+| Playfield (new on this bus) | 42 | 588 | 26% |
+| Motion objects, **BUILD 104 4-channel** | 57 | 1026 | **45%** |
+| **Video total** | | **1614** | **71%** |
+
+**BUILD 104 changed this materially, and not in our favour.** MOCHAN-4's own
+note says per-tile cost is `max(8 blit, round_trip/NCH)`: at NCH=2 the engine
+was fetch-concurrency-bound at 15.5 pixel clocks per tile, so it could ask for
+at most ~29 fetches per line; at NCH=4 it is blit-bound at 8, so its ceiling
+roughly **doubles to ~57**. On the Pocket that is affordable — the playfield is
+on the PSRAM chip, so SDRAM video load goes from ~23% to ~45% and the CPUs keep
+the rest. Here the playfield is on the *same* bus, so the two changes compound:
+video's worst-case demand goes from the Pocket's ~23% to **~71%**, leaving under
+30% of the line for two 68000s.
+
+**So: does the arbiter hold? Honestly — in the average case yes, at the peak
+no.** The ~6%/frame average rise BUILD 104 measured is absorbable. A dense
+sprite line is not: the two video clients can now request more than the bus can
+deliver, and the CPUs outrank both, so what gets dropped is sprite and tile
+fetches. The Pocket already lists "dense sprite crowds can drop scanlines" as a
+known issue *at a third of this pressure*. **Expect that symptom here, earlier
+and more often.** It is the first thing to look for on hardware.
+
+What is genuinely protective in the current design:
+
+* CPUs strictly outrank both video clients, so starvation degrades the picture
+  rather than the machine (a starved CPU is a watchdog reboot; a starved fetch
+  is a wrong tile row for one frame).
+* PF and MO alternate round-robin, so neither can lock the other out — the
+  Pocket's strict PF-over-MO ordering lived on the CRAM chain where MO was not
+  a client at all, and copying it here would have starved sprites outright.
+* The 64 KB per-CPU hot-code shadows keep most instruction fetches off SDRAM
+  entirely, which is the only reason ~30% is a workable CPU budget.
+
+Levers, cheapest first, if the artefacts show up:
+
+1. **Drop the motion-object armor** — `rd_pre_q <= 1'b0` in the MO grant arm of
+   `rtl/escape_mister.v`. Saves 4 clocks × 57 = **228 clocks/line, 10% of the
+   bus**. The armor exists because of the v39/v42 *wrong-row* bug, which was
+   diagnosed on CPU fetches where a wrong word is a wrong instruction; on MO
+   graphics a wrong row is one bad sprite row for one frame and self-heals.
+   Deliberately **not** done in this first build: it diverges from the Pocket
+   for a benefit nobody has measured, and this project's history is unkind to
+   unmeasured changes. It is a one-line experiment with an obvious A/B.
+2. Reduce playfield prefetch depth (`pfq_count` ceiling) to trade latency
+   tolerance for bus time.
+3. Spend the 168 spare M10K blocks on a tile-row cache. Playfield and motion
+   objects read the *same* 1 MB graphics region, and a scanline re-reads
+   neighbouring rows heavily, so this is the structurally right fix and the one
+   the Pocket cannot afford.
+4. Raise the SDRAM clock — **blocked**, see the CL2 capture-phase note above.
+   Do not reach for this one first just because it looks like the big lever.
+
+All of the above is arithmetic from the RTL, not measurement. Nobody has run
+this on hardware.
 
 ---
 
@@ -283,6 +337,66 @@ read data still be in flight 27.9 ns after launch. Adding the matching
 `set_multicycle_path -hold -end 1` puts the hold check back on the edge it
 belongs to. (The reference core omits it too, so it likely carries the same
 latent violation.)
+
+---
+
+## Tracking the Pocket branch (BUILD 103-105)
+
+This port is rebased on `tas-atomic` at **BUILD 105**. Three changes landed
+after the branch point and all three touch the MiSTer glue.
+
+**BUILD 103 - EEPROM persistence (`rtl/ee_save.vhd`).** Not wired here.
+`ee_save.vhd` talks to the APF bridge and Analogue data slots directly
+(`bridge_addr`, `dataslot_requestread_ack`), so it is Pocket-only; it is not in
+`src/mister/files.qip`. `escape_core`'s new `ee_saddr` / `ee_sdin` / `ee_swe`
+inputs all carry defaults and its `ee_sq` / `ee_wrpulse` outputs are left open,
+so the core compiles unchanged and the EEPROM behaves exactly as it did before
+BUILD 103 — **in-session only, high scores and operator settings do not survive
+a power cycle on MiSTer.** The MiSTer-native route is an
+`<nvram index="4" size="512"/>` element in the `.mra` plus the matching hps_io
+index-4 wiring; that is a small, well-trodden job, but it is new scope and save
+functionality was explicitly deferred for this port.
+
+*On the MLAB attributes:* `ee_save.vhd`'s two staging buffers carry
+`attribute ramstyle ... "MLAB"` because the Pocket has zero spare M10K. This
+build has 168 spare blocks so the attribute is unnecessary here — but since the
+file is not compiled into the MiSTer project at all, it costs nothing, and
+forking a shared file to remove a no-op would buy nothing and add a permanent
+divergence to maintain. Left alone deliberately.
+
+**BUILD 104 - `mo-depth`, 4-channel fetch + 3-deep prefetch queue.**
+`escape_mob.v`'s fetch interface changed from an A/B ping-pong to four packed
+channels (`gfx_req[3:0]`, `gfx_addr[95:0]`, `gfx_done[3:0]`, `gfx_data[127:0]`).
+The glue here follows, and — importantly — also reproduces core_top's
+**registered arbitration pre-decode** rather than widening the grant condition.
+That pre-decode (`mo_pend_q` / `mo_nch_q` / `mo_naddr_q`) presents the grant a
+single flop bit where four channels would otherwise put an XOR/OR tree in front
+of the eight-term AND that also gates both CPUs. The playfield client got the
+same treatment for the same reason. On the Pocket that was an optimisation; on
+MiSTer the first build *missed setup on this exact clock domain*, so keeping
+combinational depth off the shared grant is a timing requirement here.
+
+The bandwidth consequence is analysed above under
+[Bandwidth budget](#bandwidth-budget-and-why-it-is-the-headline-risk) — short
+version: MO's per-line ceiling roughly doubles, and combined with the playfield
+being on the same bus, worst-case video demand goes from the Pocket's ~23% of a
+scanline to ~71%. **The arbiter holds on average and not at the peak.**
+
+**BUILD 105 - `gfx-artifacts`, the `apply_stain` second pass.** Ported. Special
+(MPR2) sprites now occupy the line buffer with a flag instead of being dropped,
+and `disp_stain_s` / `disp_stain_e` drive a one-flip-flop automaton along the
+scanline that ORs `0x400` into the colour-RAM index. Colour RAM bit 10 is
+therefore live. **Nothing in this port's loader or memory map assumed the top
+half of colour RAM was unused** — `color_vaddr` has been 11 bits wide since the
+first commit and `escape_core`'s colour RAM is the full 2048 entries — so the
+only change needed was the OR into the pen. The line tag narrowing to `ly[7:0]`
+is entirely inside `escape_mob.v` and needs nothing from the glue.
+
+**PSRAM / `CLOCK_SPEED`: untouched, and unreachable from here.** MiSTer does not
+use the PSRAM path at all — `third_party/analogue-pocket-utils/psram.sv` is not
+in `src/mister/files.qip`, there is no `psram` instance in the MiSTer hierarchy,
+and the DE10-Nano has no such device. The held one-variable experiment on the
+Pocket side is unaffected by anything in this port.
 
 ---
 
