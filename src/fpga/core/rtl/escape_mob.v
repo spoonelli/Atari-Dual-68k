@@ -156,7 +156,15 @@ module escape_mob (
     reg [31:0] rowdata;
     reg [3:0]  blit_n;
     reg [8:0]  blit_x;
-    reg [5:0]  fetch_budget;
+    // MOFETCH-5: 7 bits. The 6-bit ceiling of 62 was never the binding
+    // constraint while traversal ate half the line (LANE4o tuned a limiter
+    // that time ran out before), but with MOFETCH-1/3/4 the engine now
+    // reaches it on 20 lines a frame and truncates the walk there. The
+    // golden model saturates at 40 tile-rows a line for this scene, so
+    // raising it costs no pixels and removes a limiter that is no longer
+    // measuring anything real. The line abort - not the budget - is what
+    // bounds a build; never-wedge is unaffected.
+    reg [6:0]  fetch_budget;
     reg [9:0]  cur_line_latch;
 
     // v80: MAME atarimo ground truth - the entry Y field is NEGATED and
@@ -180,6 +188,22 @@ module escape_mob (
     // know whether a completion is landing in the very cycle it aborts.
     wire doneA_edge = (gfx_doneA != gfx_doneA_last);
     wire doneB_edge = (gfx_doneB != gfx_doneB_last);
+
+    // MOFETCH-4: OFF-SCREEN REJECTION.
+    // S_BLIT already throws away any pixel at column >= 344, and 990 tile-rows
+    // per frame (18% of all blit cycles, 17% of all gfx fetches) were being
+    // fetched and blitted entirely into that dead window. Columns 505..511 are
+    // NOT dead - blit_x wraps mod 512 and those tiles come back into view - so
+    // the test is "starts at 344 or later AND does not wrap".
+    wire [8:0] blit_x_new = (spr_x + (hflip ? {(width_t - tx), 3'b000}
+                                            : {tx, 3'b000})
+                             - {1'b0, xscroll}) & 9'h1FF;
+    wire       tile_dead  = (blit_x_new >= 9'd344) && (blit_x_new <= 9'd504);
+    // ...and the whole sprite, so an object scrolled off the edge costs neither
+    // fetches nor blit cycles. Leftmost column is tile 0 with hflip either way.
+    wire [8:0] spr_left  = (spr_x - {1'b0, xscroll}) & 9'h1FF;
+    wire [9:0] spr_right = {1'b0, spr_left} + {3'b0, width_t, 3'b000} + 10'd7;
+    wire       spr_dead  = (spr_left >= 9'd344) && (spr_right <= 10'd511);
 
     // chunky pixel extract with hflip (declared before use for iverilog)
     wire [2:0] pn = hflip ? (3'd7 - blit_n[2:0]) : blit_n[2:0];
@@ -339,7 +363,7 @@ module escape_mob (
                 // LANE4o: 48 starved dense crowds (whole clusters shredding
                 // while lone sprites render clean) - raise toward the 6-bit
                 // ceiling; the tagged line buffers still bound overruns
-                fetch_budget <= 6'd62;
+                fetch_budget <= 7'd126;
                 sstate <= SC_E0;                         // release the scout
                 state  <= S_NEXT;                        // wait for its first hit
             end
@@ -391,7 +415,11 @@ module escape_mob (
                 tx_f  <= 3'd0;                  // next tile to ISSUE
                 tx    <= 3'd0;                  // next tile to LATCH/blit
                 blit_n <= 4'd15;                // marker: nothing in flight
-                state <= S_PRIME;
+                // MOFETCH-4: spr_x is known now (S_MATCH, one cycle ago). If
+                // every column this object covers would be clipped away, drop
+                // it here - before any fetch is issued. Not a semantic change:
+                // S_BLIT would have discarded all of its pixels anyway.
+                state <= spr_dead ? S_NEXT : S_PRIME;
             end
 
             // LANE3o: FETCH-AHEAD. The serial issue-wait-blit loop paid the
@@ -417,17 +445,17 @@ module escape_mob (
                                 + { row_in_tile, 2'd0 };
                     gfx_reqA  <= ~gfx_reqA;
                     inflA     <= 1'b1;
-                    if(width_t != 3'd0 && fetch_budget > 6'd1) begin
+                    if(width_t != 3'd0 && fetch_budget > 7'd1) begin
                         gfx_addrB <= 24'h120000
                                     + { (code_row + 15'd1), 5'd0 }
                                     + { row_in_tile, 2'd0 };
                         gfx_reqB  <= ~gfx_reqB;
                         inflB     <= 1'b1;
                         tx_f <= 3'd2;
-                        fetch_budget <= fetch_budget - 6'd2;
+                        fetch_budget <= fetch_budget - 7'd2;
                     end else begin
                         tx_f <= 3'd1;
-                        fetch_budget <= fetch_budget - 6'd1;
+                        fetch_budget <= fetch_budget - 7'd1;
                     end
                     blit_n <= 4'd14;
                   end
@@ -435,12 +463,16 @@ module escape_mob (
                     // tile tx's data has landed on its parity channel
                     rowdata <= tx[0] ? gfx_dataB : gfx_dataA;
                     if(tx[0]) pendB <= 1'b0; else pendA <= 1'b0;
-                    blit_x  <= (spr_x + (hflip ? {(width_t - tx), 3'b000}
-                                              : {tx, 3'b000})
-                                - {1'b0, xscroll}) & 9'h1FF;
-                    blit_n  <= 4'd0;
+                    blit_x  <= blit_x_new;
+                    // MOFETCH-4: a tile-row that lands wholly in the clipped
+                    // 344..504 window costs one cycle instead of eight. Jumping
+                    // straight to blit_n 7 keeps the existing end-of-tile
+                    // handoff intact, and the single write it attempts is
+                    // rejected by S_BLIT's own blit_x < 344 clip - so not one
+                    // line-buffer write changes, only the cycles spent.
+                    blit_n  <= tile_dead ? 4'd7 : 4'd0;
                     // refill the channel just freed with tile tx_f
-                    if(tx_f <= width_t && tx_f != 3'd0 && fetch_budget != 6'd0) begin
+                    if(tx_f <= width_t && tx_f != 3'd0 && fetch_budget != 7'd0) begin
                         if(tx_f[0]) begin
                             gfx_addrB <= 24'h120000
                                         + { (code_row + {12'b0, tx_f}), 5'd0 }
@@ -454,7 +486,7 @@ module escape_mob (
                             gfx_reqA  <= ~gfx_reqA;
                             inflA     <= 1'b1;
                         end
-                        fetch_budget <= fetch_budget - 6'd1;
+                        fetch_budget <= fetch_budget - 7'd1;
                         tx_f <= tx_f + 3'd1;
                     end
                     state <= S_BLIT;
@@ -471,7 +503,7 @@ module escape_mob (
                 blit_x <= (blit_x + 9'd1) & 9'h1FF;
                 if(blit_n == 4'd7) begin
                     if(tx == width_t) state <= S_NEXT;
-                    else if(tx_f == tx + 3'd1 && fetch_budget == 6'd0) state <= S_NEXT;
+                    else if(tx_f == tx + 3'd1 && fetch_budget == 7'd0) state <= S_NEXT;
                     else begin
                         tx     <= tx + 3'd1;
                         blit_n <= 4'd14;   // that tile's data is in flight
