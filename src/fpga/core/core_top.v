@@ -952,6 +952,45 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     always @(posedge clk_sys_7159) core_rom_ack_s_q <= core_rom_ack_85;
     assign core_rom_ack_s = core_rom_ack_s_q;
 
+    // SDSCHED-88 ZERO-WAIT FASTPATH: per-CPU one-word read cache, filled
+    // SPECULATIVELY from the live 7.159-domain bus. escape_core exports each
+    // CPU's image address + a raw ROM-region decode (no as_n): the TG68K
+    // kernel presents the next fetch address a full CPU clock before AS
+    // falls, so the ~13-clk armored SDRAM read completes well before the
+    // first post-AS CPU edge and DTACK lands at the authentic 4-clock phase.
+    // ROM is read-only, so a speculative read can never have side effects,
+    // and ready is tag-compared against the CPU's CURRENT address every 85.9
+    // clock, so a stale serve is structurally impossible. All crossings are
+    // single-FF timed paths (SDSCHED-73/74 SDC grouping); fpv/fpe_data
+    // settle >=2 sdram clocks before ready can assert (vpre stage), and the
+    // 7.159 side consumes them through escape_core's registered v_di_r/
+    // e_di_r capture (SDSCHED-83), so data is stable long before the CPU
+    // takes it.
+    localparam FASTPATH_EN = 1;
+    wire [23:0] fpv_addr_w, fpe_addr_w;      // escape_core exports (7.159 dom)
+    wire        fpv_spec_w, fpe_spec_w;
+    reg  [23:0] fpv_addr_s, fpe_addr_s;      // 85.9-domain samples
+    reg         fpv_spec_s = 1'b0, fpe_spec_s = 1'b0;
+    always @(posedge clk_sdram) begin
+        fpv_addr_s <= fpv_addr_w;  fpv_spec_s <= fpv_spec_w;
+        fpe_addr_s <= fpe_addr_w;  fpe_spec_s <= fpe_spec_w;
+    end
+    reg  [23:0] fpv_tag,  fpe_tag;           // cached word's image address
+    reg         fpv_valid = 1'b0, fpe_valid = 1'b0;  // tag/data pair live
+    reg         fpv_vpre  = 1'b0, fpe_vpre  = 1'b0;  // data landed, valid next clk
+    reg  [15:0] fpv_data,  fpe_data;
+    reg         fpv_owner = 1'b0, fpe_owner = 1'b0;  // fill in flight on sd_rd
+    reg         fpv_ready_q = 1'b0, fpe_ready_q = 1'b0;
+    reg         fp_last_v = 1'b0;            // fair alternation on collision
+    wire fpv_want = FASTPATH_EN && core_rstn_sd && fpv_spec_s && !fpv_owner
+                    && !fpv_vpre && !(fpv_valid && fpv_tag == fpv_addr_s);
+    wire fpe_want = FASTPATH_EN && core_rstn_sd && fpe_spec_s && !fpe_owner
+                    && !fpe_vpre && !(fpe_valid && fpe_tag == fpe_addr_s);
+    always @(posedge clk_sdram) begin
+        fpv_ready_q <= FASTPATH_EN && fpv_valid && fpv_spec_s && (fpv_tag == fpv_addr_s);
+        fpe_ready_q <= FASTPATH_EN && fpe_valid && fpe_spec_s && (fpe_tag == fpe_addr_s);
+    end
+
     // SDRAM self-check: after init + full ROM download, read word 0 and compare with
     // the known first ROM word (0x003F = high word of the reset SP). Proves the
     // download+readback path with no CPU involvement. Runs before the CPU is released.
@@ -1239,6 +1278,45 @@ always @(posedge clk_sdram) begin
             cst_sum0 <= 16'd0; cst_sum1 <= 16'd0;
         end
         vb_cst_d <= vblank_w;
+        // SDSCHED-88 fastpath fills: the highest-priority read clients. The
+        // two grant arms are ONE if/else chain (v14-v19 lesson: two arms
+        // firing on one clock = last-writer-wins address corruption), and
+        // every other read client below excludes fp wants/owners.
+        if((fpv_want || fpe_want)
+           && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner
+           && !fpv_owner && !fpe_owner) begin
+            if(fpv_want && (!fpe_want || !fp_last_v)) begin
+                fpv_tag   <= fpv_addr_s;
+                fpv_valid <= 0;
+                rd_addr_q <= {1'b0, fpv_addr_s};
+                rd_pre_q  <= 1;                 // CPU: full armor
+                sd_rd_req <= 1;
+                fpv_owner <= 1;
+                fp_last_v <= 1'b1;
+            end else begin
+                fpe_tag   <= fpe_addr_s;
+                fpe_valid <= 0;
+                rd_addr_q <= {1'b0, fpe_addr_s};
+                rd_pre_q  <= 1;
+                sd_rd_req <= 1;
+                fpe_owner <= 1;
+                fp_last_v <= 1'b0;
+            end
+        end
+        if(fpv_owner && sd_rd_req && sd_rd_ack) begin
+            sd_rd_req <= 0;
+            fpv_owner <= 0;
+            fpv_data  <= sd_rd_data[31:16];
+            fpv_vpre  <= 1;                     // valid follows next clock
+        end
+        if(fpe_owner && sd_rd_req && sd_rd_ack) begin
+            sd_rd_req <= 0;
+            fpe_owner <= 0;
+            fpe_data  <= sd_rd_data[31:16];
+            fpe_vpre  <= 1;
+        end
+        if(fpv_vpre) begin fpv_valid <= 1; fpv_vpre <= 0; end
+        if(fpe_vpre) begin fpe_valid <= 1; fpe_vpre <= 0; end
         // CPU fetch service. MUST also yield to a PENDING MO request
         // (mg_req_s != mg_req_last), not just an in-flight one: without that
         // check both gates fire on the same edge, one read goes out with the
@@ -1248,8 +1326,12 @@ always @(posedge clk_sdram) begin
         // CRAM lane: video no longer touches SDRAM - the CPU service
         // must NOT wait on video-channel state (a stuck CRAM path was
         // starving CPU fetches -> extra CPU death -> watchdog boot loop)
+        // (SDSCHED-88: with FASTPATH_EN this legacy client only fires on the
+        // escape_core fast-watchdog fallback; it stays fully wired for
+        // FASTPATH_EN=0 builds and as the never-wedge escape hatch.)
         begin
-            if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack) begin
+            if(core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack
+               && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want) begin
                 sd_rd_req <= 1;
                 rd_addr_q <= {1'b0, core_rom_addr};
                 rd_pre_q  <= 1;                     // CPU: full armor
@@ -1273,9 +1355,14 @@ always @(posedge clk_sdram) begin
         // requires no pending/in-flight CPU work, and one MO read (~10 clks
         // @85.9MHz) is far shorter than a CPU bus cycle, so worst-case CPU
         // latency grows by well under one 7.16MHz cycle.
+        // (SDSCHED-88: MO stays the LOWEST-priority SDRAM read client, now
+        // also below both CPU fastpath fills. A fill is ~13 clks and each
+        // CPU issues at most one per 48-clk bus cycle, so MO keeps >=40% of
+        // the bus even with both CPUs streaming fetches.)
         if(!vidkill_sd && (mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last)
            && !(core_rom_req_s && !core_rom_ack_85)
-           && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner) begin
+           && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner
+           && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want) begin
             if(mgA_req_s != mgA_req_last) begin
                 mgA_req_last <= mgA_req_s;
                 rd_addr_q    <= {1'b0, mo_gfx_addrA};
@@ -1324,6 +1411,10 @@ always @(posedge clk_sdram) begin
         mgB_req_last <= mgB_req_s;
         vg_reqA_last <= vg_reqA_s;
         vg_reqB_last <= vg_reqB_s;
+        // SDSCHED-88: fastpath caches die with the core - a re-download
+        // changes ROM content under a valid tag otherwise
+        fpv_valid <= 0; fpe_valid <= 0;
+        fpv_vpre  <= 0; fpe_vpre  <= 0;
     end
 end
 
@@ -2110,7 +2201,7 @@ hall_stick hall_p2 (
     .joy_x ( cont2_joy[7:0] ), .joy_y ( cont2_joy[15:8] ),
     .adc_x ( adc_p2x ),        .adc_y ( adc_p2y )
 );
-escape_core #(.PAR4_EN(1)) ecore (
+escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN)) ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
     .rom_addr   ( core_rom_addr ),
@@ -2119,6 +2210,15 @@ escape_core #(.PAR4_EN(1)) ecore (
     .rom_par4   ( core_rom_par4 ),
     .rom_req    ( core_rom_req ),
     .rom_ack    ( core_rom_ack_s ),
+    // SDSCHED-88 zero-wait fastpath (clk_sdram read caches above)
+    .fast_v_addr ( fpv_addr_w ),
+    .fast_v_spec ( fpv_spec_w ),
+    .fast_v_data ( fpv_data ),
+    .fast_v_ready( fpv_ready_q ),
+    .fast_e_addr ( fpe_addr_w ),
+    .fast_e_spec ( fpe_spec_w ),
+    .fast_e_data ( fpe_data ),
+    .fast_e_ready( fpe_ready_q ),
     .shad_wclk  ( clk_sdram ),
     .shad_waddr ( shad_waddr ),
     .shad_wdata ( shad_wdata ),
