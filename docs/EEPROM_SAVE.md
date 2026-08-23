@@ -215,6 +215,26 @@ file exists - so a missing, empty or refused save slot cannot brick a boot.
 
 Measured in that run: restore 287 us, snapshot 215 us.
 
+`sim/tb/tb_ee_ram_equiv.vhd` covers the other risk this change carries - that
+moving the EEPROM from `spram_bytelane` to `dpram_bytelane_syn` alters a RAM the
+boot reads. The two differ in exactly one way: signal storage returns the OLD
+byte on a read scheduled alongside a write to that address, shared-variable
+storage (which the Quartus true-dual-port template requires) returns the NEW
+one. The testbench drives both parts from one stimulus stream - erased-part
+reads, byte stores on each lane, write-then-immediate-read, back-to-back writes
+to one address, a walking address, both ends of the 512 locations - and compares
+`q` every cycle. Both register their reads, so `q` in cycle T belongs to the
+access in cycle T-1, and that is what decides whether a mismatch matters: `q`
+captured during a write is dead data (`escape_core` only consults `ee_q` on read
+cycles, and a 68000 discards its data input while writing); `q` captured during
+a read is not.
+
+    ./sim/run_tb.sh tb_ee_ram_equiv 100us
+    read-during-write differences: 96   (q of a write cycle; nothing reads it)
+    divergences on real reads:      0
+
+So the swap is invisible to the CPU.
+
 Quartus Analysis & Elaboration passes on the whole project with the new module
 bound from `core_top.v`.
 

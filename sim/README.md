@@ -37,6 +37,7 @@ Escape's raster (456×262), confirming the System 1 video base matches Escape's 
 ./sim/analyze_base.sh          # elaboration coverage of the base RTL
 ./sim/run_tb.sh tb_syngen      # sync-generator timing
 ./sim/run_tb.sh tb_ee_save 3ms # EEPROM save/restore across a simulated power cycle
+./sim/run_tb.sh tb_ee_ram_equiv 100us   # EEPROM RAM swap is invisible to the CPU
 ```
 
 `tb_ee_save` needs the longer stop time: it walks all 512 EEPROM bytes through
