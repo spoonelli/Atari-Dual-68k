@@ -139,7 +139,26 @@ spin-lock acquire at `$9B4`, retrying `tas.b $16CCCC` forever.
 - Bench: `tb_escape_tasrace` reproduces the swallowed release on the real RTL
   with both real CPUs and fails the run if it did not actually construct the
   race; `tb_escape_taswedge` forces a permanently stuck LOCK and proves
-  neither CPU can be starved.
+  neither CPU can be starved. Measured (foreign stores landing inside a TAS /
+  trials that ended with the lock set and no owner):
+
+  | release | interlock | stores inside a TAS | wedged |
+  |---|---|---|---|
+  | `clr.b`  | off        | 152 | 114 / 306 |
+  | `clr.b`  | on         |   0 |   0 / 305 |
+  | `move.b` | off        |  50 |  25 / 202 |
+  | `move.b` | DTACK-only |  52 |   0 / 209 |
+  | `move.b` | on         |   0 |   0 / 209 |
+
+- **The DTACK-only row is the lesson of the era, repeated.** It wedged nothing
+  and would have looked like a pass — but 52 stores still landed mid-TAS. They
+  did not wedge only because a DTACK-stalled write strobe keeps re-asserting
+  every clock and happened to re-write the byte *after* the TAS write-back,
+  clobbering that write-back instead: two owners rather than none. Same defect,
+  different corruption, luck deciding which. Test the property, not the
+  symptom — a bench judged on freezes would have shipped the broken variant.
+- The `tas.b` read-modify-write measures 13 clocks wide here, with `/AS` HIGH
+  for 3 of them. That 3-clock gap is the entire bug, as a number.
 
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)
