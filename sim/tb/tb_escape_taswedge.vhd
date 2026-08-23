@@ -24,7 +24,11 @@ use std.textio.all;
 entity tb_escape_taswedge is
     generic (
         G_TAS   : integer := 1;
-        G_BOUND : integer := 64;      -- TL_TTL_MAX+1, the claimed hard bound
+        -- TL_TTL_MAX is 63, so a window lives at most 64 clocks and the held
+        -- peer is granted on the first clock after it closes. Test against 66
+        -- (two clocks of head-room for edge alignment) and REPORT the measured
+        -- maximum - the report quotes the measurement, not the constant.
+        G_BOUND : integer := 66;
         G_FPEN  : integer := 1;
         G_FP    : integer := 1;
         G_LAT   : integer := 2;

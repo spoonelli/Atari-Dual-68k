@@ -10,12 +10,22 @@
 -- is set with nobody owning it and the extra spins forever - the wedge.
 -- See sim/tools/make_tasrace_hex.py for the trial protocol.
 --
+-- Two release flavours, built by the same generator (see sim/run_tasrace.sh):
+--   tasrace_words.hex     `clr.b`  - the game's own release.  On the 68000
+--                         CLR is ITSELF a read-modify-write, so its read half
+--                         is a second place the interlock can serialise.
+--   tasrace_mv_words.hex  `move.b #0` - a PURE write, one bus cycle.  This is
+--                         the flavour that separates a real interlock from one
+--                         that only withholds DTACK, because the shared-RAM
+--                         write strobes assert on EVERY clock of a stalled
+--                         cycle by design (escape_core.vhd, SDSCHED-80).
+--
 -- Run matrix (G_TAS is escape_core's TASLOCK_EN):
---   G_TAS=0  interlock OFF          -> swallows > 0   (the bug, reproduced)
---   G_TAS=2  interlock DTACK-ONLY   -> swallows > 0   (the trap: withholding
---            DTACK alone does nothing, because the shared-RAM write strobes
---            assert on EVERY clock of a stalled cycle by design)
---   G_TAS=1  interlock ON           -> swallows = 0   (the fix)
+--   clr.b  G_TAS=0  interlock OFF        -> swallows > 0  (the bug reproduced)
+--   clr.b  G_TAS=1  interlock ON         -> swallows = 0  (the fix)
+--   move.b G_TAS=0  interlock OFF        -> swallows > 0
+--   move.b G_TAS=2  DTACK-ONLY           -> swallows > 0  (not enough)
+--   move.b G_TAS=1  interlock ON         -> swallows = 0
 -- G_EXPECT says which of those this run is, and the bench FAILS if the run
 -- does not match.
 --
@@ -111,6 +121,8 @@ architecture tb of tb_escape_tasrace is
     signal m_ehold  : std_logic;
     signal m_owner  : std_logic_vector(1 downto 0);
     signal m_erel   : std_logic;
+    signal m_vpc    : std_logic_vector(15 downto 0);  -- main last program fetch
+    signal m_epc    : std_logic_vector(15 downto 0);  -- extra last program fetch
 
     -- results snooped out of shared RAM
     signal n_trials, n_swallow, n_stuck, n_acq, n_phase : integer := 0;
@@ -162,6 +174,8 @@ begin
     m_ehold <= << signal uut.e_hold : std_logic >>;
     m_owner <= << signal uut.tl_owner : std_logic_vector(1 downto 0) >>;
     m_erel  <= << signal uut.extra_release : std_logic >>;
+    m_vpc   <= << signal uut.pc_i  : std_logic_vector(15 downto 0) >>;
+    m_epc   <= << signal uut.epc_i : std_logic_vector(15 downto 0) >>;
 
     -- legacy ROM service (two words per request, G_LAT latency)
     serve : process(clk)
@@ -368,7 +382,9 @@ begin
                    " stuck=" & integer'image(n_stuck) &
                    " tasrmw=" & integer'image(n_tasrmw) &
                    " ovl=" & integer'image(n_overlap) &
-                   " wrin=" & integer'image(n_wrinwin) severity note;
+                   " wrin=" & integer'image(n_wrinwin) &
+                   "  mainPC=" & hex16(m_vpc) & " extraPC=" & hex16(m_epc)
+                   severity note;
             exit when n_trials >= G_MINTRIAL * 2;
             exit when t >= G_MAXUS;
         end loop;

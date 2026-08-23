@@ -498,6 +498,7 @@ architecture rtl of escape_core is
     signal v_lane, e_lane : std_logic_vector(1 downto 0);
     signal tas_hits, tas_wrhits : unsigned(7 downto 0) := (others=>'0');
     signal tas_first : std_logic_vector(15 downto 0) := (others=>'0');
+    signal tas_first_any, tas_first_wr : std_logic := '0';
     -- SDSCHED-83: registered CPU read-data capture. Both captured impostor
     -- words (080C, 08C4) were recent STACK content served into dispatch
     -- reads of a DIFFERENT memory - the read mux presenting the wrong
@@ -905,7 +906,9 @@ begin
     -- clocks = 8.9 us at 7.159 MHz. One video frame is 16.7 ms and the
     -- watchdog is 8 frames, so the worst case is ~1900x shorter than a frame
     -- and ~15000x shorter than the shortest thing that can reset the
-    -- machine. Measured real window (tb_escape_tasrace): 14 clocks.
+    -- machine. Measured real window (tb_escape_tasrace, a genuine `tas.b
+    -- $16CCCC` against this DTACK discipline): 13 clocks, of which /AS is
+    -- HIGH for 3 - that gap is the bug, in one number.
     --
     -- SCOPE. Deliberately the WHOLE shared RAM, not just the lock bytes:
     -- the window is keyed on the address the CPU is actually modifying, so
@@ -1005,8 +1008,22 @@ begin
                        or (e_hold='1' and e_hold_d='0' and e_rw_n='0') then
                         if tas_wrhits /= x"FF" then tas_wrhits <= tas_wrhits + 1; end if;
                     end if;
-                    if tas_first = x"0000" then
-                        tas_first <= tl_addr & '0';
+                    -- Address latch: first collision of any kind, UPGRADED
+                    -- once to the first collision that held off a WRITE.
+                    -- A held read is the interlock doing ordinary
+                    -- serialisation; a held WRITE is a store that would
+                    -- otherwise have been swallowed by the other CPU's
+                    -- write-back, so its address is the one worth reading
+                    -- off the screen.
+                    if tas_first_wr = '0' then
+                        if (v_hold='1' and v_hold_d='0' and v_rw_n='0')
+                           or (e_hold='1' and e_hold_d='0' and e_rw_n='0') then
+                            tas_first    <= tl_addr & '0';
+                            tas_first_wr <= '1';
+                        elsif tas_first_any = '0' then
+                            tas_first     <= tl_addr & '0';
+                            tas_first_any <= '1';
+                        end if;
                     end if;
                 end if;
             end if;
