@@ -2255,6 +2255,9 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire [1:0]  mo_prio;                // MOPRI-1: MPR1:MPR0 of the owning sprite
     wire        mo_valid_raw;
     wire        mo_valid = mo_valid_raw & ~m_mokill;
+    wire        mo_stain_s_raw, mo_stain_e_raw;      // MOSTAIN-1
+    wire        mo_stain_s = mo_stain_s_raw & ~m_mokill;
+    wire        mo_stain_e = mo_stain_e_raw & ~m_mokill;
 
 escape_mob umob (
     .clk      ( clk_sys_7159 ),
@@ -2277,7 +2280,9 @@ escape_mob umob (
     .disp_x   ( visible_x[8:0] ),
     .disp_pen ( mo_pen ),
     .disp_prio( mo_prio ),
-    .disp_valid( mo_valid_raw )
+    .disp_valid( mo_valid_raw ),
+    .disp_stain_s( mo_stain_s_raw ),
+    .disp_stain_e( mo_stain_e_raw )
 );
 
     // ---------------- alpha scanout pipeline (pixel clock domain)
@@ -2383,12 +2388,46 @@ escape_prio uprio (
     .mo_win   ( pr_mo_win ),
     .pen      ( pr_pen )
 );
+    // MOSTAIN-1: the SECOND motion-object pass (atarimo apply_stain), which the
+    // reference runs over the FINISHED picture - after the MO/PF merge AND after
+    // the alpha tilemap - to OR 0x400 into every pixel a "special" (MPR2) sprite
+    // covers. That 0x400 is colour-RAM bit 10, the top half of the 2048-entry
+    // colour RAM this core has always addressed and never used: the FACTORY MAP
+    // screen's route markers live entirely in that bank, which is why they came
+    // out as raw un-recoloured art (see docs/mo_priority.md).
+    //
+    // The reference restarts the scan at every marker pixel; the union of all
+    // those scans is this one-flip-flop automaton along the scanline:
+    //
+    //   stain(x)  = S(x) | alive(x-1)
+    //   alive(x)  = stain(x) & ~( E(x-1) & ~S(x) )
+    //
+    // with S = "special pixel here with pen bit 1" (START_MARKER) and
+    //      E = "special pixel here with pen bit 2" (END_MARKER).
+    // A solid marker (pen 6 = both bits) therefore stains its own silhouette
+    // plus the one pixel past its right edge, exactly like the C loop; a pen-2
+    // marker stains to the end of the line, also exactly like the C loop.
+    reg        stain_alive = 1'b0;
+    reg        stain_e_q   = 1'b0;
+    wire       stain_now   = mo_stain_s | stain_alive;
+    wire       stain_brk   = stain_e_q & ~mo_stain_s;
+    always @(posedge clk_sys_7159) begin
+        if(visible_x == 10'd0) begin        // first cycle of a new line
+            stain_alive <= 1'b0;
+            stain_e_q   <= 1'b0;
+        end else begin
+            stain_alive <= stain_now & ~stain_brk;
+            stain_e_q   <= mo_stain_e;
+        end
+    end
+
     // pens: alpha 0..255 = {3'b000,color6,pix2}; MO 256..511 = {3'b001,color4,pix4};
     // playfield 512..767 = {3'b010,color4,pix4}; SHADE moves the playfield into
     // the alternate bank 768..1023 (CRA9), matching CRA9 = SHADE*CL10 + CL9.
+    // The stain then moves whatever won into the 1024..2047 bank.
     always @(posedge clk_sys_7159)
-        color_vaddr <= alpha_vis ? {3'b000, act_color, pix}
-                                 : pr_pen;
+        color_vaddr <= (alpha_vis ? {3'b000, act_color, pix}
+                                  : pr_pen) | {stain_now, 10'd0};
 
     // palette: IRGB4444 with intensity: i=(I+1)*(4-intensity), ch8 = ch4*i/4
     wire [3:0] ints   = (eintensity > 4'd4) ? 4'd4 : eintensity;

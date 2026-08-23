@@ -113,6 +113,7 @@ module tb_mob;
     wire [7:0] disp_pen;
     wire [1:0] disp_prio;
     wire       disp_valid;
+    wire       disp_stain_s, disp_stain_e;    // MOSTAIN-1
     escape_mob dut (
         .clk      ( clk ),
         .reset_n  ( rstn ),
@@ -134,7 +135,9 @@ module tb_mob;
         .disp_x   ( visible_x[8:0] ),
         .disp_pen ( disp_pen ),
         .disp_prio( disp_prio ),
-        .disp_valid( disp_valid )
+        .disp_valid( disp_valid ),
+        .disp_stain_s( disp_stain_s ),
+        .disp_stain_e( disp_stain_e )
     );
 
     // ---------------- MOPRI-1: playfield pen for this pixel
@@ -182,8 +185,9 @@ escape_prio uprio (
     integer n_slip, n_entries, n_ymatch, n_fetch, n_wren, n_wren_off;
     integer n_pend, n_done, n_blitst; reg pend0_d = 0, done0_d = 0;
     integer n_mowin, n_shade, n_m7, n_occl;   // MOPRI-1 decision census
+    integer n_spec;                            // MOSTAIN-1 special pixels seen
     initial begin n_slip=0; n_entries=0; n_ymatch=0; n_fetch=0; n_wren=0; n_wren_off=0; n_pend=0; n_done=0; n_blitst=0;
-                  n_mowin=0; n_shade=0; n_m7=0; n_occl=0; end
+                  n_mowin=0; n_shade=0; n_m7=0; n_occl=0; n_spec=0; end
     reg [3:0] state_d = 0;
     always @(posedge clk) begin
         state_d <= dut.state;
@@ -217,10 +221,12 @@ escape_prio uprio (
         req_cnt_d <= gfx_req;
     end
     integer fdp;                        // MOPRI-1: per-pixel priority decision log
+    integer fds;                        // MOSTAIN-1: special (MPR2) pixels: x y S E
     initial begin
         $display("TB_MOB scroll: XSCROLL=%0d YSCROLL=%0d", XSCROLL, YSCROLL);
         fd  = $fopen("sim/build/mob_pixels.txt", "w");
         fdp = $fopen("sim/build/mob_prio.txt", "w");
+        fds = $fopen("sim/build/mob_special.txt", "w");
         $fwrite(fdp, "# x y mo_valid mo_prio mo_color mo_pix pf_color pf_pix ");
         $fwrite(fdp, "forcemc0 shade m7 pfm mo_win pen layer\n");
         px_seen = 0; reqs = 0;
@@ -230,7 +236,8 @@ escape_prio uprio (
         repeat (VID_V_TOTAL * VID_H_TOTAL + 10) @(posedge clk);
         $fclose(fd);
         $fclose(fdp);
-        $display("TB_MOB DONE: %0d pixels, %0d gfx reqs", px_seen, reqs);
+        $fclose(fds);
+        $display("TB_MOB DONE: %0d pixels, %0d gfx reqs, %0d special pixels", px_seen, reqs, n_spec);
         $display("DBG3 mo_win=%0d shade=%0d m7=%0d occluded=%0d",
                  n_mowin, n_shade, n_m7, n_occl);
         $display("DBG slips=%0d entries=%0d ymatch=%0d fetch=%0d wren=%0d offscreen_px=%0d",
@@ -247,6 +254,14 @@ escape_prio uprio (
                 $fwrite(fd, "%0d %0d %h %0d\n", visible_x - 10'd1, visible_y,
                         disp_pen, disp_prio);
                 px_seen = px_seen + 1;
+            end
+            // MOSTAIN-1: the special pass's own pixels. They never draw; the
+            // compositor uses their START/END markers to stain what is under
+            // them (sim/tools/render_scene.py replays the same rule).
+            if(disp_stain_s || disp_stain_e) begin
+                $fwrite(fds, "%0d %0d %0d %0d\n", visible_x - 10'd1, visible_y,
+                        disp_stain_s, disp_stain_e);
+                n_spec = n_spec + 1;
             end
             // MOPRI-1: log every pixel the MO layer covers, with the full set of
             // priority-decision inputs and the layer that won.

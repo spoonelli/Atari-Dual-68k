@@ -73,6 +73,11 @@ def load_gfx(path):
 def build_line(mo, cfg, gfx, ly, xscroll, budget):
     """Return {x: pen} for one built line.  x is line-buffer column 0..511."""
     out = {}
+    # MOSTAIN-1: a special (MPR2) pixel still OWNS its column - the engine writes
+    # it with a flag that stops it drawing, so it masks later sprites exactly as
+    # the reference's single motion-object bitmap does. `claimed` therefore holds
+    # every written column, drawn or not, and `out` only the drawable ones.
+    claimed = set()
     band = (ly >> 3) & 0x3F
     first_link = cfg[0x40 + band] & 0x3FF
     link = first_link
@@ -104,13 +109,6 @@ def build_line(mo, cfg, gfx, ly, xscroll, budget):
                     rowdata = bytes(4)
                 shift = (width_t - tx) * 8 if hflip else tx * 8
                 bx = (spr_x + shift - xscroll) & 0x1FF
-                # MPR2 ("special rendering") draws nothing: the engine gates
-                # only the line-buffer write, so the tile still costs its fetch
-                # and its budget slot - which is why this sits AFTER rows_left
-                # was decremented, and why it does not claim the columns (a
-                # later sprite may still win them).
-                if spr_prio & 4:
-                    continue
                 for n in range(8):
                     pn = 7 - n if hflip else n
                     byte = rowdata[pn >> 1]
@@ -120,8 +118,11 @@ def build_line(mo, cfg, gfx, ly, xscroll, budget):
                         # first-write-wins (MOPLACE-3): earliest entry keeps
                         # the pixel, which is what reverse-order rendering of
                         # a head-first walk comes out to.
-                        if x not in out:
-                            out[x] = (spr_color << 4) | pix
+                        if x not in claimed:
+                            claimed.add(x)
+                            # MOSTAIN-1: special pixels claim but never draw
+                            if not (spr_prio & 4):
+                                out[x] = (spr_color << 4) | pix
         nxt = w0 & 0x3FF
         if nxt == first_link or ent == 63 or rows_left == 0:
             break
