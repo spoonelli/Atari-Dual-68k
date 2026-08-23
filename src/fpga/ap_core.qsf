@@ -747,7 +747,32 @@ set_global_assignment -name VHDL_FILE core/rtl/escape_core.vhd
 set_global_assignment -name VHDL_FILE core/rtl/TMS5220.vhd
 set_global_assignment -name VHDL_FILE core/rtl/escape_jsa.vhd
 set_global_assignment -name VHDL_FILE core/rtl/dpram_dc.vhd
-set_global_assignment -name QIP_FILE ../../third_party/jt51/hdl/jt51.qip
+# MIX-100: jt51 sources listed explicitly. Two files are VENDORED
+# (per-channel user gain); the rest still come from the pristine
+# submodule so upstream fixes flow in normally. Replaces the former
+# single QIP_FILE line for third_party/jt51/hdl/jt51.qip.
+set_global_assignment -name VERILOG_FILE core/rtl/jt51v/jt51.v
+set_global_assignment -name VERILOG_FILE core/rtl/jt51v/jt51_acc.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_csr_op.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_eg.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_exp2lin.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_exprom.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_kon.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_lfo.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_lin2exp.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_mmr.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_mod.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_noise.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_noise_lfsr.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_op.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_pg.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_phinc_rom.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_phrom.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_pm.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_reg.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_reg_ch.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_sh.v
+set_global_assignment -name VERILOG_FILE ../../third_party/jt51/hdl/jt51_timers.v
 set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65_Pack.vhd
 set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65_MCode.vhd
 set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/T65_ALU.vhd

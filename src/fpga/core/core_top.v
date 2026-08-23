@@ -736,6 +736,11 @@ end
     reg        invy_74      = 1'b0;   // 0xA00000D0: 'Invert Stick Y'
     reg        swapxy_74    = 1'b0;   // 0xA00000E0: 'Swap Stick Axes'
     reg [4:0]  deadzn_74    = 5'd8;   // 0xA00000F0: 'Analog Deadzone'
+    // MIX-100 per-FM-channel mixer: 0xA0000120..0x13C, one per YM2151 channel.
+    // Defaults are all unity - this is a control surface, not a rebalance.
+    reg [2:0]  uvolfm_74 [0:7];
+    integer fmi;
+    initial for(fmi=0; fmi<8; fmi=fmi+1) uvolfm_74[fmi] = 3'd7;
     reg [2:0]  uvolym_74    = 3'd7;   // 0xA0000100: 'Music Volume' (0=mute,7=unity)
     reg [2:0]  uvoltms_74   = 3'd7;   // 0xA0000110: 'Speech Volume'
     reg        pfmap_74     = 1'b0;   // 0xA0000050: 'PF Map Debug' - render each
@@ -762,6 +767,9 @@ always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA00000E0) swapxy_74    <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA00000F0) deadzn_74    <= bridge_wr_data[4:0];
     if(bridge_wr && bridge_addr == 32'hA0000060) pfprobe_74   <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr[31:8] == 24'hA00001 && bridge_addr[7:0] >= 8'h20
+       && bridge_addr[7:0] <= 8'h3C && bridge_addr[1:0] == 2'b00)
+        uvolfm_74[bridge_addr[4:2]] <= bridge_wr_data[2:0];
     if(bridge_wr && bridge_addr == 32'hA0000100) uvolym_74    <= bridge_wr_data[2:0];
     if(bridge_wr && bridge_addr == 32'hA0000110) uvoltms_74   <= bridge_wr_data[2:0];
     if(bridge_wr && bridge_addr == 32'hA0000010) soft_rst_ctr <= 23'd1;
@@ -773,8 +781,12 @@ end
     wire [4:0] vpshift_s, deadzn_s;
 synch_3 #(.WIDTH(5)) s_dzn(deadzn_74, deadzn_s, clk_sys_7159);
     wire [2:0] uvolym_s, uvoltms_s;
+    wire [23:0] uvolfm_74_flat = {uvolfm_74[7], uvolfm_74[6], uvolfm_74[5], uvolfm_74[4],
+                                  uvolfm_74[3], uvolfm_74[2], uvolfm_74[1], uvolfm_74[0]};
+    wire [23:0] uvolfm_s;
 synch_3 #(.WIDTH(3)) s_uvy(uvolym_74, uvolym_s, clk_sys_7159);
 synch_3 #(.WIDTH(3)) s_uvt(uvoltms_74, uvoltms_s, clk_sys_7159);
+synch_3 #(.WIDTH(24)) s_uvfm(uvolfm_74_flat, uvolfm_s, clk_sys_7159);
 synch_3 s_swx(swapxy_74, swapxy_s, clk_sys_7159);
 synch_3 #(.WIDTH(5)) s_vps(vpshift_74, vpshift_s, clk_sys_7159);
 synch_3 s_invx(invx_74, invx_s, clk_sys_7159);
@@ -1773,7 +1785,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3099;   // bus: model the real board's shared-bus arbitration (freeze experiment) - screen shows '99'
+    localparam [15:0] BUILD_ID = 16'h3100;   // mixer: per-FM-channel user gains (control surface, authentic defaults) - screen shows '00'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2273,6 +2285,7 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0)) ecore (
                    cont1_key[5]|cont1_key[6], cont1_key[7]|cont1_key[6]} ),
     .uvol_ym    ( uvolym_s ),
     .uvol_tms   ( uvoltms_s ),
+    .uvol_fm    ( uvolfm_s ),
     .svc_n      ( ~svc_mode_s ),
     .coin1      ( coin1_s ),
     .coin2      ( coin2_s ),

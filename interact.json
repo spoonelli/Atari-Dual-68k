@@ -222,6 +222,134 @@
           "adjust_small": 1,
           "adjust_large": 2
         }
+      },
+      {
+        "name": "FM Ch 1 Level",
+        "id": 28,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA0000120",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
+      },
+      {
+        "name": "FM Ch 2 Level",
+        "id": 29,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA0000124",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
+      },
+      {
+        "name": "FM Ch 3 Level",
+        "id": 30,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA0000128",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
+      },
+      {
+        "name": "FM Ch 4 Level",
+        "id": 31,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA000012C",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
+      },
+      {
+        "name": "FM Ch 5 Level",
+        "id": 32,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA0000130",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
+      },
+      {
+        "name": "FM Ch 6 Level",
+        "id": 33,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA0000134",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
+      },
+      {
+        "name": "FM Ch 7 Level",
+        "id": 34,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA0000138",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
+      },
+      {
+        "name": "FM Ch 8 Level",
+        "id": 35,
+        "type": "slider_u32",
+        "enabled": true,
+        "address": "0xA000013C",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 7,
+        "graphical": {
+          "min": 0,
+          "max": 7,
+          "adjust_small": 1,
+          "adjust_large": 2
+        }
       }
     ],
     "messages": []
