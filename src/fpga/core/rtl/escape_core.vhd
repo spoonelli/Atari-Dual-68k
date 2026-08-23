@@ -1275,7 +1275,15 @@ begin
                 vblank_d <= vblank_in;
                 if vblank_in='1' and vblank_d='0' then
                     v_virq <= '1';
-                    e_virq <= '1';
+                    -- 87b: only latch for a RUNNING extra CPU. A stale
+                    -- pending vblank from before release fired the instant
+                    -- POST unmasked - derailing the Second Processor
+                    -- handshake (boot hang, no coin-in). The old shared
+                    -- latch was accidentally boot-safe because the main's
+                    -- acks kept clearing it.
+                    if extra_release='1' then
+                        e_virq <= '1';
+                    end if;
                     xscroll <= xs_pend;       -- v83: frame-latched scroll
                     yscroll <= ys_pend;
                 end if;
@@ -1293,6 +1301,9 @@ begin
                    and e_addr(23 downto 16) = x"36" and e_addr(5 downto 4) = "00"
                    and e_addr(3 downto 1) = "000" then                 -- LANE4j: exact
                     e_virq <= '0';                                     -- extra acks ITS latch
+                end if;
+                if extra_release='0' then
+                    e_virq <= '0';                                     -- no pending across reset
                 end if;
 
                 if v_as_n='0' and v_rw_n='0' and v_sel_vctl='1' then
