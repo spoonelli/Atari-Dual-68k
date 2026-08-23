@@ -102,6 +102,20 @@ entity escape_core is
         shad_wdata : in  std_logic_vector(15 downto 0) := (others=>'0');
         shad_we    : in  std_logic := '0';
 
+        -- EEPROM non-volatile backdoor (port B of the 2804 BRAM, this clock).
+        -- core_top's ee_save engine restores the 512 bytes from the APF save
+        -- slot before reset is released, and snapshots them back out for the
+        -- Pocket to write to SD. Byte-wide because the real part is: MAME maps
+        -- it umask16(0x00ff), so only the LOW byte of each word is EEPROM.
+        -- Defaults keep the port inert for testbenches that leave it unwired.
+        ee_saddr   : in  std_logic_vector(8 downto 0) := (others=>'0');
+        ee_sdin    : in  std_logic_vector(7 downto 0) := (others=>'0');
+        ee_swe     : in  std_logic := '0';
+        ee_sq      : out std_logic_vector(7 downto 0);
+        -- '1' for one clock whenever the CPU stores an EEPROM byte: the
+        -- dirty/idle trigger for an autosave.
+        ee_wrpulse : out std_logic;
+
         -- raster position (from video counters in core_top for now)
         vblank_in  : in  std_logic;
 
@@ -452,6 +466,8 @@ architecture rtl of escape_core is
     signal shr_qa, shr_qb : std_logic_vector(15 downto 0);
     signal pf_q, mo_q, alpha_q, work_q, pfpal_q, color_q, cfg_q, ee_q : std_logic_vector(15 downto 0);
     signal we_pf, we_mo, we_alpha, we_work, we_pfpal, we_color, we_cfg, we_ee : std_logic;
+    signal ee_sq_w   : std_logic_vector(15 downto 0); -- EEPROM port B read (lo byte used)
+    signal ee_sdin_w : std_logic_vector(15 downto 0); -- EEPROM port B write (lo byte used)
     signal v_wr, we_shr_a, we_shr_b : std_logic;
     signal shr_a_addr : std_logic_vector(14 downto 0);
     signal shr_a_din  : std_logic_vector(15 downto 0);
@@ -987,10 +1003,23 @@ begin
                    we_a=>we_cfg, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>cfg_q,
                    addr_b=>cfg_vaddr, din_b=>(others=>'0'),
                    we_b=>'0', uds_b_n=>'1', lds_b_n=>'1', q_b=>cfg_vdata );
-    ee_ram    : entity work.spram_bytelane
+    -- 2804 EEPROM. Port A = the CPU (byte lanes; only LDS ever lands, the part
+    -- is umask16(0x00ff) on the real board). Port B = core_top's ee_save engine,
+    -- which restores it from the Pocket's save slot at boot and snapshots it
+    -- back out - this is what makes high scores and operator settings survive
+    -- a power cycle. Port B drives LDS only, so it can never disturb the
+    -- (unused, all-FF) upper bank.
+    ee_ram    : entity work.dpram_bytelane_syn
         generic map ( awidth=>9, initbyte=>x"FF" )    -- real 2804 = 512 bytes
-        port map ( clk=>clk, addr=>v_addr(9 downto 1), din=>v_do, we=>we_ee,
-                   uds_n=>v_uds_n, lds_n=>v_lds_n, q=>ee_q );
+        port map ( clk=>clk,
+                   addr_a=>v_addr(9 downto 1), din_a=>v_do,
+                   we_a=>we_ee, uds_a_n=>v_uds_n, lds_a_n=>v_lds_n, q_a=>ee_q,
+                   addr_b=>ee_saddr, din_b=>ee_sdin_w,
+                   we_b=>ee_swe, uds_b_n=>'1', lds_b_n=>'0', q_b=>ee_sq_w );
+    ee_sdin_w <= x"FF" & ee_sdin;
+    ee_sq     <= ee_sq_w(7 downto 0);
+    -- dirty trigger: a CPU store that actually reaches an EEPROM byte
+    ee_wrpulse <= we_ee and not v_lds_n;
 
     -- v58 hot-code shadows: 32K x 16 dpram each; port A = CPU fetch (read),
     -- port B = download fill. In-range fetches bypass the ROM arbiter and use
