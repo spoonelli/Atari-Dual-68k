@@ -256,7 +256,7 @@ architecture rtl of escape_core is
     -- at scanline 0; instant application tore animated-scroll screens
     signal xs_pend, ys_pend : std_logic_vector(8 downto 0);
     signal intensity : std_logic_vector(3 downto 0);
-    signal virq, vblank_d, v_pc_seen : std_logic;
+    signal v_virq, e_virq, vblank_d, v_pc_seen : std_logic;
 
     -- even parity over the 32-bit ROM delivery (checked against rom_par)
     function parity32(v : std_logic_vector(31 downto 0)) return std_logic is
@@ -442,8 +442,19 @@ begin
     -- transitions. Coin-in routes through the JSA (6502 reads the switches,
     -- reports over the sound link) so coins need this live.
     v_ipl <= "001" when jsa_snd_irq='1' else
-             "011" when virq='1' else "111";
-    e_ipl <= "011" when virq='1' else "111";     -- VBLANK also interrupts the extra CPU
+             "011" when v_virq='1' else "111";
+    -- SDSCHED-87: PER-CPU vblank latches. The '86 flight-recorder readout
+    -- proved the freeze is a LOST WAKEUP: the extra parks in the ROM's
+    -- critical-section poll loop (0x9B4-0x9D8: save SR / mask to level 5 /
+    -- test flag / restore / loop - a ~30-clk IRQ window per ~60-clk pass)
+    -- while the shared virq was cleared by the MAIN's ack ~7.5us after
+    -- vblank. Both CPUs run lockstep on one clock: when the loop phase-
+    -- locks against the main's ack, the extra misses EVERY frame forever.
+    -- Every speed change shifted the freeze odds because it moved the
+    -- main's ack timing. Per-CPU latches: each interrupt pends until THAT
+    -- CPU acks - can't be stolen, can't double-fire (both ISRs ack 360000,
+    -- see LANE3l).
+    e_ipl <= "011" when e_virq='1' else "111";
     -- autovector: assert VPA during interrupt acknowledge (FC=111), per schematic 60L/55L
     v_vpa_n <= '0' when v_fc="111" and v_as_n='0' else '1';
     e_vpa_n <= '0' when e_fc="111" and e_as_n='0' else '1';
@@ -1257,13 +1268,14 @@ begin
         if rising_edge(clk) then
             if reset_n='0' then
                 extra_release <= '0'; video_off <= '0'; intensity <= (others=>'0');
-                virq <= '0'; vblank_d <= '0'; v_pc_seen <= '0';
+                v_virq <= '0'; e_virq <= '0'; vblank_d <= '0'; v_pc_seen <= '0';
                 xscroll <= (others=>'0'); yscroll <= (others=>'0');
                 xs_pend <= (others=>'0'); ys_pend <= (others=>'0');
             else
                 vblank_d <= vblank_in;
                 if vblank_in='1' and vblank_d='0' then
-                    virq <= '1';
+                    v_virq <= '1';
+                    e_virq <= '1';
                     xscroll <= xs_pend;       -- v83: frame-latched scroll
                     yscroll <= ys_pend;
                 end if;
@@ -1280,7 +1292,7 @@ begin
                 if e_as_n='0' and e_rw_n='0'
                    and e_addr(23 downto 16) = x"36" and e_addr(5 downto 4) = "00"
                    and e_addr(3 downto 1) = "000" then                 -- LANE4j: exact
-                    virq <= '0';                                       -- 360000 ack (extra)
+                    e_virq <= '0';                                     -- extra acks ITS latch
                 end if;
 
                 if v_as_n='0' and v_rw_n='0' and v_sel_vctl='1' then
@@ -1295,7 +1307,7 @@ begin
                     case v_addr(5 downto 4) is
                         when "00"   =>                                 -- 360000-01 only
                             if v_addr(3 downto 1)="000" then
-                                virq <= '0';                           -- vblank ack
+                                v_virq <= '0';                         -- main acks ITS latch
                             end if;
                         when "01"   =>                                 -- 360011 byte only
                             if v_addr(3 downto 1)="000" and v_lds_n='0' then
