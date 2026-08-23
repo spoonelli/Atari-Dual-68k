@@ -747,6 +747,7 @@ set_global_assignment -name VHDL_FILE core/rtl/escape_core.vhd
 set_global_assignment -name VHDL_FILE core/rtl/TMS5220.vhd
 set_global_assignment -name VHDL_FILE core/rtl/escape_jsa.vhd
 set_global_assignment -name VHDL_FILE core/rtl/dpram_dc.vhd
+set_global_assignment -name VHDL_FILE core/rtl/ee_save.vhd
 # MIX-100: jt51 sources listed explicitly. Two files are VENDORED
 # (per-channel user gain); the rest still come from the pristine
 # submodule so upstream fixes flow in normally. Replaces the former

@@ -12,6 +12,19 @@
                     "rom"
                 ],
                 "address": "0x10000000"
+            },
+            {
+                "name": "EEPROM",
+                "id": 2,
+                "required": false,
+                "parameters": "0x00000020",
+                "filename": "atari_escape.sav",
+                "extensions": [
+                    "sav"
+                ],
+                "address": "0x20000000",
+                "size_maximum": 512,
+                "nonvolatile": true
             }
         ]
     }
