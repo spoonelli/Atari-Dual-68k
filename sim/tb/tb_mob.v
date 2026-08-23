@@ -1,14 +1,24 @@
 // tb_mob: the REAL escape_mob.v against REAL in-game state dumped live from
 // MAME mid-gameplay (robots + player on screen): MO RAM, SLIP/config RAM,
-// scroll registers, and the real chunky gfx. Renders one frame of the MO
-// layer to mob_pixels.txt; sim/tools/check_mob_frame.py turns it into an
-// image for direct comparison against the synchronized MAME screenshot.
+// playfield + playfield-palette RAM, scroll registers, and the real chunky
+// gfx. Fixtures come from sim/tools/make_scene_hex.py.
 //
-// The question this answers: where do in-game sprites actually land under
-// real nonzero scroll (x~123 y~253)? On device they are invisible in-game
-// while attract sprites (scroll 0) are pixel-perfect.
+// Renders one frame of the MO layer to sim/build/mob_pixels.txt
+// ("<x> <y> <pen> <prio>"); sim/tools/render_scene.py turns that into an image
+// for direct comparison against the synchronized MAME screenshot.
 //
-// Run: sim/run_mob_tb.sh
+// MOPRI-1: it also drives escape_prio.v with the real MO and playfield fields
+// and logs every priority decision to sim/build/mob_prio.txt, which
+// sim/tools/check_mob_prio.py replays through the reference model
+// (sim/tools/mo_priority_model.py). See docs/mo_priority.md.
+//
+// The other question this answers: where do in-game sprites actually land under
+// real nonzero scroll? On device they are invisible in-game while attract
+// sprites (scroll 0) are pixel-perfect. (Still open - the MO layer here overlaps
+// MAME's on only a fraction of its pixels; that is a placement bug in the line
+// engine, not a priority one.)
+//
+// Run: MOB_PARAMS='-PXSCROLL=224 -PYSCROLL=421' sim/run_mob_tb.sh
 `timescale 1ns/1ps
 
 module tb_mob;
