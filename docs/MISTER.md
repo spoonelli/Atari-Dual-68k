@@ -326,11 +326,12 @@ this port's weak point. Note the DSP figure: 76 blocks, more than the Pocket
 device even has (66), because the MiSTer scaler and `ascal` use multipliers the
 APF path does not.
 
-### Timing: two real bugs, found and fixed
+### Timing: one real bug, one broken gate, and a wrong hypothesis
 
 The first CI build reported **success while carrying -5.538 ns of setup and
--10.922 ns of hold slack** on the 35.8 MHz SDRAM domain. Both the violation and
-the fact that it got through are worth recording.
+-10.922 ns of hold slack** on the 35.8 MHz SDRAM domain. Three things are worth
+recording: why it got through, what actually caused it, and what nearly got
+shipped as a "fix".
 
 **The gate was broken.** The workflow's "fail on negative slack" step grepped
 for `^; *-[0-9]` in the STA report. The slack lives in the *second* column of
@@ -339,22 +340,54 @@ passed vacuously — a check that could never fire, reporting success. It is now
 `src/mister/check_slack.py`, which parses the table columns, covers setup, hold,
 recovery, removal and minimum pulse width, and **fails if an expected table is
 missing** rather than reporting a clean bill of health for a table it never
-found. It was verified by running it against the failing report, where it
-correctly flags both violations.
+found. It was verified against the failing report, where it correctly names
+both violations.
 
-> This is the `docs/LESSONS.md` pattern again, in a new place: a measurement
-> that cannot fail is worse than no measurement, because it manufactures
-> confidence. Any new gate should be tested against a known-bad input before it
-> is trusted.
+> This is the `docs/LESSONS.md` pattern in a new place: a measurement that
+> cannot fail is worse than no measurement, because it manufactures confidence.
+> Test every new gate against a known-bad input before trusting it.
 
-**The hold violation was self-inflicted.** `escape.sdc` carried
+**The cause was one line of SDC.** `escape.sdc` carried
 `set_multicycle_path -setup -end 2` from `SDRAM_CLK` to the controller clock,
 copied from the reference core. A setup multicycle with `-end` also pushes the
 *hold* check out by one destination period, so the analyser demanded that SDRAM
-read data still be in flight 27.9 ns after launch. Adding the matching
-`set_multicycle_path -hold -end 1` puts the hold check back on the edge it
-belongs to. (The reference core omits it too, so it likely carries the same
-latent violation.)
+read data still be in flight 27.9 ns after launch. That produced the -10.922 ns
+hold failure directly — and the -5.538 ns setup failure was **collateral
+damage**: the fitter padded routing delay trying to satisfy an impossible hold
+requirement, and that padding broke setup elsewhere in the same domain. Adding
+the matching `set_multicycle_path -hold -end 1` fixed both at once:
+
+| 35.8 MHz SDRAM domain | before | after |
+|---|---|---|
+| Setup slack | **-5.538 ns** | **+15.133 ns** |
+| Hold slack | **-10.922 ns** | **+0.253 ns** |
+
+(The reference core omits the hold multicycle too, so it likely carries the
+same latent violation.)
+
+**The wrong hypothesis, recorded because it was nearly shipped.** Before the
+detailed report existed, the setup failure was attributed by elimination to the
+zero-wait fastpath's address cone: `escape_core` exports `fast_v_addr`
+*combinationally* from the live CPU bus, that cone crosses 7.16 → 35.8 MHz, and
+it was the only transfer into that domain with a deep combinational source. The
+argument was structurally sound, and a build shipped briefly with
+`FASTPATH_EN=0` on the strength of it. The measured path says otherwise:
+
+```
+From: escape_core|TG68K:vcpu|TG68KdotC_Kernel:cpu1|RDindex_A[2]
+To:   escape_mister|fpv_spec_s
+Setup slack: +15.537 ns   (budget 27.939 ns)
+```
+
+The cone was never close to failing. `FASTPATH_EN` is back to **1**, and the
+zero-wait path is fully enabled on MiSTer. Read the timing report, not the
+hypothesis — which is precisely the discipline this project's history is built
+on, applied to its own author.
+
+**Where the critical path actually is now:** the worst setup path in the entire
+design is inside the MiSTer framework's `ascal` HDMI scaler
+(`ascal|o_hcpt[5]` → `ascal|o_vcpt_pre3[5]`, +0.527 ns), not in this core. The
+game logic has an order of magnitude more margin than the framework it sits in.
 
 ---
 
@@ -416,35 +449,18 @@ in `src/mister/files.qip`, there is no `psram` instance in the MiSTer hierarchy,
 and the DE10-Nano has no such device. The held one-variable experiment on the
 Pocket side is unaffected by anything in this port.
 
-### Can the fastpath come back on this device?
+### A note for whoever checks the Pocket build
 
-**Yes — it is not structurally Pocket-only.** Nothing about the DE10-Nano
-prevents it; the blocker is the shape of the crossing, and the same shape exists
-on the Pocket.
+The fastpath cone that was wrongly blamed here exists on the Pocket too, at the
+same 27.939 ns budget, on *slower* silicon (5CEBA4 speed grade 8 versus this
+board's grade 7). It measures +15.537 ns here, so it is very unlikely to be a
+problem there either.
 
-The correct re-enable moves the *comparison* rather than the address:
-
-* Keep a registered, one-CPU-clock-stale copy of `fast_v_addr` for the **issue**
-  path only. Staleness there is harmless — the worst case is a speculative read
-  of an address the CPU has already moved past, and ROM is read-only.
-* Cross `fpv_tag` and `fpv_valid` the other way, into the CPU clock domain, and
-  compute `fast_v_ready` **there**, combinationally against the *live*
-  `fast_v_addr`. Those two signals change only at grant and completion, so their
-  crossing is slow and easy to time.
-
-That keeps the invariant the design depends on — "ready means this data is for
-the address you are asking for *right now*" — while removing the deep cone from
-the timed cross-domain path. It is maybe thirty lines. It is also new logic in
-the most safety-critical path in the machine, so it wants a bench and a
-hardware A/B, not a late-session edit.
-
-Worth noting for whoever picks this up: the same cone exists on the Pocket at
-the same 27.939 ns budget on *slower* silicon (5CEBA4 speed grade 8 versus this
-board's grade 7), and the Pocket's CI has **no timing gate at all** — it
-compiles, bit-reverses and uploads. So the Pocket build may well be carrying
-this violation too, unmeasured. `src/mister/check_slack.py` is not
-MiSTer-specific and can be pointed at `src/fpga/output_files/ap_core.sta.rpt`
-as-is.
+The SDC bug is a different matter. The Pocket's CI has **no timing gate at
+all** — it compiles, bit-reverses and uploads — so if `src/fpga/` ever grows the
+same setup-multicycle-without-hold-multicycle pattern, nothing would catch it.
+`src/mister/check_slack.py` is not MiSTer-specific and can be pointed straight
+at `src/fpga/output_files/ap_core.sta.rpt`.
 
 ---
 

@@ -347,62 +347,31 @@ always @(posedge clk_sys)    core_rom_ack_s_q <= core_rom_ack_85;
 wire core_rom_ack_s = core_rom_ack_s_q;
 
 // ---- zero-wait per-CPU fastpath caches (SDSCHED-88) -----------------------
+// ON, and measured: the worst path across this 7.16 -> 35.8 MHz crossing is
+//     escape_core|TG68K:vcpu|TG68KdotC_Kernel:cpu1|RDindex_A[2]  ->  fpv_spec_s
+// at +15.537 ns of setup slack against a 27.939 ns budget.
 //
-// DISABLED ON MiSTer.  This is the fix for the -5.538 ns setup violation the
-// first build carried, and it is a deliberate, named limitation rather than a
-// tuning choice.  Full reasoning in docs/MISTER.md "Timing"; in short:
+// That is worth recording because this port briefly shipped FASTPATH_EN=0 on
+// the theory that this cone caused the first build's -5.538 ns setup failure.
+// It did not. The real cause was entirely in escape.sdc: a setup multicycle on
+// the SDRAM read return with no matching hold multicycle demanded that read
+// data still be in flight 27.9 ns after launch, the fitter padded routing to
+// chase an impossible hold requirement, and the setup failure was collateral
+// damage from that padding. Fixing the SDC took the 35.8 MHz domain from
+// -5.538/-10.922 to +15.133/+0.253 with this fastpath left fully enabled.
 //
-//   escape_core exports fast_v_addr / fast_e_addr COMBINATIONALLY from the
-//   live CPU bus - that is the whole point of the design, it lets the SDRAM
-//   side start a speculative read a full CPU clock before AS falls.  The cone
-//   therefore runs from a TG68K register, through escape_core's address
-//   decode, across the 7.16 -> 35.8 MHz boundary into fpv_addr_s, and it does
-//   not fit the 27.939 ns budget that a 5:1 related-clock crossing gets.
-//
-// The two obvious "fixes" are both worse than the fallback:
-//
-//   * A multicycle on that crossing lets the capture register sample a
-//     mid-flight address.  fpv_tag is set from fpv_addr_s and the serve is
-//     gated on fpv_tag == fpv_addr_s, so a garbled sample can serve a CPU data
-//     for an address it never asked for.  That is the wrong-instruction bug
-//     class this project spent ~25 builds on (v14-v19, v38-v42, SDSCHED-76).
-//     No timing win is worth reopening it.
-//   * Simply REGISTERING fast_v_addr before it crosses is unsafe for exactly
-//     the same reason: fpv_addr_s would then lag the CPU's real address by a
-//     CPU clock, and fast_v_ready means "this data is for your CURRENT
-//     address".  A stale compare re-creates the same failure.
-//
-// A correct re-enable exists and is NOT Pocket-specific - see docs/MISTER.md
-// "Can the fastpath come back?".  It needs the tag comparison moved into the
-// CPU clock domain (compare a slow-changing tag against the LIVE address, and
-// let only the issue path use a registered address, where staleness is
-// harmless).  That is real new logic in the most safety-critical path in the
-// design, and it is not something to write untested at the end of a session.
-//
-// What it costs here: CPU ROM fetches that MISS the 64 KB per-CPU hot-code
-// shadows now pay the legacy arbiter round trip instead of being prefetched.
-// Fetches inside the shadows are unaffected and remain zero-wait, which is the
-// large majority of executed code.  On this platform it also has a real
-// upside: speculative fills are pure extra SDRAM traffic, and this port's bus
-// is roughly three times more contended than the Pocket's (see "Bandwidth
-// budget"), so removing them buys back bandwidth the playfield now needs.
-localparam FASTPATH_EN = 0;
+// The lesson is the project's own: the elimination argument for blaming this
+// cone was sound and wrong. Read the timing report, not the hypothesis.
+localparam FASTPATH_EN = 1;
 localparam TASLOCK_EN  = 1;
 wire [23:0] fpv_addr_w, fpe_addr_w;
 wire        fpv_spec_w, fpe_spec_w;
 reg  [23:0] fpv_addr_s = 24'd0, fpe_addr_s = 24'd0;
 reg         fpv_spec_s = 1'b0, fpe_spec_s = 1'b0;
-generate
-if (FASTPATH_EN) begin : g_fastpath_sample
-    // Only sampled when the fastpath is on.  Guarded structurally rather than
-    // left to synthesis pruning so the offending cross-domain cone is provably
-    // absent from the netlist, not merely expected to be optimised away.
-    always @(posedge clk_sdram) begin
-        fpv_addr_s <= fpv_addr_w;  fpv_spec_s <= fpv_spec_w;
-        fpe_addr_s <= fpe_addr_w;  fpe_spec_s <= fpe_spec_w;
-    end
+always @(posedge clk_sdram) begin
+    fpv_addr_s <= fpv_addr_w;  fpv_spec_s <= fpv_spec_w;
+    fpe_addr_s <= fpe_addr_w;  fpe_spec_s <= fpe_spec_w;
 end
-endgenerate
 reg  [23:0] fpv_tag = 24'd0, fpe_tag = 24'd0;
 reg         fpv_valid = 1'b0, fpe_valid = 1'b0;
 reg         fpv_vpre  = 1'b0, fpe_vpre  = 1'b0;
