@@ -30,9 +30,11 @@
 //              reference reads pfpriority as (pf[x] >> 4) & 3
 //   PFX3       playfield pixel bit 3 = pf_pix[3]  (reference: pf[x] & 8)
 //
-// MPR2 never reaches this module: escape_mob.v suppresses the line-buffer
-// write for special (mopriority & 4) sprites, which is what the reference's
-// first pass does with `continue`.
+// MPR2 never reaches this module. escape_mob.v does write special
+// (mopriority & 4) pixels into the line buffer - they have to be there to mask
+// normal sprites and to drive the stain pass (MOSTAIN-1) - but it clears
+// disp_valid for them, so this comparator sees exactly what the reference's
+// first pass sees after its `continue`.
 //
 // The two derived facts below are proved exhaustively by sim/tb/tb_prio.v
 // against sim/tools/mo_priority_model.py (a literal transcription of the
