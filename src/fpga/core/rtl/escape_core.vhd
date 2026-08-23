@@ -31,7 +31,34 @@ entity escape_core is
         -- un-ready for 16 clks (never-wedge fallback - also what testbenches
         -- that drive no fast ports land on). 0 = legacy arbiter exactly as
         -- before, speculative prefetch included.
-        FASTPATH_EN : integer := 1
+        FASTPATH_EN : integer := 1;
+        -- ZEROWAIT-92: extra-CPU vblank IRQ semantics. The 87-91 saga's
+        -- root cause (worldwake bench, docs/NIGHT-ANALYSIS.md): the real
+        -- extra ROM boots IRQ-MASKED into a multi-frame POST and its
+        -- vblank ISR (0x908, no 360000 store) writes through RAM state
+        -- that only runtime init makes valid - so a vblank latched across
+        -- the masked POST and delivered at the first unmask derails POST
+        -- itself (endless restart loop = builds 87-91 world-death), while
+        -- a latch cleared by the main's ~60-clk ack (build 86) starves
+        -- the runtime poll loop whenever its masked stretch outgrows the
+        -- pulse (the build-86 phase-locked freeze). Modes:
+        --   0 = BUILD-86 shared pulse: e_virq set at vblank, cleared by
+        --       the MAIN's 360000 ack (and either CPU's own write). The
+        --       authentic board model; lost-wakeup risk under lockstep.
+        --   1 = BUILD-91 held-until-taken: pends until the extra's IACK
+        --       completes. No lost wakeup - but delivers stale vblanks
+        --       into POST's unmask instant on EVERY boot (world-death).
+        --   2 = ARMED held-until-taken (the fix): held-until-IACK, but
+        --       delivery only arms once the extra demonstrably runs its
+        --       runtime poll loop - two completed reads of the wake-flag
+        --       word ($16CCD6) within ~1K clks with no intervening write
+        --       to it. POST marches (write/read pairs, one visit) and
+        --       checksum sweeps (single reads, frames apart) can't arm;
+        --       the poll loop arms on its second pass. Disarmed whenever
+        --       the main stops the extra. Zero premature delivery, zero
+        --       lost wakeup. (Flag address is game code, not board
+        --       hardware: revisit for Klax/Guts variants.)
+        EIRQ_MODE : integer := 2
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -283,6 +310,15 @@ architecture rtl of escape_core is
     signal intensity : std_logic_vector(3 downto 0);
     signal v_virq, e_virq, vblank_d, v_pc_seen : std_logic;
     signal e_iack_pend : std_logic := '0';
+    -- EIRQ_MODE 2 arming detector (see generic comment): completed e-side
+    -- reads of the wake-flag word, aged, reset by writes to it
+    signal e_arm        : std_logic := '0';
+    signal e_flag_rd_d  : std_logic := '0';
+    signal e_flag_wr_d  : std_logic := '0';
+    signal e_flag_cnt   : unsigned(1 downto 0) := "00";
+    signal e_flag_age   : unsigned(9 downto 0) := (others=>'0');
+    signal e_flag_hit   : std_logic;
+    signal e_flag_rd, e_flag_wr : std_logic;
 
     -- even parity over the 32-bit ROM delivery (checked against rom_par)
     function parity32(v : std_logic_vector(31 downto 0)) return std_logic is
@@ -1359,20 +1395,57 @@ begin
             if reset_n='0' then
                 extra_release <= '0'; video_off <= '0'; intensity <= (others=>'0');
                 v_virq <= '0'; e_virq <= '0'; e_iack_pend <= '0'; vblank_d <= '0'; v_pc_seen <= '0';
+                e_arm <= '0'; e_flag_cnt <= "00"; e_flag_age <= (others=>'0');
+                e_flag_rd_d <= '0'; e_flag_wr_d <= '0';
                 xscroll <= (others=>'0'); yscroll <= (others=>'0');
                 xs_pend <= (others=>'0'); ys_pend <= (others=>'0');
             else
                 vblank_d <= vblank_in;
+
+                -- EIRQ_MODE 2 arming detector: two completed e-side reads
+                -- of the wake-flag word within ~1K clks, no intervening
+                -- write to it. The runtime poll loop is the only code with
+                -- that access shape (POST marches pair every read with a
+                -- write; checksum sweeps revisit an address frames apart).
+                e_flag_rd_d <= e_flag_rd;
+                e_flag_wr_d <= e_flag_wr;
+                if e_flag_age /= "1111111111" then
+                    e_flag_age <= e_flag_age + 1;
+                end if;
+                if extra_release='0' then
+                    e_arm <= '0'; e_flag_cnt <= "00";
+                elsif e_flag_wr='1' and e_flag_wr_d='0' then
+                    e_flag_cnt <= "00";
+                elsif e_flag_rd='1' and e_flag_rd_d='0' then
+                    if e_flag_cnt = "00" or e_flag_age = "1111111111" then
+                        e_flag_cnt <= "01";
+                    else
+                        e_arm <= '1';
+                    end if;
+                    e_flag_age <= (others=>'0');
+                end if;
+
                 if vblank_in='1' and vblank_d='0' then
                     v_virq <= '1';
-                    -- 87b: only latch for a RUNNING extra CPU. A stale
-                    -- pending vblank from before release fired the instant
-                    -- POST unmasked - derailing the Second Processor
-                    -- handshake (boot hang, no coin-in). The old shared
-                    -- latch was accidentally boot-safe because the main's
-                    -- acks kept clearing it.
-                    if extra_release='1' then
+                    -- 87b lesson, completed by the ZEROWAIT-92 worldwake
+                    -- bench: gating the latch on extra_release is NOT
+                    -- enough - the extra's own POST runs IRQ-masked for
+                    -- whole frames AFTER release, and a vblank held
+                    -- across that mask derails POST at its first unmask
+                    -- (the 87-91 world-death). Mode 2 therefore also
+                    -- requires the poll-loop arming signature; mode 0 is
+                    -- the build-86 shared pulse (cleared by main's ack
+                    -- below); mode 1 is the build-91 latch, kept for A/B.
+                    if EIRQ_MODE = 0 then
                         e_virq <= '1';
+                    elsif EIRQ_MODE = 1 then
+                        if extra_release='1' then
+                            e_virq <= '1';
+                        end if;
+                    else
+                        if extra_release='1' and e_arm='1' then
+                            e_virq <= '1';
+                        end if;
                     end if;
                     xscroll <= xs_pend;       -- v83: frame-latched scroll
                     yscroll <= ys_pend;
@@ -1405,20 +1478,22 @@ begin
                 -- extra spun awake-but-unwoken at ~21k cyc/frame, no world,
                 -- run-light red). Real devices hold the level through the
                 -- acknowledge; so do we.
-                if e_fc = "111" and e_as_n='0' then
-                    e_iack_pend <= '1';                                -- taking it now
-                end if;
-                if e_iack_pend='1' and e_as_n='1' then
-                    e_virq      <= '0';                                -- taken: IACK done
-                    e_iack_pend <= '0';
+                if EIRQ_MODE /= 0 then
+                    if e_fc = "111" and e_as_n='0' then
+                        e_iack_pend <= '1';                            -- taking it now
+                    end if;
+                    if e_iack_pend='1' and e_as_n='1' then
+                        e_virq      <= '0';                            -- taken: IACK done
+                        e_iack_pend <= '0';
+                    end if;
+                    if extra_release='0' then
+                        e_virq <= '0';                                 -- no pending across reset
+                    end if;
                 end if;
                 if e_as_n='0' and e_rw_n='0'
                    and e_addr(23 downto 16) = x"36" and e_addr(5 downto 4) = "00"
                    and e_addr(3 downto 1) = "000" then                 -- LANE4j: exact
                     e_virq <= '0';                                     -- explicit ack
-                end if;
-                if extra_release='0' then
-                    e_virq <= '0';                                     -- no pending across reset
                 end if;
 
                 if v_as_n='0' and v_rw_n='0' and v_sel_vctl='1' then
@@ -1434,6 +1509,9 @@ begin
                         when "00"   =>                                 -- 360000-01 only
                             if v_addr(3 downto 1)="000" then
                                 v_virq <= '0';                         -- main acks ITS latch
+                                if EIRQ_MODE = 0 then
+                                    e_virq <= '0';                     -- 86: shared pulse
+                                end if;
                             end if;
                         when "01"   =>                                 -- 360011 byte only
                             if v_addr(3 downto 1)="000" and v_lds_n='0' then
@@ -1463,6 +1541,12 @@ begin
             end if;
         end if;
     end process;
+    -- EIRQ_MODE 2 arming decode: the extra's wake-flag word ($16CCD6).
+    -- Game code knowledge, not board hardware (like the mailbox forensics
+    -- decodes): revisit for the Klax/Guts variants.
+    e_flag_hit <= '1' when e_addr(23 downto 1) & '0' = x"16CCD6" else '0';
+    e_flag_rd  <= '1' when e_sel_ram='1' and e_rw_n='1' and e_flag_hit='1' else '0';
+    e_flag_wr  <= '1' when e_sel_ram='1' and e_rw_n='0' and e_flag_hit='1' else '0';
     ---------------------------------------------------------------- ADC0809
     -- Hall-effect joystick digitizer. A read of 260020+2n returns the last
     -- completed conversion in the low byte, then latches channel n (A2..A1)

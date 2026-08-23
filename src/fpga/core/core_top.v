@@ -1767,7 +1767,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3091;   // zerowait: IACK-completion clear (hold IPL through vector gen) - screen shows '91'
+    localparam [15:0] BUILD_ID = 16'h3092;   // zerowait: ARMED extra-vblank latch (POST-derail + lost-wakeup fix) - screen shows '92'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2201,7 +2201,9 @@ hall_stick hall_p2 (
     .joy_x ( cont2_joy[7:0] ), .joy_y ( cont2_joy[15:8] ),
     .adc_x ( adc_p2x ),        .adc_y ( adc_p2y )
 );
-escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN)) ecore (
+// EIRQ_MODE 2 = ZEROWAIT-92 armed extra-vblank latch (worldwake-bench
+// validated; see escape_core generic comment + docs/NIGHT-ANALYSIS.md)
+escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(2)) ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
     .rom_addr   ( core_rom_addr ),
