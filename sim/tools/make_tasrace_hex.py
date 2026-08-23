@@ -210,11 +210,15 @@ m.w(0x4A79, *lw(IDLE))                                # tst.w IDLE
 m.beq_s("WIDLE")
 m.w(0x4239, *lw(LOCKB))                               # lock is now certainly free
 m.w(0x5242)                                           # addq.w #1,d2   (trials)
-m.w(0x33C2, *lw(R_TRI))
+# TRIALS IS PUBLISHED LAST, on purpose. The bench samples these words while
+# the CPU is running, so a sample taken mid-publish must never show more
+# trials than it shows outcomes - otherwise "acquires != trials" fires on a
+# sampling skew rather than on a real miss.
 m.w(0x33C3, *lw(R_SWA))
 m.w(0x33C4, *lw(R_STK))
 m.w(0x33C5, *lw(R_AQQ))
 m.w(0x33C6, *lw(R_PHA))
+m.w(0x33C2, *lw(R_TRI))
 m.w(0x5246)                                           # addq.w #1,d6
 m.w(0x0C46, PHASES)                                   # cmpi.w #PHASES,d6
 m.bne_s("NEXT")

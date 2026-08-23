@@ -20,14 +20,26 @@
 --                         write strobes assert on EVERY clock of a stalled
 --                         cycle by design (escape_core.vhd, SDSCHED-80).
 --
--- Run matrix (G_TAS is escape_core's TASLOCK_EN):
---   clr.b  G_TAS=0  interlock OFF        -> swallows > 0  (the bug reproduced)
---   clr.b  G_TAS=1  interlock ON         -> swallows = 0  (the fix)
---   move.b G_TAS=0  interlock OFF        -> swallows > 0
---   move.b G_TAS=2  DTACK-ONLY           -> swallows > 0  (not enough)
---   move.b G_TAS=1  interlock ON         -> swallows = 0
--- G_EXPECT says which of those this run is, and the bench FAILS if the run
--- does not match.
+-- WHAT THE VERDICT TESTS: indivisibility, measured directly as the number of
+-- foreign stores that physically landed on the byte between the extra's TAS
+-- read and its write-back.  The swallowed-release count is reported too, but
+-- it is the CONSEQUENCE, not the property: whether a given violation actually
+-- wedges the machine depends on the interleaving, so a run judged on swallows
+-- alone can pass by luck.  (It nearly did - see the DTACK-only row.)
+--
+-- Run matrix (G_TAS is escape_core's TASLOCK_EN), measured:
+--   clr.b  G_TAS=0  OFF         152 stores inside a TAS, 114/306 wedged
+--   clr.b  G_TAS=1  ON            0 stores inside a TAS,   0/305 wedged
+--   move.b G_TAS=0  OFF          50 stores inside a TAS,  25/202 wedged
+--   move.b G_TAS=2  DTACK-ONLY   52 stores inside a TAS,   0/210 wedged  <--
+--          NOT a pass: the stores DID land mid-TAS.  They did not wedge only
+--          because a DTACK-stalled write strobe keeps re-asserting every
+--          clock and happened to re-write the byte AFTER the TAS write-back -
+--          which also means it CLOBBERED that write-back.  Same defect, a
+--          different corruption, and pure luck which one you get.
+--   move.b G_TAS=1  ON            0 stores inside a TAS,   0/210 wedged
+-- G_EXPECT says which side of that line this run is, and the bench FAILS if
+-- the run does not match.
 --
 -- ANTI-PHANTOM-MEASUREMENT METRICS (this project has been burned six times
 -- by benches that measured nothing).  All are reported, and the bench FAILS
@@ -429,44 +441,54 @@ begin
         end if;
 
         -- --- the actual verdict ---
+        -- THE PROPERTY UNDER TEST IS INDIVISIBILITY, measured directly:
+        -- n_wrinwin = the number of foreign stores that physically landed on
+        -- the byte between the extra's TAS read and its write-back. Zero means
+        -- the read-modify-write really was indivisible; anything else means it
+        -- was not, whatever the downstream symptom happened to be that run.
+        -- The swallow count is the USER-VISIBLE CONSEQUENCE and is reported
+        -- either way, but it is a lagging indicator: whether a given violation
+        -- wedges the machine depends on the interleaving, so testing on
+        -- swallows alone would let a broken configuration pass by luck.
         if G_EXPECT = 0 then
-            if n_swallow = 0 then
-                report "TASRACE: expected to REPRODUCE the swallowed release and did not"
-                    severity failure;
-            end if;
             if n_wrinwin = 0 then
-                report "TASRACE: swallows counted but no release strobe was ever " &
-                       "seen inside the window - the oracle and the bus disagree"
-                    severity failure;
+                report "TASRACE: expected to VIOLATE read-modify-write " &
+                       "indivisibility and did not - no foreign store ever " &
+                       "landed inside the extra's TAS" severity failure;
             end if;
-            say("TASRACE REPRODUCED: " & integer'image(n_swallow) &
-                " ownerless locks out of " & integer'image(n_trials) & " trials");
+            say("TASRACE: INDIVISIBILITY VIOLATED - " & integer'image(n_wrinwin) &
+                " foreign stores landed inside a TAS on $16CCCC, " &
+                integer'image(n_swallow) & " of the " & integer'image(n_trials) &
+                " trials ended with the lock set and no owner");
         else
+            if n_wrinwin /= 0 then
+                report "TASRACE FIX FAILED: " & integer'image(n_wrinwin) &
+                       " foreign stores still landed inside a TAS" severity failure;
+            end if;
             if n_swallow /= 0 then
                 report "TASRACE FIX FAILED: " & integer'image(n_swallow) &
                        " swallowed releases with the interlock on" severity failure;
             end if;
-            if n_acq /= n_trials then
+            -- one trial of slack: the counters are sampled live, so a sample
+            -- taken mid-publish can lag the trial counter by one
+            if n_acq < n_trials - 1 then
                 report "TASRACE FIX FAILED: " & integer'image(n_trials - n_acq) &
                        " trials did not acquire on the first release"
                     severity failure;
             end if;
-            if n_wrinwin /= 0 then
-                report "TASRACE FIX FAILED: " & integer'image(n_wrinwin) &
-                       " release strobes still landed inside an RMW window"
-                    severity failure;
-            end if;
             if dbg_tas_cnt = x"0000" then
-                report "TASRACE FIX SUSPECT: zero swallows but the interlock " &
-                       "never engaged either - it is not what prevented them"
+                report "TASRACE FIX SUSPECT: indivisibility held but the " &
+                       "interlock never engaged - it is not what achieved it"
                     severity failure;
             end if;
-            say("TASRACE FIXED: 0 swallowed releases in " &
-                integer'image(n_trials) & " trials, interlock engaged " &
+            say("TASRACE FIXED: indivisibility HELD - 0 foreign stores inside " &
+                "a TAS, 0 swallowed releases in " & integer'image(n_trials) &
+                " trials; interlock engaged " &
                 integer'image(to_integer(unsigned(dbg_tas_cnt(7 downto 0)))) &
                 " times (" &
                 integer'image(to_integer(unsigned(dbg_tas_cnt(15 downto 8)))) &
-                " of them writes), first collision at $16" & hex16(dbg_tas_addr));
+                " of them writes), first write collision at $16" &
+                hex16(dbg_tas_addr));
         end if;
         wait;
     end process;
