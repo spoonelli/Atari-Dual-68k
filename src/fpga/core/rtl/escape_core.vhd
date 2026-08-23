@@ -455,6 +455,7 @@ architecture rtl of escape_core is
     signal shr_a_din  : std_logic_vector(15 downto 0);
     signal shr_a_uds, shr_a_lds : std_logic;
     signal v_addr_q, e_addr_q : std_logic_vector(23 downto 1) := (others=>'0');
+    signal e_bus_yield : std_logic := '0';   -- BUS-99 arbitration wait
     -- SDSCHED-83: registered CPU read-data capture. Both captured impostor
     -- words (080C, 08C4) were recent STACK content served into dispatch
     -- reads of a DIFFERENT memory - the read mux presenting the wrong
@@ -1847,12 +1848,32 @@ begin
                             e_dtack_n <= '0';
                         end if;
                     elsif e_ws='1' then
-                        e_dtack_n <= '0';
+                        -- BUS-99 SHARED-BUS CONTENTION. The real board has ONE
+                        -- arbitrated common bus (EWAI ownership latch, sheet
+                        -- p6) and runs its two 68000s 180 degrees out of phase;
+                        -- when both want memory, one physically WAITS. Our
+                        -- dual-port model lets them run forever without ever
+                        -- stalling each other, so a fixed timing relationship
+                        -- between the CPUs can persist indefinitely - exactly
+                        -- what a "misses the vblank window every frame,
+                        -- forever" wedge requires. Model the arbitration: the
+                        -- extra yields one cycle when the video CPU is using
+                        -- the shared RAM in the same cycle (video CPU owns the
+                        -- bus by default on the real board - it drives the
+                        -- run/halt latch). Costs ~1 clk on contended accesses
+                        -- only; breaks lockstep the way the hardware does.
+                        if e_sel_ram='1' and v_sel_ram='1' and v_as_n='0'
+                           and e_bus_yield='0' then
+                            e_bus_yield <= '1';                -- wait one cycle
+                        else
+                            e_dtack_n   <= '0';
+                            e_bus_yield <= '0';
+                        end if;
                     else
                         e_ws <= '1';
                     end if;
                 else
-                    e_dtack_n <= '1'; e_ws <= '0';
+                    e_dtack_n <= '1'; e_ws <= '0'; e_bus_yield <= '0';
                 end if;
             end if;
         end if;
