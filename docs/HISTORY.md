@@ -105,6 +105,42 @@ Coins raced, sound was one blip in an hour, start never fired.
   placement-invariant read timing, reproducible builds. The structural exit
   from six weeks of lottery.
 
+## Era 6 — The freeze, and the atom that wasn't (build 101–102)
+An intermittent, reboot-only freeze survived eight refuted theories and
+roughly twenty builds: address-qualified waitstates, registered read
+capture, six different vblank-interrupt schemes, the CDC parity gap, a
+mailbox deadlock, and finally shared-bus arbitration. Build 85's flight
+recorder ended it: at the build-101 freeze the extra CPU's last 17 bus
+cycles decoded, byte-exact against the ROM, as one pass of the inter-CPU
+spin-lock acquire at `$9B4`, retrying `tas.b $16CCCC` forever.
+- **Root cause: TAS is not atomic in our machine.** TG68K decodes TAS through
+  the ordinary MOVE path, writes bit 7 back unconditionally, and has no bus
+  lock, so `/AS` is released between the read and the write-back. Our shared
+  RAM is true dual-port with zero interlock. One CPU's `clr.b` release landing
+  in that gap is overwritten with `$80`: the mutex ends up **set with no
+  owner**, and every later acquirer on both CPUs spins forever.
+- The real board cannot do this. `/AS` stays asserted across the whole
+  read-modify-write (M68000UM Rev 9 §5.1.3), and the shared RAM is two
+  *single-ported* SRAMs behind one `/AS`-level ownership mux (SP-332 sheet 5,
+  40M/50M via 30M LS158A on EWAI, loser held in waits by 30D/30L). Atomicity
+  was a property of the *memory fabric*, not of a lock signal — and replacing
+  it with dual-port BRAM deleted it silently. Era-1's lesson again, at the
+  hardest possible altitude.
+- **Fix (102)**: export the CPU kernel's existing `exec_write_back` as a real
+  LOCK output (vendored TG68K, `rtl/tg68kv/`) and let escape_core serialise
+  the other port off that exact byte for the duration — write strobe *and*
+  DTACK, because the strobes assert on every clock of a stalled cycle by
+  design. Bounded by a 64-clock watchdog with a re-arm inhibit, so a stuck
+  LOCK costs the peer one window and never another.
+- **And the fix carries its own proof**: saturating counters of the cycles the
+  interlock actually held off, plus the first colliding address, on HUD page 2.
+  Freezes stop with a non-zero count = mechanism confirmed and cured in one
+  session. Freezes stop with a zero count = the fix is not what helped.
+- Bench: `tb_escape_tasrace` reproduces the swallowed release on the real RTL
+  with both real CPUs and fails the run if it did not actually construct the
+  race; `tb_escape_taswedge` forces a permanently stuck LOCK and proves
+  neither CPU can be starved.
+
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)
 2. SDRAM chip-clock capture phase (v45)

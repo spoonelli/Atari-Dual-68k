@@ -780,10 +780,17 @@ set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiS
 set_global_assignment -name VHDL_FILE core/rtl/escape_decode.vhd
 set_global_assignment -name VHDL_FILE core/rtl/spram_bytelane.vhd
 set_global_assignment -name VHDL_FILE core/rtl/dpram_bytelane_syn.vhd
-set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/TG68K/TG68K.vhd
+# TASLOCK-102: TG68K.vhd and TG68KdotC_Kernel.vhd are VENDORED into
+# core/rtl/tg68kv/ (one added output port each: the LOCK / lock_rmw
+# read-modify-write window - see those files' headers). The submodule copies
+# of those two files must NOT also be listed: same entity names = duplicate
+# definitions. ALU and Pack are untouched and still come from the submodule,
+# so upstream fixes to them flow in normally. Same shape as the jt51v
+# vendoring above.
+set_global_assignment -name VHDL_FILE core/rtl/tg68kv/TG68K.vhd
+set_global_assignment -name VHDL_FILE core/rtl/tg68kv/TG68KdotC_Kernel.vhd
 set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/TG68K/TG68K_ALU.vhd
 set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/TG68K/TG68K_Pack.vhd
-set_global_assignment -name VHDL_FILE ../../third_party/Arcade-Atari-system1_MiSTer/rtl/lib/TG68K/TG68KdotC_Kernel.vhd
 set_global_assignment -name VERILOG_FILE core/core_bridge_cmd.v
 set_global_assignment -name SDC_FILE core/core_constraints.sdc
 set_global_assignment -name SIGNALTAP_FILE core/stp1.stp
