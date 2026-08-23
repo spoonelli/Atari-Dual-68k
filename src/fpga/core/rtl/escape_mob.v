@@ -103,6 +103,7 @@ module escape_mob (
     reg [3:0]  state;
     reg [8:0]  ly;                      // playfield-space line being built
     reg [9:0]  first_link, link;
+    reg [9:0]  nlink;                   // MOFETCH-1: this entry's link, read early
     reg [6:0]  ent_count;
     reg [15:0] w0, w1, w2, w3;
     reg [8:0]  spr_y;
@@ -127,6 +128,16 @@ module escape_mob (
     // matched almost nothing (v79 probe: 97 fetches, 12 pixels/frame).
     wire [8:0] ydiff = (ly + spr_y + {1'b0, height_t, 3'b000} + 9'd8) & 9'h1FF;
     wire       ymatch = ydiff < {height_t, 3'b000} + 9'd8;   // (height+1)*8 lines
+
+    // MOFETCH-1: the same test one cycle EARLIER, straight off the MO RAM bus
+    // rather than off spr_y/height_t. The walk needs the accept/reject verdict
+    // in the cycle w3 lands so a non-matching entry can be dropped without ever
+    // reading w1/w2 - see the S_E2/S_E3 loop below. Identical arithmetic, so
+    // ymatch_e at S_E3 == ymatch at S_WAIT for the same entry, by construction.
+    wire [8:0] e_y     = mo_vdata[15:7];
+    wire [2:0] e_h     = mo_vdata[2:0];
+    wire [8:0] ydiff_e = (ly + e_y + {1'b0, e_h, 3'b000} + 9'd8) & 9'h1FF;
+    wire       ymatch_e = ydiff_e < {e_h, 3'b000} + 9'd8;
 
     // chunky pixel extract with hflip (declared before use for iverilog)
     wire [2:0] pn = hflip ? (3'd7 - blit_n[2:0]) : blit_n[2:0];
@@ -204,10 +215,69 @@ module escape_mob (
                 state <= S_E0;
             end
 
+            // MOFETCH-1: PIPELINED EARLY-REJECT WALK.
+            // The old walk read all four words of every entry in a fixed
+            // 8-cycle sequence, matched or not: 18822 entries visited per 3
+            // frames to find 3858 hits meant ~212 of the 456 cycles in a
+            // scanline went to traversal before a single pixel was fetched, and
+            // EVERY active line aborted mid-build. The real board does not pay
+            // this - Escape's PAL16L8 at 70J drives a dedicated /LINK memory
+            // slot (schematic sheet 7), so list walking costs the pixel
+            // pipeline nothing.
+            //
+            // Only two words decide an entry's fate: w3 (y/height -> ymatch)
+            // and w0 (the link to the next entry). Read those two, in that
+            // order, and issue the NEXT entry's w0 in the very cycle this
+            // entry's w0 lands - the MO RAM read latency is then fully hidden
+            // and a rejected entry costs 2 cycles instead of 8:
+            //
+            //   S_E2: w0 arrives -> nlink;  address {nlink,0}   (speculative)
+            //   S_E3: w3 arrives -> verdict; address {nlink,3}  -> back to S_E2
+            //
+            // The speculative {nlink,0} read is free (the MO RAM port is
+            // otherwise idle) and is simply not latched if the entry matches.
+            // w1/w2 are read only for entries that actually intersect the line,
+            // and a matching entry still reaches S_PRIME in 7 cycles - exactly
+            // as before - so nothing about the blit path shifts in time.
             S_E0: begin mo_vaddr <= {link, 2'd0}; state <= S_E1; end
-            S_E1: begin mo_vaddr <= {link, 2'd1}; state <= S_E2; end
-            S_E2: begin mo_vaddr <= {link, 2'd2}; w0 <= mo_vdata; state <= S_E3; end
-            S_E3: begin mo_vaddr <= {link, 2'd3}; w1 <= mo_vdata; state <= S_MATCH; end
+            S_E1: begin mo_vaddr <= {link, 2'd3}; state <= S_E2; end
+
+            S_E2: begin
+                // w0 on the bus: capture the link and immediately start the
+                // next entry's w0 read, whether or not this entry matches.
+                w0    <= mo_vdata;
+                nlink <= mo_vdata[9:0];
+                mo_vaddr <= {mo_vdata[9:0], 2'd0};
+                state <= S_E3;
+            end
+
+            S_E3: begin
+                // w3 on the bus: geometry + the accept/reject verdict.
+                w3       <= mo_vdata;
+                spr_y    <= mo_vdata[15:7];
+                width_t  <= mo_vdata[6:4];
+                height_t <= mo_vdata[2:0];
+                hflip    <= mo_vdata[3];
+                if(ymatch_e && fetch_budget != 0) begin
+                    // hit: go read w2 then w1 (that order keeps S_MATCH the
+                    // colour/x/prio state it has always been)
+                    mo_vaddr <= {link, 2'd2};
+                    state <= S_WAIT;
+                end else if(nlink == first_link || ent_count == 7'd63
+                            || fetch_budget == 0) begin
+                    // same three terminators S_NEXT applies, just evaluated
+                    // here for entries that never needed w1/w2
+                    state <= S_IDLE;
+                end else begin
+                    ent_count <= ent_count + 7'd1;
+                    link      <= nlink;
+                    mo_vaddr  <= {nlink, 2'd3};
+                    state     <= S_E2;
+                end
+            end
+
+            // one BRAM-latency cycle; ymatch (the registered form) is valid here
+            S_WAIT: begin mo_vaddr <= {link, 2'd1}; state <= S_MATCH; end
 
             S_MATCH: begin
                 w2 <= mo_vdata;                           // color/x/prio
@@ -217,28 +287,18 @@ module escape_mob (
             end
 
             S_FETCH: begin
-                w3 <= mo_vdata;
-                spr_y    <= mo_vdata[15:7];
-                width_t  <= mo_vdata[6:4];
-                height_t <= mo_vdata[2:0];
-                hflip    <= mo_vdata[3];
-                tx <= 0;
-                state <= S_WAIT;
-            end
-
-            S_WAIT: begin
-                // now spr_y etc are valid: decide match and start tile loop
-                if(ymatch && fetch_budget != 0) begin
-                    // code for this row: code + ty*width + tx  (ty = ydiff>>3)
-                    code_row    <= w1[14:0] + ( (ydiff[8:3]) * ({3'b0,width_t}+4'd1) );
-                    row_in_tile <= ydiff[2:0];
-                    tx_f  <= 3'd0;                  // next tile to ISSUE
-                    tx    <= 3'd0;                  // next tile to LATCH/blit
-                    state <= S_PRIME;
-                    blit_n <= 4'd15;                // marker: nothing in flight
-                end else begin
-                    state <= S_NEXT;
-                end
+                // MOFETCH-1: w1 (code) is the LAST word read, so the tile loop
+                // starts straight off the bus. The entry is already known to
+                // match (decided at S_E3), so the old ymatch re-test here is
+                // gone - it can no longer be false.
+                w1 <= mo_vdata;
+                // code for this row: code + ty*width + tx  (ty = ydiff>>3)
+                code_row    <= mo_vdata[14:0] + ( (ydiff[8:3]) * ({3'b0,width_t}+4'd1) );
+                row_in_tile <= ydiff[2:0];
+                tx_f  <= 3'd0;                  // next tile to ISSUE
+                tx    <= 3'd0;                  // next tile to LATCH/blit
+                blit_n <= 4'd15;                // marker: nothing in flight
+                state <= S_PRIME;
             end
 
             // LANE3o: FETCH-AHEAD. The serial issue-wait-blit loop paid the
