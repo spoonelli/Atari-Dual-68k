@@ -280,6 +280,24 @@ Levers, cheapest first, if the artefacts show up:
 4. Raise the SDRAM clock — **blocked**, see the CL2 capture-phase note above.
    Do not reach for this one first just because it looks like the big lever.
 
+**None of the four levers is applied in this build.** Levers 1 and 2 are single
+lines and would probably help, but each diverges from the Pocket for a benefit
+nobody has measured, and this project's history is specifically unkind to
+unmeasured changes — that is why they are written down with their locations
+instead of silently applied. Lever 1 in particular has an obvious A/B: flip it,
+reflash, look at the same dense scene.
+
+**The falsifiable prediction**, so first flash is a test and not just a vibe:
+
+> Dense sprite crowds will drop scanlines *sooner and more often here than on
+> the Pocket* — the same symptom already on the Pocket's known-issues list, at
+> roughly three times the bus pressure. Because the CPUs strictly outrank both
+> video clients, this should degrade the **picture** (missing or stale sprite
+> rows, tile rows repeating from the previous line) and **not** the machine: no
+> boot loops, no wrong behaviour, no audio disruption. If instead you see boot
+> loops or the game misbehaving, the cause is *not* bandwidth and this analysis
+> is wrong — look at SDRAM read integrity instead.
+
 All of the above is arithmetic from the RTL, not measurement. Nobody has run
 this on hardware.
 
@@ -398,6 +416,36 @@ in `src/mister/files.qip`, there is no `psram` instance in the MiSTer hierarchy,
 and the DE10-Nano has no such device. The held one-variable experiment on the
 Pocket side is unaffected by anything in this port.
 
+### Can the fastpath come back on this device?
+
+**Yes — it is not structurally Pocket-only.** Nothing about the DE10-Nano
+prevents it; the blocker is the shape of the crossing, and the same shape exists
+on the Pocket.
+
+The correct re-enable moves the *comparison* rather than the address:
+
+* Keep a registered, one-CPU-clock-stale copy of `fast_v_addr` for the **issue**
+  path only. Staleness there is harmless — the worst case is a speculative read
+  of an address the CPU has already moved past, and ROM is read-only.
+* Cross `fpv_tag` and `fpv_valid` the other way, into the CPU clock domain, and
+  compute `fast_v_ready` **there**, combinationally against the *live*
+  `fast_v_addr`. Those two signals change only at grant and completion, so their
+  crossing is slow and easy to time.
+
+That keeps the invariant the design depends on — "ready means this data is for
+the address you are asking for *right now*" — while removing the deep cone from
+the timed cross-domain path. It is maybe thirty lines. It is also new logic in
+the most safety-critical path in the machine, so it wants a bench and a
+hardware A/B, not a late-session edit.
+
+Worth noting for whoever picks this up: the same cone exists on the Pocket at
+the same 27.939 ns budget on *slower* silicon (5CEBA4 speed grade 8 versus this
+board's grade 7), and the Pocket's CI has **no timing gate at all** — it
+compiles, bit-reverses and uploads. So the Pocket build may well be carrying
+this violation too, unmeasured. `src/mister/check_slack.py` is not
+MiSTer-specific and can be pointed at `src/fpga/output_files/ap_core.sta.rpt`
+as-is.
+
 ---
 
 ## Video
@@ -492,17 +540,48 @@ power cycle. Save states are explicitly out of scope for this port.
 * Any control mapping. None of it has been pressed.
 * Audio levels through the MiSTer audio path.
 
-### If it does not work, look here first
+### Top three things most likely broken on first flash
 
-1. **Playfield/sprite corruption or tearing** — SDRAM starvation from the added
-   playfield client. Try dropping the motion-object armor to `rd_pre = 0` as
-   well, or reducing playfield prefetch depth.
-2. **Black screen / no sync on HDMI** — sync pulse placement, or `CE_PIXEL`
-   generation. Check `direct_video` and the scandoubler path first.
-3. **Boot loop** — the watchdog / freeze-rescue path is active (it reboots the
-   machine on a watchdog timeout, a dead extra CPU, or a wedged inter-CPU
-   mailbox). A loop means one of those is firing, which usually means the CPUs
-   are being starved of SDRAM or fed bad data.
+Ordered by likelihood, with what to actually look at rather than which
+subsystem to suspect.
+
+**1. Sprite and tile rows dropping out in busy scenes** — the bandwidth
+prediction above. *Where to look:* play past the attract mode into a crowded
+level and watch sprites specifically, not the whole screen. The signature is
+sprite rows that vanish or repeat the previous line's content, worst on the
+right-hand side of the screen (the deficit accumulates rightward as a line runs
+out of fetch slots), and worse the more robots are on screen. The playfield may
+show the same thing as horizontal bands of stale tile rows. *What it is not:*
+if the machine boot-loops, misbehaves, or the sound breaks up, it is not this.
+*Cheapest response:* lever 1 in the bandwidth section — one line, obvious A/B.
+
+**2. No picture, or a picture the scaler will not lock to** — sync generation
+is the least-transcribed part of this port. The Pocket emitted one-clock HS/VS
+pulses because the APF scaler tolerates them; MiSTer's scandoubler and `ascal`
+need real widths, so this port invents a 32-clock HSync and a 3-line VSync
+placed in the front porch. **Those positions are a reasonable guess, not
+transcribed from the SP-332 schematic.** *Where to look:* try `direct_video`
+first, and try the analog/VGA output as well as HDMI — if one works and the
+other does not, it is sync placement, not the core. Adjust `HS_START` /
+`HS_END` / `VS_START` / `VS_END` in `rtl/escape_mister.v`. A picture that is
+present but off-centre or shifted is the same cause and is cosmetic.
+
+**3. Nothing loads, or the machine sits at a black screen after the ROM
+download** — the loader is new code on this platform even though its *output*
+is byte-verified. *Where to look:* the LED_USER activity during load, then
+whether the picture ever changes from black. The ROM contents are proven
+correct offline, so a failure here is the *delivery*, not the data: most likely
+`ioctl_wait` backpressure (the writer accepts three bytes of slack by
+construction; a slower or faster HPS transfer than assumed would break that) or
+the SDRAM read-capture phase on a DE10-Nano SDRAM module that differs from the
+Pocket's part. The core holds itself in reset until its own SDRAM self-check
+passes, so a permanent black screen means that check is failing, which points
+at read capture rather than at the download.
+
+Two things that are *unlikely* to be the problem, so as not to waste time on
+them: the ROM mapping (verified byte-exact against a CRC-verified image) and
+the button/stick mapping (untested, but a wrong mapping produces a game that
+responds oddly, not one that fails to start).
 
 ---
 
