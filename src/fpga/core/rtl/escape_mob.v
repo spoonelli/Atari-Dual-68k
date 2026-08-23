@@ -167,6 +167,19 @@ module escape_mob (
     // escape_prio.v from exactly where it always did. Only w1, which carries
     // no priority information at all, moved to the scout. That is what makes
     // the prefetch compatible with keeping the priority decode blitter-side.
+    //
+    // Cost, escape_mob synthesised standalone for the 5CEBA4F23C8 (Quartus
+    // 18.1, virtual pins, clk constrained at the real 139.68ns pixel period):
+    //          ALMs   regs   block-mem bits   DSP   worst setup slack
+    //   before  439    305       20,480        1        +129.395 ns
+    //   after   493    308       20,480        1        +126.571 ns
+    // M10K delta 0 - the line buffers are untouched at 2 x 512 x 20, so the
+    // 308-block ceiling is not approached. DSP delta 0 confirms the code_row
+    // multiply MOVED to the scout rather than being duplicated. The engine
+    // uses ~13ns of a 139.68ns budget either way; the new critical path is
+    // ly -> mo_vaddr (the scout's own address decode), and every output that
+    // crosses to the 85.9MHz SDRAM domain (gfx_req*, gfx_addr*) is still
+    // registered here, so nothing combinational was added to that crossing.
     localparam SC_IDLE  = 3'd0;
     localparam SC_E0    = 3'd1;
     localparam SC_E1    = 3'd2;
