@@ -75,14 +75,16 @@ architecture tb of tb_escape_taswedge is
     signal m_owner : std_logic_vector(1 downto 0);
 
     -- phase control / measurement
-    signal phase       : integer := 0;   -- 0 free-run 1 v_lock stuck 2 e_lock stuck
-    signal vcyc, ecyc  : integer := 0;   -- bus cycles in the current phase
-    signal vcyc_0, ecyc_0 : integer := 0;
-    signal vcyc_1, ecyc_1 : integer := 0;
-    signal vcyc_2, ecyc_2 : integer := 0;
-    signal vhold_clk, ehold_clk : integer := 0;   -- hold clocks in the current phase
-    signal vh_1, eh_1, vh_2, eh_2 : integer := 0;
+    -- The meter process owns these four and NOTHING else may drive them: a
+    -- second driver on an unresolved type is an elaboration error, and the
+    -- first cut of this bench had the driver process zeroing them between
+    -- phases. They free-run; the phases are separated by snapshots instead.
+    signal vcyc, ecyc  : integer := 0;   -- bus cycles, cumulative
+    signal vhold_clk, ehold_clk : integer := 0;   -- hold clocks, cumulative
     signal runmax : integer := 0;        -- longest single uninterrupted hold
+    -- snapshots taken by the driver at each phase boundary
+    signal vc0, ec0, vc1, ec1, vc2, ec2 : integer := 0;
+    signal vh0, eh0, vh1, eh1, vh2, eh2 : integer := 0;
 begin
     clk <= not clk after 5 ns when not done else '0';
 
@@ -185,78 +187,64 @@ begin
 
     ------------------------------------------------------------------- driver
     drive : process
-        procedure snap(p : integer) is
-        begin
-            if p = 0 then vcyc_0 <= vcyc; ecyc_0 <= ecyc;
-            elsif p = 1 then vcyc_1 <= vcyc; ecyc_1 <= ecyc;
-                             vh_1 <= vhold_clk; eh_1 <= ehold_clk;
-            else vcyc_2 <= vcyc; ecyc_2 <= ecyc;
-                 vh_2 <= vhold_clk; eh_2 <= ehold_clk; end if;
-        end procedure;
     begin
         wait for 600 us;                       -- free-running baseline
-        snap(0);
-        vcyc <= 0; ecyc <= 0; vhold_clk <= 0; ehold_clk <= 0;
+        vc0 <= vcyc; ec0 <= ecyc; vh0 <= vhold_clk; eh0 <= ehold_clk;
         wait for 20 ns;
 
         -- ADVERSARY 1: the video CPU's RMW never finishes.
-        phase <= 1;
         << signal uut.v_lock : std_logic >> <= force '1';
         wait for 600 us;
-        snap(1);
+        vc1 <= vcyc; ec1 <= ecyc; vh1 <= vhold_clk; eh1 <= ehold_clk;
         << signal uut.v_lock : std_logic >> <= release;
-        vcyc <= 0; ecyc <= 0; vhold_clk <= 0; ehold_clk <= 0;
         wait for 20 ns;
 
         -- ADVERSARY 2: the extra CPU's RMW never finishes.
-        phase <= 2;
         << signal uut.e_lock : std_logic >> <= force '1';
         wait for 600 us;
-        snap(2);
+        vc2 <= vcyc; ec2 <= ecyc; vh2 <= vhold_clk; eh2 <= ehold_clk;
         << signal uut.e_lock : std_logic >> <= release;
         wait for 1 us;
         done <= true;
         wait for 100 ns;
 
         report "=== TASWEDGE (TASLOCK_EN=" & integer'image(G_TAS) & ") ===" severity note;
-        report "  baseline 600us : main " & integer'image(vcyc_0) &
-               " cyc, extra " & integer'image(ecyc_0) & " cyc" severity note;
-        report "  v_lock STUCK   : main " & integer'image(vcyc_1) &
-               " cyc, extra " & integer'image(ecyc_1) & " cyc, extra held " &
-               integer'image(eh_1) & " clks" severity note;
-        report "  e_lock STUCK   : main " & integer'image(vcyc_2) &
-               " cyc, extra " & integer'image(ecyc_2) & " cyc, main held " &
-               integer'image(vh_2) & " clks" severity note;
+        report "  baseline 600us : main " & integer'image(vc0) &
+               " cyc, extra " & integer'image(ec0) & " cyc" severity note;
+        report "  v_lock STUCK   : main " & integer'image(vc1 - vc0) &
+               " cyc, extra " & integer'image(ec1 - ec0) & " cyc, extra held " &
+               integer'image(eh1 - eh0) & " clks" severity note;
+        report "  e_lock STUCK   : main " & integer'image(vc2 - vc1) &
+               " cyc, extra " & integer'image(ec2 - ec1) & " cyc, main held " &
+               integer'image(vh2 - vh1) & " clks" severity note;
         report "  longest single hold, whole run : " & integer'image(runmax) &
                " clks (bound " & integer'image(G_BOUND) & ")" severity note;
 
-        -- the machine must still be alive under both adversaries
-        if ecyc_0 = 0 or vcyc_0 = 0 then
+        if ec0 = 0 or vc0 = 0 then
             report "TASWEDGE BENCH INVALID: no baseline bus traffic" severity failure;
         end if;
-        if ecyc_1 * 2 < ecyc_0 then
+        if (ec1 - ec0) * 2 < ec0 then
             report "TASWEDGE FAIL: extra CPU throughput collapsed with the main's " &
-                   "LOCK stuck (" & integer'image(ecyc_1) & " vs " &
-                   integer'image(ecyc_0) & " cycles)" severity failure;
+                   "LOCK stuck (" & integer'image(ec1 - ec0) & " vs " &
+                   integer'image(ec0) & " cycles)" severity failure;
         end if;
-        if vcyc_2 * 2 < vcyc_0 then
+        if (vc2 - vc1) * 2 < vc0 then
             report "TASWEDGE FAIL: main CPU throughput collapsed with the extra's " &
-                   "LOCK stuck (" & integer'image(vcyc_2) & " vs " &
-                   integer'image(vcyc_0) & " cycles)" severity failure;
+                   "LOCK stuck (" & integer'image(vc2 - vc1) & " vs " &
+                   integer'image(vc0) & " cycles)" severity failure;
         end if;
-        -- and the stall must be bounded, once, not per access
         if runmax > G_BOUND then
             report "TASWEDGE FAIL: a single hold lasted " & integer'image(runmax) &
                    " clks, over the claimed bound of " & integer'image(G_BOUND)
                 severity failure;
         end if;
-        if eh_1 > G_BOUND then
-            report "TASWEDGE FAIL: extra held for " & integer'image(eh_1) &
+        if (eh1 - eh0) > G_BOUND then
+            report "TASWEDGE FAIL: extra held for " & integer'image(eh1 - eh0) &
                    " clks total against a permanently stuck main LOCK - the " &
                    "re-arm inhibit is not working" severity failure;
         end if;
-        if vh_2 > G_BOUND then
-            report "TASWEDGE FAIL: main held for " & integer'image(vh_2) &
+        if (vh2 - vh1) > G_BOUND then
+            report "TASWEDGE FAIL: main held for " & integer'image(vh2 - vh1) &
                    " clks total against a permanently stuck extra LOCK - the " &
                    "re-arm inhibit is not working" severity failure;
         end if;
