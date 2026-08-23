@@ -21,14 +21,20 @@ if [ ! -d "$REPO_ROOT/third_party/Arcade-Atari-system1_MiSTer/rtl" ]; then
 fi
 exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}" -w /work "$IMAGE" bash -c "
   set -e
-  STD='--std=08 -fsynopsys -frelaxed'; W=sim/build
+  # per-TB workdir: a shared sim/build wiped on entry was killing any
+  # concurrently-running vecrace slices (they build in sim/build/vecrace-*)
+  STD='--std=08 -fsynopsys -frelaxed'; W=sim/build/tb-$TB
   rm -rf \$W; mkdir -p \$W
   RTL=third_party/Arcade-Atari-system1_MiSTer/rtl
   SIMLIB=\$(find sim/lib -iname '*.vhd' | sort)
   OURS=\$(find src/fpga/core/rtl -iname '*.vhd' 2>/dev/null | sort)
   # TMS5220.vhd excluded from the submodule tree: our patched copy lives in
-  # src/fpga/core/rtl/ (LANE3z lattice wrap fix) and would collide with it
-  FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' ! -iname 'TMS5220.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd)\"
+  # src/fpga/core/rtl/ (LANE3z lattice wrap fix) and would collide with it.
+  # escape_jsa_vecstub excluded: it redefines entity escape_jsa, and with
+  # both files imported the real architecture can bind against the stub's
+  # entity (no numeric_std in its context) and fail analysis; the stub
+  # belongs to run_vecrace.sh, which excludes the real file instead.
+  FILES=\"\$SIMLIB \$(find \$RTL/atarisys1 \$RTL/lib -iname '*.vhd' ! -iname 'dpram.vhd' ! -iname 'TMS5220.vhd' | sort) \$OURS \$(ls sim/tb/*.vhd | grep -v escape_jsa_vecstub)\"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W $TB >/dev/null
   ghdl -r \$STD --workdir=\$W $TB --ieee-asserts=disable --stop-time=$STOPTIME
