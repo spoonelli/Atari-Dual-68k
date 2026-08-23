@@ -1878,6 +1878,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire [6:0]  cfg_vaddr;
     wire [15:0] cfg_vdata;
     wire [7:0]  mo_pen;
+    wire [1:0]  mo_prio;                // MOPRI-1: MPR1:MPR0 of the owning sprite
     wire        mo_valid_raw;
     wire        mo_valid = mo_valid_raw & ~m_mokill;
 
@@ -1905,6 +1906,7 @@ escape_mob umob (
     .gfx_dataB( mg_dataB ),
     .disp_x   ( visible_x[8:0] ),
     .disp_pen ( mo_pen ),
+    .disp_prio( mo_prio ),
     .disp_valid( mo_valid_raw )
 );
 
@@ -1987,11 +1989,36 @@ escape_mob umob (
     // Tied through synch_3 to the pixel clock domain.
     wire       alpha_vis  = alpha_vis_raw & ~iso_alpha_off;
     wire       mo_show    = mo_valid      & ~iso_mo_off;
-    // pens: alpha 0..255 = {3'b000,color6,pix2}; playfield 512..767 = {3'b010,color4,pix4}
+
+    // MOPRI-1: the real motion-object / playfield priority comparator replaces
+    // the old fixed alpha > MO > playfield ladder (robots drew in front of
+    // scenery that should occlude them). escape_prio.v holds the transcribed
+    // GAL equations; the playfield priority bits PFX5:PFX4 are pf_att[1:0] and
+    // PFX3 is pf_pix[3] - see docs/mo_priority.md for the derivation.
+    // The alpha layer still wins outright: the reference draws it AFTER the
+    // MO/PF merge, so it sits on top of whatever the comparator chose.
+    wire        pr_mo_win, pr_shade, pr_m7, pr_pfm, pr_forcemc0;
+    wire [10:0] pr_pen;
+escape_prio uprio (
+    .mo_valid ( mo_show ),
+    .mo_prio  ( mo_prio ),
+    .mo_color ( mo_pen[7:4] ),
+    .mo_pix   ( mo_pen[3:0] ),
+    .pf_color ( pf_att[3:0] ),
+    .pf_pix   ( pf_pix ),
+    .forcemc0 ( pr_forcemc0 ),
+    .shade    ( pr_shade ),
+    .m7       ( pr_m7 ),
+    .pfm      ( pr_pfm ),
+    .mo_win   ( pr_mo_win ),
+    .pen      ( pr_pen )
+);
+    // pens: alpha 0..255 = {3'b000,color6,pix2}; MO 256..511 = {3'b001,color4,pix4};
+    // playfield 512..767 = {3'b010,color4,pix4}; SHADE moves the playfield into
+    // the alternate bank 768..1023 (CRA9), matching CRA9 = SHADE*CL10 + CL9.
     always @(posedge clk_sys_7159)
         color_vaddr <= alpha_vis ? {3'b000, act_color, pix}
-                     : mo_show   ? {3'b001, mo_pen}
-                                 : {3'b010, pf_att[3:0], pf_pix};
+                                 : pr_pen;
 
     // palette: IRGB4444 with intensity: i=(I+1)*(4-intensity), ch8 = ch4*i/4
     wire [3:0] ints   = (eintensity > 4'd4) ? 4'd4 : eintensity;
