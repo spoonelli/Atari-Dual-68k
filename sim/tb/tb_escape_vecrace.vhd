@@ -20,6 +20,17 @@
 -- before releasing reset, so the dispatch chain is BRAM-shadow-served (the
 -- hardware path) while the 0x6000 main loop still fetches over SDRAM.
 --
+-- ZEROWAIT-92 CAVEAT + RESTORATION (2026-08-23 overnight): from SDSCHED-88
+-- (the release-gated e_virq latch) until ZEROWAIT-92, this bench delivered
+-- ZERO extra-CPU interrupts - the image's main never wrote 360011 and
+-- dbg_force_extra does not feed the latch (verified iack_cyc=0 on the 91
+-- tip), so the SDSCHED-88 results below are valid for BUS TIMING ONLY and
+-- vacuous on IRQ semantics. The image's main now releases the extra and the
+-- extra's loop carries the poll-loop flag read (arms EIRQ_MODE 2 delivery);
+-- ZEROWAIT-92 reference run: FPEN=1/FP=1 NIRQ=1200 MAXAS=2 -> iack_cyc
+-- 13,768, 95,393 reads all 4-clk, zero corruption; FPEN=0 NIRQ=600 clean.
+-- Runtime IRQ-contract coverage (POST derail, lost wakeup, storms) lives in
+-- tb_escape_worldwake, not here.
 -- SDSCHED-88 RESULTS (2026-08-23, zerowait branch, GHDL mcode): fastpath
 -- matrix all green - FPEN=1/FP=1 SHAD=0 (2000 IRQs, PHOFF 0 and 307: full
 -- 613-phase sweep >3x through): 152,749 + 160,077 extra-CPU ROM cycles ALL
