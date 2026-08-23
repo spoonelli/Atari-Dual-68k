@@ -6,6 +6,10 @@
 #   Platforms/_images/<platform_id>.bin
 #   Assets/<platform_id>/common/  (empty -- the user supplies their own ROM)
 #
+# Saves/<platform_id>/common/ is NOT packaged: the Pocket creates it itself the
+# first time the core writes its EEPROM (see docs/EEPROM_SAVE.md). Shipping a
+# save here would overwrite the owner's high scores on every update.
+#
 # NEVER includes ROM data: a guard fails the build if any *.rom would be packaged.
 #
 # Usage: ./support/package.sh <path/to/bitstream.rbf_r> [out.zip]
@@ -45,6 +49,11 @@ Put your self-built atari_escape.rom in this folder.
 Build it from your own verified dumps:
   python3 support/build_rom.py /path/to/eprom ./atari_escape.rom
 This project does not distribute ROMs.
+
+High scores and operator settings are saved automatically to
+  /Saves/eprom/common/atari_escape.sav
+The Pocket creates that file on its own -- nothing to install. Delete it to
+reset the machine to a factory-fresh EEPROM.
 EOF
 
 # guard: refuse to package any ROM data

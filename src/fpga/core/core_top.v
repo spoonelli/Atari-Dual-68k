@@ -303,6 +303,14 @@ always @(*) begin
         // bridge_rd_data <= example_device_data;
         bridge_rd_data <= 0;
     end
+    32'h20xxxxxx: begin
+        // EEPROM save slot window. Deliberately decoded across the whole
+        // 0x20 region, not just the 512 bytes: APF's read pipeline is
+        // buffered by one word, so it issues one transaction PAST the end
+        // of a block to collect the final word, and that trailing address
+        // must still select this register.
+        bridge_rd_data <= ee_bridge_rd_data;
+    end
     32'hF8xxxxxx: begin
         bridge_rd_data <= cmd_bridge_rd_data;
     end
@@ -324,7 +332,12 @@ end
 
     wire            dataslot_requestread;
     wire    [15:0]  dataslot_requestread_id;
-    wire            dataslot_requestread_ack = 1;
+    // EEPROM save slot: APF sends [0080 Data slot request read] and then reads
+    // our bridge window out to the SD card. Hold the handshake off until the
+    // save engine has refreshed that window, so APF can never capture a
+    // half-built image. Driven (and timed out) in the EEPROM save block below,
+    // so a wedged engine delays the exit rather than hanging the Pocket.
+    wire            dataslot_requestread_ack;
     wire            dataslot_requestread_ok = 1;
 
     wire            dataslot_requestwrite;
@@ -366,10 +379,10 @@ end
 // bridge target commands
 // synchronous to clk_74a
 
-    reg             target_dataslot_read;       
-    reg             target_dataslot_write;
-    reg             target_dataslot_getfile;    // require additional param/resp structs to be mapped
-    reg             target_dataslot_openfile;   // require additional param/resp structs to be mapped
+    reg             target_dataslot_read     = 0;
+    reg             target_dataslot_write    = 0;
+    reg             target_dataslot_getfile  = 0;   // require additional param/resp structs to be mapped
+    reg             target_dataslot_openfile = 0;   // require additional param/resp structs to be mapped
     
     wire            target_dataslot_ack;        
     wire            target_dataslot_done;
@@ -594,6 +607,20 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                         3'd3: vidout_rgb <= chk_ok_s               ? 24'h00A000 : 24'hA00000;
                         3'd4: vidout_rgb <= rom_req_seen           ? 24'h00A000 : 24'hA00000;
                         3'd5: vidout_rgb <= (dbg_v_pc_fetch & dbg_e_running) ? 24'h00A000 : 24'hA00000;
+                        // EEPROM save state - the one thing you cannot see from
+                        // the game itself until you have already power-cycled:
+                        //   red     virgin EEPROM, no save file was loaded
+                        //   teal    save file loaded, nothing written back yet
+                        //   amber   the game changed the EEPROM, save pending
+                        //   blue    snapshot taken, APF has not confirmed it
+                        //   green   APF wrote the save file to the SD card
+                        //   magenta APF refused or never answered a save
+                        3'd6: vidout_rgb <= (ee_wr_err_s != 8'd0) ? 24'hA000A0 :
+                                            ee_dirty_c            ? 24'hA0A000 :
+                                            (ee_wr_ok_s  != 8'd0) ? 24'h00A000 :
+                                            (ee_savecnt_c!= 8'd0) ? 24'h0000A0 :
+                                            ee_loaded_s           ? 24'h008080 :
+                                                                    24'hA00000;
                         default: vidout_rgb <= dbg_alpha_wr        ? 24'h00FF00 : 24'h404040;
                     endcase
                 end else if(diag_on && in_hexrow) begin
@@ -750,8 +777,18 @@ end
                                       // noise = the game writes garbage (extra CPU)
     reg        tone_74      = 1'b0;   // 0xA0000040: 'Audio Test Tone' - splits
                                       // i2s-path faults from JSA-side silence
+    reg        ee_autoen_74 = 1'b1;   // 0xA0000140: 'EEPROM Autosave' (default ON)
+                                      // (0x120-0x13C belong to the MIX-100
+                                      //  per-FM-channel mixer)
+                                      // ON  = push the EEPROM to the SD card
+                                      //       ~1.2 s after the game stops
+                                      //       writing it, so a score survives
+                                      //       an unclean power-off
+                                      // OFF = only the save APF performs when
+                                      //       the core is exited normally
     reg [22:0] soft_rst_ctr = 23'd0;
 always @(posedge clk_74a) begin
+    if(bridge_wr && bridge_addr == 32'hA0000140) ee_autoen_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
@@ -811,6 +848,158 @@ synch_3 s_dq(dl_quiet_74, dl_quiet_sd, clk_sdram);
 
     wire dl_req_s;
 synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
+
+    // ---------------- EEPROM non-volatile save (APF data slot 2)
+    //
+    // The game keeps its high-score table and every operator setting in a
+    // 2804 EEPROM (68k 0x0E0000-0x0E03FF, low byte only - MAME maps it
+    // umask16(0x00ff), so 512 locations). It is BRAM inside escape_core, so
+    // without this block everything resets on each power-on, which the real
+    // cabinet never did.
+    //
+    // data.json declares slot 2 as a nonvolatile slot loading at bridge
+    // address 0x20000000, 512 bytes. APF then:
+    //   * at startup, writes the .sav file into this window (plain bridge
+    //     writes, bracketed by [0082] and [008F Data slot access all
+    //     complete]) - ee_save copies it into the EEPROM before the 68000s
+    //     leave reset;
+    //   * at core exit, sends [0080 Data slot request read] and reads the
+    //     window back out to the SD card - ee_save refreshes it first, gated
+    //     by dataslot_requestread_ack above;
+    //   * on demand, honours target command [0184 Data slot write], which the
+    //     little FSM below issues whenever the game has finished writing the
+    //     EEPROM. That write-through is what makes a score survive a battery
+    //     pull rather than only a clean exit.
+    //
+    // Nothing here can stall the game: ee_save owns only port B of the EEPROM
+    // BRAM, and every handshake with APF is timed out.
+    localparam [15:0] EE_SLOT_ID   = 16'd2;
+    localparam [31:0] EE_BRIDGE_AD = 32'h20000000;
+    localparam [31:0] EE_BYTES     = 32'd512;
+
+    // Writes are decoded strictly (512 bytes) so a stray write outside the
+    // slot cannot alias into the buffer; reads are decoded across 0x20xxxxxx
+    // (see the bridge_rd_data mux for why).
+    wire        ee_rgn_74 = (bridge_addr[31:24] == 8'h20);
+    wire        ee_sel_74 = ee_rgn_74 && (bridge_addr[23:9] == 15'd0);
+    wire [31:0] ee_bridge_rd_data;
+    wire        ee_loaded_74, ee_snapdone_74, ee_savereq_74;
+    reg         ee_snapreq_74 = 1'b0;
+    reg         ee_saveack_74 = 1'b0;
+    wire [8:0]  ee_saddr;
+    wire [7:0]  ee_sdin, ee_sq, ee_savecnt_c;
+    wire        ee_swe, ee_wrpulse, ee_ready_c, ee_dirty_c;
+    wire        ee_autoen_s, ee_loaded_s;
+    wire [7:0]  ee_wr_ok_s, ee_wr_err_s;
+    reg  [7:0]  ee_wr_ok  = 8'd0;    // slot writes APF completed  (diag strip)
+    reg  [7:0]  ee_wr_err = 8'd0;    // slot writes that failed    (diag strip)
+synch_3 s_eeauto(ee_autoen_74, ee_autoen_s, clk_sys_7159);
+    // diag-strip status, into the pixel domain
+synch_3 s_eeld(ee_loaded_74, ee_loaded_s, clk_sys_7159);
+synch_3 #(.WIDTH(8)) s_eeok(ee_wr_ok,  ee_wr_ok_s,  clk_sys_7159);
+synch_3 #(.WIDTH(8)) s_eeerr(ee_wr_err, ee_wr_err_s, clk_sys_7159);
+
+ee_save ee (
+    .bclk       ( clk_74a ),
+    .b_sel      ( ee_sel_74 ),
+    .b_wr       ( bridge_wr ),
+    // latch only on reads aimed at our region, so an unrelated bridge read
+    // between the last data word and APF's trailing pipeline read cannot
+    // clobber the word still owed to APF
+    .b_rd       ( bridge_rd & ee_rgn_74 ),
+    .b_addr     ( bridge_addr[8:2] ),
+    .b_wdata    ( bridge_wr_data ),
+    .b_rdata    ( ee_bridge_rd_data ),
+    .b_loaded   ( ee_loaded_74 ),
+    .b_allcomp  ( dataslot_allcomplete ),
+    .b_snapreq  ( ee_snapreq_74 ),
+    .b_snapdone ( ee_snapdone_74 ),
+    .b_savereq  ( ee_savereq_74 ),
+    .b_saveack  ( ee_saveack_74 ),
+    .cclk       ( clk_sys_7159 ),
+    .c_ready    ( ee_ready_c ),
+    .c_autoen   ( ee_autoen_s ),
+    .c_wrpulse  ( ee_wrpulse ),
+    .c_addr     ( ee_saddr ),
+    .c_din      ( ee_sdin ),
+    .c_we       ( ee_swe ),
+    .c_q        ( ee_sq ),
+    .c_savecnt  ( ee_savecnt_c ),
+    .c_dirty    ( ee_dirty_c )
+);
+
+    // exit-time readback gate. ~452 ms at 74.25 MHz before we give up and let
+    // APF read whatever the window already holds - which is always a complete
+    // older image, never a partial one.
+    wire        ee_rd_pending = dataslot_requestread & (dataslot_requestread_id == EE_SLOT_ID);
+    reg  [24:0] ee_rd_to = 25'd0;
+assign dataslot_requestread_ack = ~ee_rd_pending | ee_snapdone_74 | (&ee_rd_to);
+always @(posedge clk_74a) begin
+    if(ee_rd_pending) begin
+        ee_snapreq_74 <= 1'b1;
+        if(!(&ee_rd_to)) ee_rd_to <= ee_rd_to + 25'd1;
+    end else begin
+        ee_snapreq_74 <= 1'b0;
+        ee_rd_to      <= 25'd0;
+    end
+end
+
+    // [0184 Data slot write] issuer. Four-phase with ee_save: it snapshots the
+    // EEPROM, raises b_savereq, we push the slot to disk, we ack, it releases.
+    // ~226 ms timeout on APF's reply so a framework that never answers costs
+    // us one skipped save, not a stuck engine.
+    reg  [2:0]  ee_tw     = 3'd0;
+    reg  [23:0] ee_tw_to  = 24'd0;
+always @(posedge clk_74a) begin
+    target_dataslot_read     <= 1'b0;
+    target_dataslot_getfile  <= 1'b0;
+    target_dataslot_openfile <= 1'b0;
+    target_dataslot_write    <= 1'b0;   // rising-edge triggered: one-cycle pulse
+    case(ee_tw)
+    3'd0: begin
+        ee_saveack_74 <= 1'b0;
+        ee_tw_to      <= 24'd0;
+        // never race APF's own exit-time readback of the same slot
+        if(ee_savereq_74 && !ee_rd_pending && ee_autoen_74) begin
+            target_dataslot_id         <= EE_SLOT_ID;
+            target_dataslot_slotoffset <= 32'd0;
+            target_dataslot_bridgeaddr <= EE_BRIDGE_AD;
+            target_dataslot_length     <= EE_BYTES;
+            ee_tw <= 3'd1;
+        end else if(ee_savereq_74) begin
+            // autosave disabled, or APF is reading the slot anyway: drop it
+            ee_tw <= 3'd4;
+        end
+    end
+    3'd1: begin
+        target_dataslot_write <= 1'b1;
+        ee_tw <= 3'd2;
+    end
+    3'd2: begin
+        // target_dataslot_done is sticky from the previous command until
+        // core_bridge_cmd starts this one; wait for it to clear first
+        ee_tw_to <= ee_tw_to + 24'd1;
+        if(!target_dataslot_done) ee_tw <= 3'd3;
+        else if(&ee_tw_to) begin ee_wr_err <= ee_wr_err + 8'd1; ee_tw <= 3'd4; end
+    end
+    3'd3: begin
+        ee_tw_to <= ee_tw_to + 24'd1;
+        if(target_dataslot_done) begin
+            if(target_dataslot_err == 3'd0) ee_wr_ok  <= ee_wr_ok  + 8'd1;
+            else                            ee_wr_err <= ee_wr_err + 8'd1;
+            ee_tw <= 3'd4;
+        end else if(&ee_tw_to) begin
+            ee_wr_err <= ee_wr_err + 8'd1;   // APF never answered
+            ee_tw <= 3'd4;
+        end
+    end
+    3'd4: begin
+        ee_saveack_74 <= 1'b1;
+        if(!ee_savereq_74) ee_tw <= 3'd0;
+    end
+    default: ee_tw <= 3'd0;
+    endcase
+end
 
     reg        dl_req_last;
     reg  [1:0] dl_phase;      // 0 idle, 1 wait ack, 2 wait ack-drop
@@ -1525,8 +1714,14 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
         end
     end
 
+    // ee_ready_c: the EEPROM has been restored from the save slot (or skipped,
+    // when no save file was loaded). Bounded - ee_save reaches it within ~290 us
+    // of dataslot_allcomplete, unconditionally - so it can never brick a boot,
+    // but it does guarantee the 68000s never read a half-restored EEPROM.
+    // It latches once and survives watchdog/soft resets, which must not re-run
+    // the restore over scores earned since boot.
     wire core_reset_n = reset_n & dataslot_allcomplete_s & sdram_init_done_s & chk_done_s
-                        & ~soft_rst_s & ~wdog_rst;
+                        & ee_ready_c & ~soft_rst_s & ~wdog_rst;
 
     // sticky: CPU has issued at least one ROM fetch
     reg rom_req_seen;
@@ -2299,6 +2494,12 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .shad_waddr ( shad_waddr ),
     .shad_wdata ( shad_wdata ),
     .shad_we    ( shad_we ),
+    // EEPROM non-volatile port (ee_save, above)
+    .ee_saddr   ( ee_saddr ),
+    .ee_sdin    ( ee_sdin ),
+    .ee_swe     ( ee_swe ),
+    .ee_sq      ( ee_sq ),
+    .ee_wrpulse ( ee_wrpulse ),
     .vblank_in  ( vblank_w ),
     // {duck, spare, fire, jump} = Pocket {A, -, B, Y}   (schematic sheet 3: CD11..CD8;
     // MAME eprom: D9 = button 1 fire, D8 = button 2 jump, D11 = button 3 duck)
