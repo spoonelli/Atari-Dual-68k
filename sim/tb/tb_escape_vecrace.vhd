@@ -50,6 +50,19 @@ entity tb_escape_vecrace is
         G_LAT   : integer := 2;       -- rom service latency, clks (0 = jitter
                                       -- mode: pseudo-random 1..16 per request,
                                       -- modeling SDRAM contention/refresh)
+        -- SDSCHED-88 zero-wait fastpath knobs
+        G_FPEN  : integer := 1;       -- escape_core FASTPATH_EN generic
+        G_FP    : integer := 1;       -- fastpath server model: 0 = no server
+                                      -- (every ROM cycle must be rescued by
+                                      -- the fast watchdog -> legacy arbiter),
+                                      -- 1 = authentic (fill lands inside one
+                                      -- CPU clock, as the 85.9MHz cache
+                                      -- does), N>1 = fill takes N CPU clks
+                                      -- (models refresh/collision backlog)
+        G_MAXAS : integer := 0;       -- >0: FAIL if a completed extra-CPU
+                                      -- ROM-region bus cycle holds AS low
+                                      -- more than G_MAXAS consecutive clks
+                                      -- (2 = the authentic 4-clock cycle)
         G_HEX   : string  := "sim/work/vecrace_words.hex"
     );
 end tb_escape_vecrace;
@@ -85,6 +98,14 @@ architecture tb of tb_escape_vecrace is
     signal rom_ack  : std_logic := '0';
     signal rom_par  : std_logic := '0';
     signal vblank   : std_logic := '0';
+
+    -- SDSCHED-88 fastpath port wiring + as-low-duration bookkeeping
+    signal fast_v_addr, fast_e_addr : std_logic_vector(23 downto 0);
+    signal fast_v_spec, fast_e_spec : std_logic;
+    signal fast_v_data, fast_e_data : std_logic_vector(15 downto 0) := (others=>'0');
+    signal fast_v_ready, fast_e_ready : std_logic := '0';
+    type hist_t is array (1 to 16) of natural;
+    signal aslen_hist : hist_t := (others=>0);
 
     signal shad_wclk  : std_logic := '0';
     signal shad_waddr : std_logic_vector(23 downto 0) := (others=>'0');
@@ -130,10 +151,14 @@ begin
     clk <= not clk after 5 ns when not done else '0';
 
     uut : entity work.escape_core
-        generic map ( YM_ENABLE => 0, SHAD_EN => G_SHAD )
+        generic map ( YM_ENABLE => 0, SHAD_EN => G_SHAD, FASTPATH_EN => G_FPEN )
         port map ( clk=>clk, reset_n=>resetn,
                    rom_addr=>rom_addr, rom_data=>rom_data, rom_par=>rom_par,
                    rom_req=>rom_req, rom_ack=>rom_ack,
+                   fast_v_addr=>fast_v_addr, fast_v_spec=>fast_v_spec,
+                   fast_v_data=>fast_v_data, fast_v_ready=>fast_v_ready,
+                   fast_e_addr=>fast_e_addr, fast_e_spec=>fast_e_spec,
+                   fast_e_data=>fast_e_data, fast_e_ready=>fast_e_ready,
                    shad_wclk=>shad_wclk, shad_waddr=>shad_waddr,
                    shad_wdata=>shad_wdata, shad_we=>shad_we,
                    vblank_in=>vblank,
@@ -182,6 +207,118 @@ begin
                     else lat := lat + 1; end if;
                 end if;
             else rom_ack <= '0'; served := false; lat := 0; end if;
+        end if;
+    end process;
+
+    -- SDSCHED-88 fastpath server model (both CPUs). In hardware the 85.9MHz
+    -- cache fill lands ~17 sdram clks after the CPU presents a new ROM
+    -- address (kernel presents it a full CPU clock before AS falls), i.e.
+    -- inside ONE cpu clock - so at this bench's granularity G_FP=1 means
+    -- "tag/data/ready updated at the first rising edge that samples the new
+    -- address". G_FP>1 stretches the fill by whole CPU clocks (refresh or
+    -- both-CPU collision backlog); G_FP=0 removes the server entirely so the
+    -- escape_core fast watchdog must rescue every cycle through the legacy
+    -- arbiter. Tag persistence models the one-word cache (byte-pair rereads
+    -- hit with no new transaction), exactly like core_top's.
+    fastsrv_v : process(clk)
+        variable tag : std_logic_vector(23 downto 0) := (others=>'1');
+        variable cnt : integer := 0;
+        variable wi  : integer;
+    begin
+        if rising_edge(clk) and G_FP > 0 then
+            if fast_v_spec='1' then
+                if fast_v_addr /= tag then
+                    tag := fast_v_addr; cnt := G_FP;
+                end if;
+                if cnt > 0 then
+                    cnt := cnt - 1;
+                    if cnt = 0 then
+                        wi := to_integer(unsigned(tag(AW downto 1)));
+                        fast_v_data  <= img(wi);
+                        fast_v_ready <= '1';
+                    else
+                        fast_v_ready <= '0';
+                    end if;
+                else
+                    fast_v_ready <= '1';           -- cache hit
+                end if;
+            else
+                fast_v_ready <= '0';
+            end if;
+        end if;
+    end process;
+
+    fastsrv_e : process(clk)
+        variable tag : std_logic_vector(23 downto 0) := (others=>'1');
+        variable cnt : integer := 0;
+        variable wi  : integer;
+    begin
+        if rising_edge(clk) and G_FP > 0 then
+            if fast_e_spec='1' then
+                if fast_e_addr /= tag then
+                    tag := fast_e_addr; cnt := G_FP;
+                end if;
+                if cnt > 0 then
+                    cnt := cnt - 1;
+                    if cnt = 0 then
+                        wi := to_integer(unsigned(tag(AW downto 1)));
+                        fast_e_data  <= img(wi);
+                        fast_e_ready <= '1';
+                    else
+                        fast_e_ready <= '0';
+                    end if;
+                else
+                    fast_e_ready <= '1';
+                end if;
+            else
+                fast_e_ready <= '0';
+            end if;
+        end if;
+    end process;
+
+    -- SDSCHED-88 as-low-duration meter + zero-wait assertion: consecutive
+    -- rising edges with the extra CPU's AS low, per completed cycle. The
+    -- authentic 4-clock 68000 bus cycle samples AS low on exactly 2 edges;
+    -- every waitstate adds one. Only ROM-region cycles (addr < 0x10000,
+    -- FC /= 111) are asserted; with G_SHAD=1 the BRAM-shadowed ranges
+    -- (0x0000-0x3FFF, 0xF000-0xFFFF) are exempt - the shadow path keeps its
+    -- proven +1ws timing by design.
+    aslen : process(clk)
+        variable cnt   : natural := 0;
+        variable a     : integer;
+        variable inrom : boolean := false;
+        variable addr0 : std_logic_vector(23 downto 0);
+        variable h     : hist_t := (others=>0);
+    begin
+        if rising_edge(clk) and resetn='1' then
+            if m_eas='0' then
+                if cnt = 0 then
+                    addr0 := m_eaddr(23 downto 0);
+                    a     := to_integer(unsigned(m_eaddr(15 downto 0)));
+                    inrom := (m_eaddr(23 downto 16) = x"00") and m_efc /= "111";
+                    if G_SHAD = 1 and (a < 16#4000# or a >= 16#F000#) then
+                        inrom := false;
+                    end if;
+                end if;
+                cnt := cnt + 1;
+            elsif cnt > 0 then
+                if inrom then
+                    if cnt > 16 then h(16) := h(16) + 1;
+                    else h(cnt) := h(cnt) + 1; end if;
+                    aslen_hist <= h;
+                    if G_MAXAS > 0 and cnt > G_MAXAS then
+                        report "VECRACE SLOW CYCLE: extra-CPU ROM cycle held AS low " &
+                               integer'image(cnt) & " clks (max " &
+                               integer'image(G_MAXAS) & ") at 0x" &
+                               hex16(addr0(15 downto 0)) &
+                               "  irq " & integer'image(irq_idx) &
+                               "  phase " & integer'image(irq_phase) &
+                               "  time " & time'image(now)
+                            severity failure;
+                    end if;
+                end if;
+                cnt := 0;
+            end if;
         end if;
     end process;
 
@@ -250,6 +387,13 @@ begin
                ", iack_cyc " & integer'image(iack_cyc_cnt) &
                ", earlyterm " & integer'image(earlyterm_cnt) &
                ", hb " & hex16(hb) & " - NO CORRUPTION" severity note;
+        for i in 1 to 16 loop
+            if aslen_hist(i) /= 0 then
+                report "vecrace as-low histogram: " & integer'image(i + 2) &
+                       "-clk cycles (AS low " & integer'image(i) & " edges) x " &
+                       integer'image(aslen_hist(i)) severity note;
+            end if;
+        end loop;
         done <= true;
         wait;
     end process;
