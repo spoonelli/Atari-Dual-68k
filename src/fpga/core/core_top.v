@@ -1773,7 +1773,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3093;   // bisect: FASTPATH OFF + armed IRQ (isolating the JSA/coin symptom) - screen shows '93'
+    localparam [15:0] BUILD_ID = 16'h3094;   // bisect-2: EIRQ_MODE 0 ('86 shared pulse) + fastpath off = last known-good - screen shows '94'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2209,7 +2209,7 @@ hall_stick hall_p2 (
 );
 // EIRQ_MODE 2 = ZEROWAIT-92 armed extra-vblank latch (worldwake-bench
 // validated; see escape_core generic comment + docs/NIGHT-ANALYSIS.md)
-escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(2)) ecore (
+escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0)) ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
     .rom_addr   ( core_rom_addr ),
