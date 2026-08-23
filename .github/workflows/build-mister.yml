@@ -1,0 +1,66 @@
+name: Build MiSTer core (Quartus)
+
+# Compiles the DE10-Nano bitstream inside theypsilon/quartus-lite-c5:18.1, the
+# same container the Pocket build uses. Runs on the native-x86 hosted runner:
+# on Apple Silicon the container runs under emulation and quartus_map takes
+# well over half an hour, so CI is the reliable path.
+#
+# NOTE: MiSTer officially targets Quartus 17.0.2 Standard. This image is 18.1
+# Lite; src/mister/sys/pll_q18.qip exists for exactly that reason. See
+# docs/MISTER.md.
+
+on:
+  push:
+    branches: [main, mister-port]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compile Arcade-Escape
+        run: |
+          docker run --rm -v "$PWD":/work -w /work/src/mister \
+            theypsilon/quartus-lite-c5:18.1 \
+            quartus_sh --flow compile Arcade-Escape
+
+      - name: Report timing and resources
+        if: always()
+        run: |
+          echo "=== Fitter resource usage ==="
+          sed -n '1,60p' src/mister/output_files/Arcade-Escape.fit.summary || true
+          echo "=== Timing (worst-case slack per clock) ==="
+          grep -A40 -i "Slow 1100mV 85C Model Setup Summary" \
+            src/mister/output_files/Arcade-Escape.sta.rpt || true
+          grep -A40 -i "Slow 1100mV 85C Model Fmax Summary" \
+            src/mister/output_files/Arcade-Escape.sta.rpt || true
+
+      - name: Fail on negative slack
+        run: |
+          # Project policy: never ship negative timing slack.
+          if grep -qE '^; *-[0-9]' src/mister/output_files/Arcade-Escape.sta.rpt; then
+            echo "Negative slack found in the STA report." >&2
+            exit 1
+          fi
+
+      - name: Stage release files
+        run: |
+          mkdir -p mister-release
+          cp src/mister/output_files/Arcade-Escape.rbf mister-release/escape.rbf
+          cp src/mister/releases/*.mra mister-release/
+          cp docs/MISTER.md mister-release/README.md
+
+      - name: Upload MiSTer core
+        uses: actions/upload-artifact@v4
+        with:
+          name: mister-core
+          path: |
+            mister-release/
+            src/mister/output_files/Arcade-Escape.fit.summary
+            src/mister/output_files/Arcade-Escape.sta.rpt

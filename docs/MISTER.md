@@ -222,6 +222,13 @@ engine already share on the Pocket. The 64 KB per-CPU hot-code shadows inside
 `escape_core` keep most instruction fetches off SDRAM entirely, which is why
 that budget closes at all. **This is an arithmetic estimate, not a measurement.**
 
+And it starts from a bus that is *already* tight: the Pocket build's own known
+issues list "dense sprite crowds can drop scanlines (bandwidth work in
+progress)" — with the playfield on a separate chip. Adding the playfield to
+the same bus can only make that worse, not better. Expect the MiSTer build to
+show the Pocket's sprite-bandwidth artefacts sooner and more often, and treat
+that as the first thing to measure rather than a surprise.
+
 ---
 
 ## Video

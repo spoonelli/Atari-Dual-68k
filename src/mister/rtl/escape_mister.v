@@ -250,7 +250,12 @@ always @(posedge clk_sdram) begin
         endcase
     end
     if (dl_taken) begin dl_req <= 1'b0; dl_pending <= 1'b0; end
-    if (!ioctl_download) begin dl_req <= 1'b0; dl_pending <= 1'b0; end
+    // NOTE: deliberately NOT cleared when ioctl_download drops.  hps_io
+    // deasserts ioctl_download right after the last byte, and the last group
+    // is still queued at that moment - clearing here would silently drop the
+    // final four bytes of the image.  dl_taken is the only thing that retires
+    // a group, and the self-check FSM below waits on !dl_pending before it
+    // releases the machine.
 end
 
 // backpressure: hold the HPS off while a group is still queued or the PLL is
