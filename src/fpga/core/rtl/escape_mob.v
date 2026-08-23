@@ -200,6 +200,23 @@ module escape_mob (
     // ly -> mo_vaddr (the scout's own address decode), and every output that
     // crosses to the 85.9MHz SDRAM domain (gfx_req*, gfx_addr*) is still
     // registered here, so nothing combinational was added to that crossing.
+    //
+    // MODEPTH-1 measured the same way, against MOCHAN-4 (the two rows above
+    // predate the four-channel change, so they are not directly comparable to
+    // these; each row is measured against the revision immediately before it):
+    //          ALMs   regs   M10K   block-mem bits   DSP   worst setup slack
+    //   before  530    361      2       20,480        1        +129.216 ns
+    //   after   768    607      2       20,480        1        +127.059 ns
+    // M10K and block-memory-bits deltas are both 0, which is the number that
+    // matters: the design is AT the 308-block ceiling. The park queue is
+    // deliberately registers, and tch_v is a flat vector indexed by part-select
+    // rather than an array of regs, precisely so neither can be inferred as
+    // memory. DSP delta 0 again - the code_row multiply travelled with the
+    // decode into SC_DEC rather than being duplicated per queue slot. The
+    // engine now spends 12.6ns of the 139.68ns budget, up from 10.5ns, and
+    // core_top.v is unchanged, so the SDRAM grant - shared with both CPUs and
+    // the tightest path in the design - sees exactly what it saw before.
+    //
     // MODEPTH-1: PREFETCH DEPTH. MOCHAN-4 left the steady-state per-tile cost
     // at max(8 blit, 31/4) = 8, i.e. blit-bound, but per-sprite STARTUP barely
     // moved (14.22 -> 12.54 cycles) and became 42-54% of all fetch stall.
