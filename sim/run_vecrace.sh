@@ -36,10 +36,11 @@ if [ "${SKIPHEX:-0}" != "1" ]; then
 fi
 
 # worktrees carry an empty third_party submodule: mount the main checkout's
-# copy read-only in that case
+# copy read-only in that case (main checkout = first entry of worktree list,
+# so this works regardless of where the worktree directory lives)
 TPMOUNT=()
 if [ ! -d "$REPO_ROOT/third_party/Arcade-Atari-system1_MiSTer/rtl" ]; then
-  MAIN="$(cd "$REPO_ROOT/../../.." && pwd)"
+  MAIN="$(git -C "$REPO_ROOT" worktree list --porcelain | head -1 | sed 's/^worktree //')"
   TPMOUNT=(-v "$MAIN/third_party:/work/third_party:ro")
 fi
 
@@ -47,7 +48,7 @@ fi
 # and analyze it AFTER the tree's copy so it wins elaboration
 FIXEDFILE=""
 if [ "$FIXED" = "1" ]; then
-  MAIN="$(cd "$REPO_ROOT/../../.." && pwd)"
+  MAIN="$(git -C "$REPO_ROOT" worktree list --porcelain | head -1 | sed 's/^worktree //')"
   cp "$MAIN/src/fpga/core/rtl/escape_core.vhd" "$REPO_ROOT/sim/work/escape_core_fixed.vhd"
   FIXEDFILE="sim/work/escape_core_fixed.vhd"
 fi
