@@ -282,6 +282,7 @@ architecture rtl of escape_core is
     signal xs_pend, ys_pend : std_logic_vector(8 downto 0);
     signal intensity : std_logic_vector(3 downto 0);
     signal v_virq, e_virq, vblank_d, v_pc_seen : std_logic;
+    signal e_iack_pend : std_logic := '0';
 
     -- even parity over the 32-bit ROM delivery (checked against rom_par)
     function parity32(v : std_logic_vector(31 downto 0)) return std_logic is
@@ -1357,7 +1358,7 @@ begin
         if rising_edge(clk) then
             if reset_n='0' then
                 extra_release <= '0'; video_off <= '0'; intensity <= (others=>'0');
-                v_virq <= '0'; e_virq <= '0'; vblank_d <= '0'; v_pc_seen <= '0';
+                v_virq <= '0'; e_virq <= '0'; e_iack_pend <= '0'; vblank_d <= '0'; v_pc_seen <= '0';
                 xscroll <= (others=>'0'); yscroll <= (others=>'0');
                 xs_pend <= (others=>'0'); ys_pend <= (others=>'0');
             else
@@ -1397,8 +1398,19 @@ begin
                 -- the interrupt - its IACK cycle (FC=111), the hardware's
                 -- own announcement. Its 360000 write (self-test path,
                 -- LANE3l) still clears too.
+                -- ZEROWAIT-91: clear at IACK COMPLETION, not start. The
+                -- 68000 computes its autovector FROM the IPL lines during
+                -- the IACK cycle itself - dropping the level mid-cycle
+                -- corrupted the vector and the handler never ran ('90: the
+                -- extra spun awake-but-unwoken at ~21k cyc/frame, no world,
+                -- run-light red). Real devices hold the level through the
+                -- acknowledge; so do we.
                 if e_fc = "111" and e_as_n='0' then
-                    e_virq <= '0';                                     -- taken: IACK
+                    e_iack_pend <= '1';                                -- taking it now
+                end if;
+                if e_iack_pend='1' and e_as_n='1' then
+                    e_virq      <= '0';                                -- taken: IACK done
+                    e_iack_pend <= '0';
                 end if;
                 if e_as_n='0' and e_rw_n='0'
                    and e_addr(23 downto 16) = x"36" and e_addr(5 downto 4) = "00"
