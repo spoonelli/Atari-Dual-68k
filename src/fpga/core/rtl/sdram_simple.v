@@ -11,7 +11,7 @@
 `default_nettype none
 
 module sdram_simple (
-    input  wire        clk,           // 85.909 MHz
+    input  wire        clk,           // 35.795455 MHz (mf_pllbase outclk_2)
     input  wire        reset_n,
 
     // SDRAM chip
@@ -107,7 +107,15 @@ module sdram_simple (
         end else begin
             cmd(CMD_NOP);
             refresh_ctr <= refresh_ctr + 10'd1;
-            if (refresh_ctr == 10'd250) begin      // 2.9us @ 85.909MHz (spec: <7.8us/row)
+            // CLKFIX-106: this clock is 35.795455 MHz (mf_pllbase outclk_2), NOT
+            // the 85.909 the old comment assumed -- a period of 27.94ns, not
+            // 11.64ns. At 250 the interval was really 6.98us typical, and the
+            // deferral below (forced only at refresh_age>=48) pushed worst case
+            // to (250+48)*27.94 = 8.33us -- ~7% OVER the 7.81us JEDEC limit, a
+            // latent retention violation on the memory holding sprite graphics
+            // and CPU RAM. 160 restores real margin: 4.47us typical, 5.81us
+            // worst (26% under spec), at a cost of 14 refreshes/line vs 9.
+            if (refresh_ctr == 10'd160) begin      // 4.5us @ 35.795MHz (spec: <7.81us/row)
                 refresh_due <= 1'b1;
                 refresh_ctr <= 10'd0;
             end
