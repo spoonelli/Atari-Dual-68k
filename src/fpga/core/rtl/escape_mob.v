@@ -544,7 +544,12 @@ module escape_mob (
             // line the scout has always got there first.
             S_NEXT: begin
                 if(hit_pending && fetch_budget != 0) state <= S_E0;
-                else if(sstate == SC_DONE || fetch_budget == 0) state <= S_IDLE;
+                // SC_IDLE is included defensively: the scout is only ever left
+                // idle by reset or a line abort, both of which also drive the
+                // blitter out of S_NEXT, but a stuck S_NEXT would silently cost
+                // a whole scanline of MO and the test is free.
+                else if(sstate == SC_DONE || sstate == SC_IDLE
+                        || fetch_budget == 0) state <= S_IDLE;
             end
 
             default: state <= S_IDLE;
