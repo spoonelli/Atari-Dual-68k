@@ -117,6 +117,11 @@ architecture rtl of escape_jsa is
     -- 68k link latches
     signal cmd_latch, resp_latch : std_logic_vector(7 downto 0) := (others => '0');
     signal cmd_full_i, resp_full_i : std_logic := '0';
+    -- SCHEM-95: serial-link transit model (8 bits + framing at 894.9kHz
+    -- ~= 11us; this core's clk is 7.159MHz => ~80 clocks)
+    constant SCOM_XFER : unsigned(6 downto 0) := to_unsigned(80, 7);
+    signal   scom_ctr  : unsigned(6 downto 0) := (others => '0');
+    signal   cmd_pend  : std_logic := '0';
 
     -- control registers
     signal bank      : std_logic_vector(1 downto 0) := "00";   -- WRIO D7:6
@@ -324,6 +329,7 @@ begin
         if rising_edge(clk) then
             if reset_n = '0' or sres_cnt /= 0 then
                 cmd_full_i <= '0'; resp_full_i <= '0';
+                cmd_pend <= '0'; scom_ctr <= (others => '0');
                 timed_int <= '0'; irqctr <= (others => '0');
                 -- v63: WRIO (bank/YAMRES/squeak/TMS strobes) and MIX live in
                 -- LS273s cleared only by /POR on the real board (SP-332
@@ -356,6 +362,7 @@ begin
                     -- /RDP 2802 read: consume command, release NMI
                     if sel_r28 = '1' and a16(2 downto 1) = "01" and cpu_rw_n = '1' then
                         cmd_full_i <= '0';
+                        cmd_pend   <= '0';          -- channel free again
                     end if;
                     if cpu_rw_n = '0' and sel_w2a = '1' then
                         case a16(2 downto 1) is
@@ -385,15 +392,32 @@ begin
                 if resp_rd = '1' then
                     resp_full_i <= '0';
                 end if;
+                -- SCHEM-95 SERIAL SCOM LINK TIMING (sheet p5/p6: main 20K <->
+                -- audio 1M, clocked by /B4H = 894.9kHz). A byte takes >10us to
+                -- cross REGARDLESS of CPU speed, and each arrival NMIs the
+                -- 6502. Modelling instant delivery let a fast main CPU
+                -- NMI-storm the sound CPU through its software-timed /WS
+                -- pulse and coin handling: speech cut mid-phrase, coins
+                -- dropped. Now: the main sees the channel busy immediately
+                -- (it cannot stuff a second byte mid-transit), the sound side
+                -- is notified only after the transit delay.
                 if cmd_we = '1' then
-                    cmd_latch  <= cmd_data;
-                    cmd_full_i <= '1';
+                    cmd_latch <= cmd_data;
+                    cmd_pend  <= '1';
+                    scom_ctr  <= (others => '0');
+                end if;
+                if cmd_pend = '1' and cmd_full_i = '0' then
+                    if scom_ctr = SCOM_XFER then
+                        cmd_full_i <= '1';          -- byte lands: NMI the 6502
+                    else
+                        scom_ctr <= scom_ctr + 1;
+                    end if;
                 end if;
             end if;
         end if;
     end process;
 
-    cmd_full  <= cmd_full_i;
+    cmd_full  <= cmd_pend or cmd_full_i;   -- busy from write until 6502 reads
     resp_full <= resp_full_i;
     resp_data <= resp_latch;
     snd_irq   <= resp_full_i;                       -- /SINT: level until 260031 read
