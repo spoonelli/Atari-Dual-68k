@@ -15,12 +15,15 @@
 # identical in both (one independent GFX_LAT countdown per channel), which is
 # what makes the two columns comparable.
 #
+# MODEPTH-1: BASE_REF now defaults to mo-chan4, the four-channel engine this
+# change builds on, so the table reads as the before/after of prefetch DEPTH.
+#
 #   BASE_REF=origin/zerowait ./sim/run_mob_perf_sweep.sh
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 mkdir -p sim/build
-BASE_REF="${BASE_REF:-origin/zerowait}"
+BASE_REF="${BASE_REF:-origin/mo-chan4}"
 git show "$BASE_REF:src/fpga/core/rtl/escape_mob.v" > sim/build/escape_mob_base.v
 git show "$BASE_REF:sim/tb/tb_mob_perf.v"           > sim/build/tb_mob_perf_base.v
 
@@ -38,11 +41,11 @@ printf '%-9s %-11s %-4s | %-7s %-8s %-9s %-8s %-6s %s\n' \
 for scene in "50 157" "123 253" "0 0"; do
   set -- $scene
   for lat in 8 16 31; do
-    for eng in base MOCHAN4; do
+    for eng in base MODEPTH; do
       if [ "$eng" = base ]; then
         out=$(run sim/build/escape_mob_base.v sim/build/tb_mob_perf_base.v base "$1" "$2" "$lat")
       else
-        out=$(run src/fpga/core/rtl/escape_mob.v sim/tb/tb_mob_perf.v ch4 "$1" "$2" "$lat")
+        out=$(run src/fpga/core/rtl/escape_mob.v sim/tb/tb_mob_perf.v depth "$1" "$2" "$lat")
       fi
       px=$(sed -n 's/.*pixels=\([0-9]*\).*/\1/p' <<<"$out" | head -1)
       cov=$(sed -n 's/.*coverage=\([0-9.]*%\).*/\1/p' <<<"$out")
