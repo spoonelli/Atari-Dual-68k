@@ -20,6 +20,20 @@ module tb_mob_perf;
     parameter XSCROLL = 50;
     parameter YSCROLL = 157;
     parameter GFX_LAT = 8;   // pixel-clock cycles per fetch (device-realistic)
+    // MOCHAN-4: SHARED-SERVER OCCUPANCY, in pixel clocks. The per-channel
+    // latency model below is a LATENCY model: every channel's round trip runs
+    // independently, which is what "N channels in flight divides the effective
+    // per-tile cost by N" assumes. The real MO path is not N independent
+    // servers - core_top serializes every MO fetch through one SDRAM read port
+    // (mo_owner), so only the round trip overlaps, not the port occupancy.
+    // That is a fair model as long as occupancy << GFX_LAT/NCH: an MO burst
+    // holds mo_owner for ~10 clocks at 85.909MHz = 116ns, against a 139.68ns
+    // pixel clock, so real occupancy is well under ONE pixel clock.
+    // GFX_OCC forces a minimum spacing between fetch STARTS across all four
+    // channels so the concurrency win can be re-measured against a serialized
+    // port. 0 = the independent model (matches the pre-MOCHAN-4 bench exactly).
+    parameter GFX_OCC = 0;
+    parameter NCH     = 4;
 
     reg clk = 0;
     always #69.84 clk = ~clk;           // 7.159MHz pixel clock
@@ -69,35 +83,57 @@ module tb_mob_perf;
         cfg_vdata <= cfgmem[cfg_vaddr];
     end
 
+    // measurement window flag - declared early, the gfx model's concurrency
+    // census below needs it
+    reg measuring = 0, dumping = 0;
+
     // ---------------- gfx model: real chunky image bytes, GFX_LAT latency
     reg [7:0] gfx [0:(1<<22)-1];        // image bytes 0..0x220000
     initial $readmemh("sim/work/image_bytes.hex", gfx);
-    wire        gfx_reqA, gfx_reqB;
-    wire [23:0] gfx_addrA, gfx_addrB;
-    reg         gfx_doneA = 0, gfx_doneB = 0;
-    reg  [31:0] gfx_dataA, gfx_dataB;
-    reg         reqA_d = 0, reqB_d = 0;
-    reg  [4:0]  latA = 0, latB = 0;
-    reg  [23:0] addrA_l, addrB_l;
+    wire [3:0]   gfx_req;
+    wire [95:0]  gfx_addr;
+    reg  [3:0]   gfx_done = 4'd0;
+    reg  [127:0] gfx_data;
+    reg  [3:0]   req_d = 4'd0;
+    reg  [6:0]   lat  [0:3];            // 0 = channel idle
+    reg  [23:0]  addr_l [0:3];
+    reg  [6:0]   occ_ctr = 0;           // shared-server spacing countdown
+    integer      k;
+    // concurrency census: how many fetches are genuinely in flight at once.
+    // This is the POSITIVE EXERCISE METRIC for this change - if it never
+    // exceeds 2 then the four channels are not actually being used and any
+    // coverage change came from somewhere else.
+    integer conc_hist [0:4];
+    integer inflight_now, conc_max;
+    initial begin
+        for(k = 0; k < 4; k = k + 1) begin lat[k] = 0; addr_l[k] = 0; end
+        for(k = 0; k < 5; k = k + 1) conc_hist[k] = 0;
+        gfx_data = 0; conc_max = 0;
+    end
     always @(posedge clk) begin
-        if(gfx_reqA != reqA_d && latA == 0) begin
-            reqA_d <= gfx_reqA; addrA_l <= gfx_addrA; latA <= GFX_LAT[4:0];
-        end else if(latA != 0) begin
-            latA <= latA - 5'd1;
-            if(latA == 5'd1) begin
-                gfx_dataA <= {gfx[addrA_l], gfx[addrA_l+1], gfx[addrA_l+2], gfx[addrA_l+3]};
-                gfx_doneA <= ~gfx_doneA;
+        if(occ_ctr != 0) occ_ctr <= occ_ctr - 7'd1;
+        for(k = 0; k < NCH; k = k + 1) begin
+            if(gfx_req[k] != req_d[k] && lat[k] == 0
+               && (GFX_OCC == 0 || occ_ctr == 0)) begin
+                req_d[k]  <= gfx_req[k];
+                addr_l[k] <= gfx_addr[k*24 +: 24];
+                lat[k]    <= GFX_LAT[6:0];
+                if(GFX_OCC != 0) occ_ctr <= GFX_OCC[6:0];
+            end else if(lat[k] != 0) begin
+                lat[k] <= lat[k] - 7'd1;
+                if(lat[k] == 7'd1) begin
+                    gfx_data[k*32 +: 32] <= {gfx[addr_l[k]],   gfx[addr_l[k]+1],
+                                             gfx[addr_l[k]+2], gfx[addr_l[k]+3]};
+                    gfx_done[k] <= ~gfx_done[k];
+                end
             end
         end
-        if(gfx_reqB != reqB_d && latB == 0) begin
-            reqB_d <= gfx_reqB; addrB_l <= gfx_addrB; latB <= GFX_LAT[4:0];
-        end else if(latB != 0) begin
-            latB <= latB - 5'd1;
-            if(latB == 5'd1) begin
-                gfx_dataB <= {gfx[addrB_l], gfx[addrB_l+1], gfx[addrB_l+2], gfx[addrB_l+3]};
-                gfx_doneB <= ~gfx_doneB;
-            end
-        end
+    end
+    always @(posedge clk) if(measuring) begin
+        inflight_now = 0;
+        for(k = 0; k < NCH; k = k + 1) if(lat[k] != 0) inflight_now = inflight_now + 1;
+        conc_hist[inflight_now] = conc_hist[inflight_now] + 1;
+        if(inflight_now > conc_max) conc_max = inflight_now;
     end
 
     // ---------------- DUT
@@ -119,14 +155,10 @@ module tb_mob_perf;
         .mo_vdata ( mo_vdata ),
         .cfg_vaddr( cfg_vaddr ),
         .cfg_vdata( cfg_vdata ),
-        .gfx_reqA ( gfx_reqA ),
-        .gfx_reqB ( gfx_reqB ),
-        .gfx_addrA( gfx_addrA ),
-        .gfx_addrB( gfx_addrB ),
-        .gfx_doneA( gfx_doneA ),
-        .gfx_doneB( gfx_doneB ),
-        .gfx_dataA( gfx_dataA ),
-        .gfx_dataB( gfx_dataB ),
+        .gfx_req  ( gfx_req ),
+        .gfx_addr ( gfx_addr ),
+        .gfx_done ( gfx_done ),
+        .gfx_data ( gfx_data ),
         .disp_x   ( visible_x[8:0] ),
         .disp_pen ( disp_pen ),
         .disp_valid( disp_valid )
@@ -137,7 +169,6 @@ module tb_mob_perf;
     // numbers are directly comparable to the 456 cycles x 240 lines a frame has.
     localparam S_IDLE = 4'd0, S_BLIT = 4'd11, S_PRIME = 4'd13;
 
-    reg measuring = 0, dumping = 0;
     integer c_idle, c_trav, c_prime, c_blit;     // cycles by phase, this frame
     integer n_lines, n_complete, n_aborted;      // build outcome per line
     integer n_ymatch, n_wren, n_wren_off, n_reqs;
@@ -152,6 +183,15 @@ module tb_mob_perf;
     // pipelining" decides which lever is worth pulling, and it is entirely a
     // question of tiles-per-sprite: a 1-tile sprite can never amortise a fetch.
     integer n_sprites, n_tilerows;
+    // MOCHAN-4 diagnostics for the STARTUP term (which is a pure latency and
+    // does NOT divide by channel count, unlike the steady-state term):
+    //   n_pfhit    - sprites loaded with tile 0 already in flight
+    //   c_sc_block - cycles the scout wanted to prefetch but its rotation slot
+    //                was still busy
+    //   c_sc_noarm - cycles the blitter was idle-in-prime with no parked hit to
+    //                prefetch at all (the scout had not walked far enough)
+    integer n_pfhit, c_sc_block, c_sc_noarm, c_sc_done, n_leadsum, n_leadn;
+    integer pf_issue_t, now_t;
     // ...and WHERE in S_PRIME the engine waits:
     //   issue   - blit_n==15: the sprite-start issue cycle, or blocked on a
     //             channel still in flight after a line abort
@@ -170,11 +210,37 @@ module tb_mob_perf;
         px_seen=0; line_entries=0; max_entries=0; n_entries=0;
         n_deadtile=0; n_blitpx=0; n_sprites=0; n_tilerows=0;
         c_pr_issue=0; c_pr_start=0; c_pr_steady=0;
+        n_pfhit=0; c_sc_block=0; c_sc_noarm=0; c_sc_done=0; n_leadsum=0; n_leadn=0;
+        pf_issue_t=0; now_t=0;
     end
 
+    // MOCHAN-4: the pump issues in parallel with S_PRIME/S_BLIT, so the old
+    // blit_n==15 "dedicated issue cycle" no longer exists and the issue bucket
+    // reads 0 on this engine. startup/steady keep their meaning exactly.
     always @(posedge clk) if(measuring) begin
         // a sprite LOAD == entering S_E0 (the blitter taking a parked hit)
-        if(dut.state == 4'd4 && state_d != 4'd4) n_sprites = n_sprites + 1;
+        now_t = now_t + 1;
+        if(dut.state == 4'd4 && state_d != 4'd4) begin
+            n_sprites = n_sprites + 1;
+            if(dut.sc_pf_valid) begin
+                n_pfhit = n_pfhit + 1;
+                // LEAD TIME: cycles between the prefetch going out and the
+                // blitter adopting it. This must reach GFX_LAT for the
+                // per-sprite startup wait to be fully hidden.
+                n_leadsum = n_leadsum + (now_t - pf_issue_t);
+                n_leadn   = n_leadn + 1;
+            end
+        end
+        if(dut.iss_en && !dut.pump_want) pf_issue_t = now_t;
+        // Split the scout's idle window three ways - which one dominates
+        // decides whether MORE CHANNELS or a DEEPER prefetch queue is the
+        // next lever.
+        if(dut.pump_live && !dut.pump_ready) begin
+            if(dut.sc_pf_valid)            c_sc_done  = c_sc_done  + 1;
+            else if(!dut.hit_pending || !dut.pf_armed)
+                                           c_sc_noarm = c_sc_noarm + 1;
+            else if(dut.busy_iss)          c_sc_block = c_sc_block + 1;
+        end
         // a tile-row BLIT == entering S_BLIT at blit_n==0
         if(dut.state == S_BLIT && state_d != S_BLIT && dut.blit_n == 4'd0)
             n_tilerows = n_tilerows + 1;
@@ -218,8 +284,13 @@ module tb_mob_perf;
             line_entries = 0;
         end
     end
-    always @(gfx_reqA) if(measuring) n_reqs = n_reqs + 1;
-    always @(gfx_reqB) if(measuring) n_reqs = n_reqs + 1;
+    reg [3:0] req_cnt_d = 4'd0;
+    always @(posedge clk) begin
+        if(measuring)
+            for(k = 0; k < NCH; k = k + 1)
+                if(gfx_req[k] != req_cnt_d[k]) n_reqs = n_reqs + 1;
+        req_cnt_d <= gfx_req;
+    end
 
     // ---------------- fetch-pairing check (MO-ARTIFACT-RESEARCH.md root cause B)
     // The gfx handshake is edge-based, so a completion that lands across a line
@@ -231,8 +302,20 @@ module tb_mob_perf;
                          + { dut.row_in_tile, 2'd0 };
     wire [31:0] exp_data = {gfx[exp_addr], gfx[exp_addr+1],
                             gfx[exp_addr+2], gfx[exp_addr+3]};
+    // MOCHAN-4: STALE-PEND check. The blitter consumes tile tx from channel
+    // (pf_ch+tx)&3 purely on that channel's pend bit, so a completion left
+    // unconsumed by a PREVIOUS sprite would be silently blitted as this
+    // sprite's tile. The invariant that forbids it: when a sprite is loaded,
+    // no channel holds an unconsumed completion except the one the scout
+    // prefetched tile 0 onto. Checked directly rather than argued.
+    integer n_stalepend;
+    reg [3:0] pf_hit_mask;
     integer n_pairslip;
-    initial n_pairslip = 0;
+    initial begin n_pairslip = 0; n_stalepend = 0; end
+    always @(posedge clk) if(measuring && dut.state == 4'd9) begin   // S_FETCH
+        pf_hit_mask = dut.pf_hit ? (4'b0001 << dut.pf_ch) : 4'b0000;
+        if((dut.pend & ~pf_hit_mask) != 4'd0) n_stalepend = n_stalepend + 1;
+    end
     always @(posedge clk) if(measuring) begin
         // Checked at the point of USE rather than at the channel mux: when the
         // first pixel of tile tx is about to be blitted, the row the engine
@@ -305,8 +388,11 @@ module tb_mob_perf;
                  px_seen, n_reqs, n_wren, n_entries, max_entries);
         $display("PERF lines=%0d complete=%0d aborted=%0d budget_exhausted=%0d",
                  n_lines, n_complete, n_aborted, n_budget_out);
-        $display("PERF pairing_slips=%0d dead_tiles=%0d (%0d wasted blit cycles of %0d)",
-                 n_pairslip, n_deadtile, n_deadtile*8, n_blitpx);
+        $display("PERF pairing_slips=%0d stale_pend=%0d dead_tiles=%0d (%0d wasted blit cycles of %0d)",
+                 n_pairslip, n_stalepend, n_deadtile, n_deadtile*8, n_blitpx);
+        $display("PERF concurrency max=%0d hist0=%0d hist1=%0d hist2=%0d hist3=%0d hist4=%0d",
+                 conc_max, conc_hist[0], conc_hist[1], conc_hist[2],
+                 conc_hist[3], conc_hist[4]);
         $display("PERF ghosts=%0d pen_mismatch=%0d  (stale-tag pixels this frame's build never wrote)",
                  n_ghost, n_mismatch);
         $display("PERF sprites=%0d tilerows=%0d tiles_per_sprite=%0d.%02d prime_per_sprite=%0d.%02d",
@@ -315,6 +401,10 @@ module tb_mob_perf;
                  n_sprites ? (100*n_tilerows/n_sprites)%100 : 0,
                  n_sprites ? c_prime/n_sprites : 0,
                  n_sprites ? (100*c_prime/n_sprites)%100 : 0);
+        $display("PERF startup_diag pf_hits=%0d/%0d sc_blocked=%0d sc_nohit=%0d sc_alreadydone=%0d mean_lead=%0d.%02d",
+                 n_pfhit, n_sprites, c_sc_block, c_sc_noarm, c_sc_done,
+                 n_leadn ? n_leadsum/n_leadn : 0,
+                 n_leadn ? (100*n_leadsum/n_leadn)%100 : 0);
         $display("PERF prime_split issue=%0d startup=%0d steady=%0d (startup is %0d%% of prime)",
                  c_pr_issue, c_pr_start, c_pr_steady,
                  c_prime ? (100*c_pr_start)/c_prime : 0);

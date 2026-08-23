@@ -1027,36 +1027,76 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg        vg_reqB_last, vg_doneB_85;
     reg        cpu_owner;
     reg        mo_owner = 1'b0;           // MO-SDRAM read in flight
-    reg        mo_sd_ch = 1'b0;           // which MO channel it serves
+    reg [1:0]  mo_sd_ch = 2'd0;           // which MO channel it serves
     reg [31:0] vg_dataA, vg_dataB;
     reg        cvg_ch;                    // channel served by the in-flight cvg op
-    // LANE3o: MO gets the same A/B ping-pong as PF - two fetches in flight
-    // across the CDC (the serial channel starved late links: Jake invisible)
-    reg        mgA_req_last, mgA_done_85;
-    reg        mgB_req_last, mgB_done_85;
-    reg [31:0] mg_dataA, mg_dataB;
+    // LANE3o: MO got the same A/B ping-pong as PF - two fetches in flight
+    // across the CDC (the serial channel starved late links: Jake invisible).
+    // MOCHAN-4: FOUR channels. Two in flight left the engine bound by fetch
+    // concurrency at the measured worst-case round trip (per-tile cost
+    // max(8 blit, 31/2) = 15.5); four make the steady-state term max(8, 31/4)
+    // = 8, i.e. blit-bound.
+    reg [3:0]  mg_req_last, mg_done_85;
+    reg [127:0] mg_data;                  // 4 x 32
     reg        cmg_ch;
-    wire       mgA_req_s, mgB_req_s;
-    wire       mo_gfx_reqA, mo_gfx_reqB;
-    wire [23:0] mo_gfx_addrA, mo_gfx_addrB;
+    wire [3:0] mg_req_s;
+    wire [3:0]  mo_gfx_req;
+    wire [95:0] mo_gfx_addr;              // 4 x 24
     // SDSCHED-74: same-family crossings (7.159 -> 85.909, timed since the
     // '73 SDC grouping) - single capture FFs. The 3-stage done-return
     // chains cost ~400ns per fetched sprite row (~1/3 of the row budget).
-    reg mgA_req_s_q, mgB_req_s_q;
+    integer   mci;                        // MOCHAN-4 per-channel loop index
+    reg [3:0] mg_req_s_q;
+    always @(posedge clk_sdram) mg_req_s_q <= mo_gfx_req;
+    assign mg_req_s = mg_req_s_q;
+    wire [3:0] mg_done_s;
+    reg  [3:0] mg_done_s_q;
+    always @(posedge clk_sys_7159) mg_done_s_q <= mg_done_85;
+    assign mg_done_s = mg_done_s_q;
+
+    // ---- MOCHAN-4: REGISTERED MO ARBITRATION PRE-DECODE --------------------
+    // This is the whole reason the channel count could be doubled without
+    // growing the SDRAM grant condition, which is the tightest timing path in
+    // the design AND is shared with both CPUs' read clients.
+    //
+    // Before: the grant tested
+    //     (mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last)
+    // - two XORs feeding an OR, in front of the eight-term AND chain that also
+    // gates the CPU fastpath and CPU fetch arms. Four channels done the same
+    // way would have made that four XORs feeding a 4-input OR, i.e. one more
+    // level of logic on the shared path, and the address mux on rd_addr_q
+    // would have grown from 2:1 to 4:1 on the same path.
+    //
+    // After: the pending test, the channel choice AND the address selection
+    // are all computed one clock EARLIER and presented to the grant as plain
+    // register outputs. The grant sees a single flop bit (mo_pend_q) where it
+    // used to see XOR+OR, and rd_addr_q's MO leg is a register-to-register
+    // path where it used to be a 2:1 mux. Combinational depth on the
+    // CPU-shared grant therefore goes DOWN, not up, at four channels.
+    //
+    // Cost: one clk_sdram cycle (11.6ns) of extra arbitration latency per MO
+    // fetch, against a round trip of ~1.1us. Fixed priority 0>1>2>3 keeps the
+    // old "A before B" order.
+    //
+    // Safety of looking one cycle back: mg_req_last only ever CLEARS a pending
+    // bit, and only in the grant arm, which also sets mo_owner - and the grant
+    // requires !mo_owner, so no second grant can fire off the stale bit. Every
+    // other transition only ADDS pending bits. So a channel that was pending
+    // last cycle is still pending this cycle, and mo_naddr_q still holds its
+    // address (the engine holds gfx_addr stable until the completion returns).
+    wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
+    reg        mo_pend_q;
+    reg [1:0]  mo_nch_q;
+    reg [23:0] mo_naddr_q;
     always @(posedge clk_sdram) begin
-        mgA_req_s_q <= mo_gfx_reqA;
-        mgB_req_s_q <= mo_gfx_reqB;
+        mo_pend_q  <= |mg_pend_w;
+        mo_nch_q   <= mg_pend_w[0] ? 2'd0 : mg_pend_w[1] ? 2'd1
+                    : mg_pend_w[2] ? 2'd2 : 2'd3;
+        mo_naddr_q <= mg_pend_w[0] ? mo_gfx_addr[23:0]
+                    : mg_pend_w[1] ? mo_gfx_addr[47:24]
+                    : mg_pend_w[2] ? mo_gfx_addr[71:48]
+                                   : mo_gfx_addr[95:72];
     end
-    assign mgA_req_s = mgA_req_s_q;
-    assign mgB_req_s = mgB_req_s_q;
-    wire mgA_done_s, mgB_done_s;
-    reg mgA_done_s_q, mgB_done_s_q;
-    always @(posedge clk_sys_7159) begin
-        mgA_done_s_q <= mgA_done_85;
-        mgB_done_s_q <= mgB_done_85;
-    end
-    assign mgA_done_s = mgA_done_s_q;
-    assign mgB_done_s = mgB_done_s_q;
     wire       vg_reqA_s, vg_reqB_s;
     reg        vg_reqA_px, vg_reqB_px;    // pixel-domain request toggles
     reg [23:0] vg_addrA_px, vg_addrB_px;  // stable while request in flight
@@ -1203,11 +1243,17 @@ always @(posedge clk_sdram) begin
             if(vg_reqB_s != vg_reqB_last && cvg_ph==2'd0) begin
                 vg_reqB_last <= vg_reqB_s; vg_dataB <= 32'd0; vg_doneB_85 <= ~vg_doneB_85;
             end
-            if(mgA_req_s != mgA_req_last && cmg_ph==3'd0) begin
-                mgA_req_last <= mgA_req_s; mg_dataA <= 32'd0; mgA_done_85 <= ~mgA_done_85;
-            end
-            if(mgB_req_s != mgB_req_last && cmg_ph==3'd0) begin
-                mgB_req_last <= mgB_req_s; mg_dataB <= 32'd0; mgB_done_85 <= ~mgB_done_85;
+            // MOCHAN-4: same drain, four channels. This arm is exclusive with
+            // the real MO grant below (that one requires !vidkill_sd), so
+            // mg_req_last still has exactly one writer per cycle.
+            if(cmg_ph==3'd0) begin
+                for(mci = 0; mci < 4; mci = mci + 1) begin
+                    if(mg_req_s[mci] != mg_req_last[mci]) begin
+                        mg_req_last[mci]      <= mg_req_s[mci];
+                        mg_data[mci*32 +: 32] <= 32'd0;
+                        mg_done_85[mci]       <= ~mg_done_85[mci];
+                    end
+                end
             end
         end
         // unified CRAM read-start chain (drain owns cq_n!=0 cycles; reads
@@ -1377,19 +1423,21 @@ always @(posedge clk_sdram) begin
         // also below both CPU fastpath fills. A fill is ~13 clks and each
         // CPU issues at most one per 48-clk bus cycle, so MO keeps >=40% of
         // the bus even with both CPUs streaming fetches.)
-        if(!vidkill_sd && (mgA_req_s != mgA_req_last || mgB_req_s != mgB_req_last)
+        // MOCHAN-4: the ONLY change to this condition is that the two-channel
+        // XOR/OR pending test became the single registered bit mo_pend_q. Every
+        // CPU-first term is byte-for-byte what it was: MO still yields to a
+        // pending CPU fetch (core_rom_req_s && !core_rom_ack_85), to either
+        // fastpath want or owner, and to any read already in flight. MO remains
+        // the LOWEST-priority SDRAM read client. (v14-v19: two grant arms
+        // firing on one clock is last-writer-wins address corruption - this is
+        // still one if, one arm.)
+        if(!vidkill_sd && mo_pend_q
            && !(core_rom_req_s && !core_rom_ack_85)
            && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner
            && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want) begin
-            if(mgA_req_s != mgA_req_last) begin
-                mgA_req_last <= mgA_req_s;
-                rd_addr_q    <= {1'b0, mo_gfx_addrA};
-                mo_sd_ch     <= 1'b0;
-            end else begin
-                mgB_req_last <= mgB_req_s;
-                rd_addr_q    <= {1'b0, mo_gfx_addrB};
-                mo_sd_ch     <= 1'b1;
-            end
+            mg_req_last[mo_nch_q] <= mg_req_s[mo_nch_q];
+            rd_addr_q <= {1'b0, mo_naddr_q};
+            mo_sd_ch  <= mo_nch_q;
             rd_pre_q  <= 1;                     // same armor as CPU reads
             sd_rd_req <= 1;
             mo_owner  <= 1;
@@ -1397,13 +1445,8 @@ always @(posedge clk_sdram) begin
         if(mo_owner && sd_rd_req && sd_rd_ack) begin
             sd_rd_req <= 0;
             mo_owner  <= 0;
-            if(mo_sd_ch) begin
-                mg_dataB    <= sd_rd_data;
-                mgB_done_85 <= ~mgB_done_85;
-            end else begin
-                mg_dataA    <= sd_rd_data;
-                mgA_done_85 <= ~mgA_done_85;
-            end
+            mg_data[mo_sd_ch*32 +: 32] <= sd_rd_data;
+            mg_done_85[mo_sd_ch]       <= ~mg_done_85[mo_sd_ch];
         end
         // LANE3i2: the READ-INTEGRITY SCRUBBER is RETIRED. It answered its
         // questions (v23-v29 exoneration arc; final verdict 0100 = full pass,
@@ -1425,8 +1468,12 @@ always @(posedge clk_sdram) begin
     // trackers kept stale values - an inverted pair = one phantom serve per
     // channel per reset. Track the live toggles while reset is held.
     if(!core_rstn_sd) begin
-        mgA_req_last <= mgA_req_s;
-        mgB_req_last <= mgB_req_s;
+        mg_req_last <= mg_req_s;
+        // MOCHAN-4: the pre-decode is one cycle behind the resync above, so
+        // hold it low for the duration of reset rather than let a one-cycle
+        // stale "pending" launch a phantom serve as the engine zeroes its
+        // toggles. (SDSCHED-75 is the same lesson one stage further back.)
+        mo_pend_q <= 1'b0;
         vg_reqA_last <= vg_reqA_s;
         vg_reqB_last <= vg_reqB_s;
         // SDSCHED-88: fastpath caches die with the core - a re-download
@@ -1646,8 +1693,8 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     reg [15:0] cst0_px, cst1_px, cst0_m, cst1_m;
     reg mgreq_d2;
     always @(posedge clk_sys_7159) begin
-        mgreq_d2 <= mo_gfx_reqA;
-        if(mo_gfx_reqA != mgreq_d2) mgreq_cnt <= mgreq_cnt + 8'd1;
+        mgreq_d2 <= mo_gfx_req[0];
+        if(mo_gfx_req[0] != mgreq_d2) mgreq_cnt <= mgreq_cnt + 8'd1;
         if(mo_valid && mo_pen[3:0] != 4'h0) mopen_cnt <= mopen_cnt + 8'd1;
         cst0_m <= cst_sum0; cst0_px <= cst0_m;
         cst1_m <= cst_sum1; cst1_px <= cst1_m;
@@ -2005,14 +2052,10 @@ escape_mob umob (
     .mo_vdata ( mo_vdata ),
     .cfg_vaddr( cfg_vaddr ),
     .cfg_vdata( cfg_vdata ),
-    .gfx_reqA ( mo_gfx_reqA ),
-    .gfx_reqB ( mo_gfx_reqB ),
-    .gfx_addrA( mo_gfx_addrA ),
-    .gfx_addrB( mo_gfx_addrB ),
-    .gfx_doneA( mgA_done_s ),
-    .gfx_doneB( mgB_done_s ),
-    .gfx_dataA( mg_dataA ),
-    .gfx_dataB( mg_dataB ),
+    .gfx_req  ( mo_gfx_req ),
+    .gfx_addr ( mo_gfx_addr ),
+    .gfx_done ( mg_done_s ),
+    .gfx_data ( mg_data ),
     .disp_x   ( visible_x[8:0] ),
     .disp_pen ( mo_pen ),
     .disp_prio( mo_prio ),
