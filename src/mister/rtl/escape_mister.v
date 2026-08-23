@@ -23,6 +23,8 @@
 //    DE10-Nano has one SDRAM and no PSRAM, so the playfield graphics channel
 //    (vg A/B) has been moved onto the SDRAM arbiter alongside the motion
 //    objects.  PF and MO share the lowest priority tier round-robin.
+//    MiSTer does NOT use the psram/CLOCK_SPEED path at all - third_party's
+//    psram.sv is not in this project's file list.
 //
 // 2. SDRAM CLOCK IS UNCHANGED at 35.795455 MHz (5 x CPU) with the same +90
 //    degree chip-clock phase the Pocket ships.  It is tempting to raise it to
@@ -46,6 +48,17 @@
 //    are converted to the chunky 4bpp layout the machine expects by the
 //    download writer below (see the SPRITE REPACK block).  The Pocket does
 //    the same transform offline in support/build_rom.py.
+//
+// 6. EEPROM persistence (BUILD 103, rtl/ee_save.vhd) is NOT wired here.  That
+//    engine talks to the APF bridge and data slots directly, so it is Pocket
+//    -only; escape_core's ee_* ports all carry defaults and are left open.
+//    High scores and operator settings therefore do not survive a power cycle
+//    on MiSTer yet.  The MiSTer-native route is an <nvram index="4" size="512">
+//    element in the .mra plus the matching hps_io ioctl index-4 wiring.
+//    Because ee_save.vhd is not compiled here, its two "MLAB" ramstyle
+//    attributes - which exist only because the Pocket has zero spare M10K -
+//    cost this build nothing, so they are deliberately left alone rather than
+//    forked.
 //============================================================================
 `default_nettype none
 
@@ -360,48 +373,78 @@ always @(posedge clk_sdram) begin
     fpe_ready_q <= FASTPATH_EN && fpe_valid && fpe_spec_s && (fpe_tag == fpe_addr_s);
 end
 
-// ---- motion-object gfx channels (A/B ping-pong) ---------------------------
-wire        mo_gfx_reqA, mo_gfx_reqB;
-wire [23:0] mo_gfx_addrA, mo_gfx_addrB;
-reg         mgA_req_last, mgB_req_last;
-reg         mgA_done_85 = 1'b0, mgB_done_85 = 1'b0;
-reg  [31:0] mg_dataA, mg_dataB;
-reg         mo_owner = 1'b0, mo_sd_ch = 1'b0;
-reg mgA_req_s_q, mgB_req_s_q;
+// ---- motion-object gfx channels (MOCHAN-4: four, packed) -------------------
+// BUILD 104 widened the engine from an A/B ping-pong to four channels and gave
+// core_top a REGISTERED arbitration pre-decode so the grant condition sees one
+// flop bit instead of a widening XOR/OR tree.  That pre-decode is reproduced
+// here verbatim in intent, and it matters more on MiSTer than on the Pocket:
+// the grant is the tightest path in the design AND our first build missed
+// setup on this very clock domain, so keeping combinational depth off the
+// shared grant is not optional here.
+wire [3:0]   mo_gfx_req;
+wire [95:0]  mo_gfx_addr;              // 4 x 24
+reg  [3:0]   mg_req_last;
+reg  [3:0]   mg_done_85 = 4'd0;
+reg  [127:0] mg_data;                  // 4 x 32
+reg          mo_owner = 1'b0;
+reg  [1:0]   mo_sd_ch = 2'd0;
+reg  [3:0]   mg_req_s_q;
+always @(posedge clk_sdram) mg_req_s_q <= mo_gfx_req;
+wire [3:0] mg_req_s = mg_req_s_q;
+reg  [3:0] mg_done_s_q;
+always @(posedge clk_sys) mg_done_s_q <= mg_done_85;
+wire [3:0] mg_done_s = mg_done_s_q;
+
+// Registered MO pre-decode. Safety of looking one cycle back is the same
+// argument core_top makes: mg_req_last only ever CLEARS a pending bit, and
+// only in the grant arm, which also sets mo_owner - and the grant requires
+// !mo_owner, so a stale bit can never fire a second grant. Everything else
+// only ADDS pending bits, and the engine holds gfx_addr stable until the
+// completion returns.
+wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
+reg        mo_pend_q  = 1'b0;
+reg [1:0]  mo_nch_q   = 2'd0;
+reg [23:0] mo_naddr_q = 24'd0;
 always @(posedge clk_sdram) begin
-    mgA_req_s_q <= mo_gfx_reqA;
-    mgB_req_s_q <= mo_gfx_reqB;
+    // gated by core_rstn_sd HERE and not in the reset-resync block below:
+    // one always block per net, or Quartus rejects it as multiple drivers
+    // (iverilog accepts it silently, so no bench catches this).
+    mo_pend_q  <= core_rstn_sd && (|mg_pend_w);
+    mo_nch_q   <= mg_pend_w[0] ? 2'd0 : mg_pend_w[1] ? 2'd1
+                : mg_pend_w[2] ? 2'd2 : 2'd3;
+    mo_naddr_q <= mg_pend_w[0] ? mo_gfx_addr[23:0]
+                : mg_pend_w[1] ? mo_gfx_addr[47:24]
+                : mg_pend_w[2] ? mo_gfx_addr[71:48]
+                                : mo_gfx_addr[95:72];
 end
-wire mgA_req_s = mgA_req_s_q, mgB_req_s = mgB_req_s_q;
-reg mgA_done_s_q, mgB_done_s_q;
-always @(posedge clk_sys) begin
-    mgA_done_s_q <= mgA_done_85;
-    mgB_done_s_q <= mgB_done_85;
-end
-wire mgA_done_s = mgA_done_s_q, mgB_done_s = mgB_done_s_q;
 
 // ---- playfield gfx channels (A/B ping-pong) - SDRAM on MiSTer -------------
+// Given the same pre-decode treatment as MO, for the same reason: the PF
+// client is new on this platform and must not add depth to the shared grant.
 reg         vg_reqA_px = 1'b0, vg_reqB_px = 1'b0;
 reg  [23:0] vg_addrA_px, vg_addrB_px;
-reg         vg_reqA_last, vg_reqB_last;
-reg         vg_doneA_85 = 1'b0, vg_doneB_85 = 1'b0;
-reg  [31:0] vg_dataA, vg_dataB;
-reg         pf_owner = 1'b0, pf_sd_ch = 1'b0;
-reg vg_reqA_s_q, vg_reqB_s_q;
-always @(posedge clk_sdram) begin
-    vg_reqA_s_q <= vg_reqA_px;
-    vg_reqB_s_q <= vg_reqB_px;
-end
-wire vg_reqA_s = vg_reqA_s_q, vg_reqB_s = vg_reqB_s_q;
-reg vg_doneA_s_q, vg_doneB_s_q;
-always @(posedge clk_sys) begin
-    vg_doneA_s_q <= vg_doneA_85;
-    vg_doneB_s_q <= vg_doneB_85;
-end
-wire vg_doneA_s = vg_doneA_s_q, vg_doneB_s = vg_doneB_s_q;
+reg  [1:0]  vg_req_last;
+reg  [1:0]  vg_done_85 = 2'd0;
+reg  [63:0] vg_data;                   // 2 x 32
+reg         pf_owner = 1'b0;
+reg         pf_sd_ch = 1'b0;
+reg  [1:0]  vg_req_s_q;
+always @(posedge clk_sdram) vg_req_s_q <= {vg_reqB_px, vg_reqA_px};
+wire [1:0] vg_req_s = vg_req_s_q;
+reg  [1:0] vg_done_s_q;
+always @(posedge clk_sys) vg_done_s_q <= vg_done_85;
+wire [1:0] vg_done_s = vg_done_s_q;
 
-wire mo_pend = (mgA_req_s != mgA_req_last) || (mgB_req_s != mgB_req_last);
-wire pf_pend = (vg_reqA_s != vg_reqA_last) || (vg_reqB_s != vg_reqB_last);
+wire [1:0] vg_pend_w = vg_req_s ^ vg_req_last;
+reg        pf_pend_q  = 1'b0;
+reg        pf_nch_q   = 1'b0;
+reg [23:0] pf_naddr_q = 24'd0;
+always @(posedge clk_sdram) begin
+    pf_pend_q  <= core_rstn_sd && (|vg_pend_w);
+    pf_nch_q   <= vg_pend_w[0] ? 1'b0 : 1'b1;
+    pf_naddr_q <= vg_pend_w[0] ? vg_addrA_px : vg_addrB_px;
+end
+
 reg  vid_last_pf = 1'b0;      // round-robin between the two video clients
 
 // ---- char ROM DMA + SDRAM self-check --------------------------------------
@@ -504,37 +547,28 @@ always @(posedge clk_sdram) begin
         end
         if (!core_rom_req_s) core_rom_ack_85 <= 1'b0;
 
-        // video tier: playfield and motion objects, round-robin.
-        // CPUs always outrank both; a video read is ~10 clocks at 35.8 MHz,
-        // i.e. about two 7.16 MHz CPU cycles at worst.
-        if ((pf_pend || mo_pend)
+        // Video tier: playfield and motion objects, round-robin.  CPUs always
+        // outrank both.  Both pending tests are single registered bits
+        // (MOCHAN-4 pre-decode above), so this arm adds one 2-input OR and one
+        // mux select to the shared grant, not a tree of comparators.
+        // v14-v19 lesson: ONE if, ONE arm - two grant arms firing on the same
+        // clock is last-writer-wins address corruption.
+        if ((pf_pend_q || mo_pend_q)
             && !(core_rom_req_s && !core_rom_ack_85)
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
             && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want) begin
-            if (pf_pend && (!mo_pend || vid_last_pf == 1'b0)) begin
-                if (vg_reqA_s != vg_reqA_last) begin
-                    vg_reqA_last <= vg_reqA_s;
-                    rd_addr_q    <= {1'b0, vg_addrA_px};
-                    pf_sd_ch     <= 1'b0;
-                end else begin
-                    vg_reqB_last <= vg_reqB_s;
-                    rd_addr_q    <= {1'b0, vg_addrB_px};
-                    pf_sd_ch     <= 1'b1;
-                end
+            if (pf_pend_q && (!mo_pend_q || vid_last_pf == 1'b0)) begin
+                vg_req_last[pf_nch_q] <= vg_req_s[pf_nch_q];
+                rd_addr_q   <= {1'b0, pf_naddr_q};
+                pf_sd_ch    <= pf_nch_q;
                 rd_pre_q    <= 1'b0;        // video fast path (see header note 3)
                 sd_rd_req   <= 1'b1;
                 pf_owner    <= 1'b1;
                 vid_last_pf <= 1'b1;
             end else begin
-                if (mgA_req_s != mgA_req_last) begin
-                    mgA_req_last <= mgA_req_s;
-                    rd_addr_q    <= {1'b0, mo_gfx_addrA};
-                    mo_sd_ch     <= 1'b0;
-                end else begin
-                    mgB_req_last <= mgB_req_s;
-                    rd_addr_q    <= {1'b0, mo_gfx_addrB};
-                    mo_sd_ch     <= 1'b1;
-                end
+                mg_req_last[mo_nch_q] <= mg_req_s[mo_nch_q];
+                rd_addr_q   <= {1'b0, mo_naddr_q};
+                mo_sd_ch    <= mo_nch_q;
                 rd_pre_q    <= 1'b1;        // MO keeps the Pocket's armor
                 sd_rd_req   <= 1'b1;
                 mo_owner    <= 1'b1;
@@ -544,14 +578,14 @@ always @(posedge clk_sdram) begin
         if (pf_owner && sd_rd_req && sd_rd_ack) begin
             sd_rd_req <= 1'b0;
             pf_owner  <= 1'b0;
-            if (pf_sd_ch) begin vg_dataB <= sd_rd_data; vg_doneB_85 <= ~vg_doneB_85; end
-            else          begin vg_dataA <= sd_rd_data; vg_doneA_85 <= ~vg_doneA_85; end
+            vg_data[pf_sd_ch*32 +: 32] <= sd_rd_data;
+            vg_done_85[pf_sd_ch]       <= ~vg_done_85[pf_sd_ch];
         end
         if (mo_owner && sd_rd_req && sd_rd_ack) begin
             sd_rd_req <= 1'b0;
             mo_owner  <= 1'b0;
-            if (mo_sd_ch) begin mg_dataB <= sd_rd_data; mgB_done_85 <= ~mgB_done_85; end
-            else          begin mg_dataA <= sd_rd_data; mgA_done_85 <= ~mgA_done_85; end
+            mg_data[mo_sd_ch*32 +: 32] <= sd_rd_data;
+            mg_done_85[mo_sd_ch]       <= ~mg_done_85[mo_sd_ch];
         end
 
         // SDRAM canary: while the deep probe fails, re-probe + re-DMA
@@ -566,10 +600,11 @@ always @(posedge clk_sdram) begin
     // mob zeroes its request toggles there, and a stale tracker is one
     // phantom serve per channel per reset (SDSCHED-75).
     if (!core_rstn_sd) begin
-        mgA_req_last <= mgA_req_s;
-        mgB_req_last <= mgB_req_s;
-        vg_reqA_last <= vg_reqA_s;
-        vg_reqB_last <= vg_reqB_s;
+        mg_req_last <= mg_req_s;
+        vg_req_last <= vg_req_s;
+        // NOTE: mo_pend_q / pf_pend_q are held low under reset in their OWN
+        // always blocks above, not here - two blocks driving one net is a
+        // Quartus error that iverilog accepts silently.
         fpv_valid <= 1'b0; fpe_valid <= 1'b0;
         fpv_vpre  <= 1'b0; fpe_vpre  <= 1'b0;
     end
@@ -642,7 +677,7 @@ reg [23:0] pfq_addr0, pfq_addr1, pfq_addr2, pfq_addr3;
 reg [1:0]  pfq_slot0, pfq_slot1, pfq_slot2, pfq_slot3;
 reg [2:0]  pfq_count = 3'd0;
 reg [1:0]  pfq_wr = 2'd0, pfq_rd = 2'd0;
-reg        vg_doneA_last = 1'b0, vg_doneB_last = 1'b0;
+reg [1:0]  vg_done_last = 2'd0;
 
 wire [23:0] pf_fetch_addr = 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
 
@@ -687,24 +722,23 @@ always @(posedge clk_sys) begin
         default: ;
     endcase
 
-    vg_doneA_last <= vg_doneA_s;
-    if (vg_doneA_s != vg_doneA_last) begin
+    vg_done_last <= vg_done_s;
+    if (vg_done_s[0] != vg_done_last[0]) begin
         case (pf_inflA)
-            2'd0: pfring0 <= vg_dataA;  2'd1: pfring1 <= vg_dataA;
-            2'd2: pfring2 <= vg_dataA;  default: pfring3 <= vg_dataA;
+            2'd0: pfring0 <= vg_data[31:0];  2'd1: pfring1 <= vg_data[31:0];
+            2'd2: pfring2 <= vg_data[31:0];  default: pfring3 <= vg_data[31:0];
         endcase
         inflA <= 1'b0;
     end
-    vg_doneB_last <= vg_doneB_s;
-    if (vg_doneB_s != vg_doneB_last) begin
+    if (vg_done_s[1] != vg_done_last[1]) begin
         case (pf_inflB)
-            2'd0: pfring0 <= vg_dataB;  2'd1: pfring1 <= vg_dataB;
-            2'd2: pfring2 <= vg_dataB;  default: pfring3 <= vg_dataB;
+            2'd0: pfring0 <= vg_data[63:32];  2'd1: pfring1 <= vg_data[63:32];
+            2'd2: pfring2 <= vg_data[63:32];  default: pfring3 <= vg_data[63:32];
         endcase
         inflB <= 1'b0;
     end
     if (pfq_count != 3'd0) begin
-        if (!inflA && !(vg_doneA_s != vg_doneA_last)) begin
+        if (!inflA && !(vg_done_s[0] != vg_done_last[0])) begin
             case (pfq_rd)
                 2'd0: begin vg_addrA_px <= pfq_addr0; pf_inflA <= pfq_slot0; end
                 2'd1: begin vg_addrA_px <= pfq_addr1; pf_inflA <= pfq_slot1; end
@@ -715,7 +749,7 @@ always @(posedge clk_sys) begin
             inflA      <= 1'b1;
             pfq_rd     <= pfq_rd + 2'd1;
             pfq_count  <= pfq_count - 3'd1;
-        end else if (!inflB && !(vg_doneB_s != vg_doneB_last)) begin
+        end else if (!inflB && !(vg_done_s[1] != vg_done_last[1])) begin
             case (pfq_rd)
                 2'd0: begin vg_addrB_px <= pfq_addr0; pf_inflB <= pfq_slot0; end
                 2'd1: begin vg_addrB_px <= pfq_addr1; pf_inflB <= pfq_slot1; end
@@ -758,6 +792,7 @@ wire [15:0] cfg_vdata;
 wire [7:0]  mo_pen;
 wire [1:0]  mo_prio;
 wire        mo_valid;
+wire        mo_stain_s, mo_stain_e;      // MOSTAIN-1 second-pass markers
 
 escape_mob umob (
     .clk       ( clk_sys ),
@@ -773,18 +808,16 @@ escape_mob umob (
     .mo_vdata  ( mo_vdata ),
     .cfg_vaddr ( cfg_vaddr ),
     .cfg_vdata ( cfg_vdata ),
-    .gfx_reqA  ( mo_gfx_reqA ),
-    .gfx_reqB  ( mo_gfx_reqB ),
-    .gfx_addrA ( mo_gfx_addrA ),
-    .gfx_addrB ( mo_gfx_addrB ),
-    .gfx_doneA ( mgA_done_s ),
-    .gfx_doneB ( mgB_done_s ),
-    .gfx_dataA ( mg_dataA ),
-    .gfx_dataB ( mg_dataB ),
+    .gfx_req   ( mo_gfx_req ),
+    .gfx_addr  ( mo_gfx_addr ),
+    .gfx_done  ( mg_done_s ),
+    .gfx_data  ( mg_data ),
     .disp_x    ( visible_x[8:0] ),
     .disp_pen  ( mo_pen ),
     .disp_prio ( mo_prio ),
-    .disp_valid( mo_valid )
+    .disp_valid( mo_valid ),
+    .disp_stain_s( mo_stain_s ),
+    .disp_stain_e( mo_stain_e )
 );
 
 // ===========================================================================
@@ -851,8 +884,38 @@ escape_prio uprio (
     .pen      ( pr_pen )
 );
 
+// MOSTAIN-1: the SECOND motion-object pass (atarimo apply_stain).  The
+// reference runs it over the FINISHED picture - after the MO/PF merge AND
+// after the alpha tilemap - ORing 0x400 into every pixel a "special" (MPR2)
+// sprite covers.  0x400 is colour-RAM bit 10, the top half of the 2048-entry
+// colour RAM: the FACTORY MAP screen's route markers live entirely in that
+// bank.  The reference restarts its scan at every marker pixel; the union of
+// those scans is this one-flip-flop automaton along the scanline:
+//
+//     stain(x) = S(x) | alive(x-1)
+//     alive(x) = stain(x) & ~( E(x-1) & ~S(x) )
+//
+// S = special pixel with pen bit 1 (START_MARKER), E = pen bit 2 (END_MARKER).
+reg  stain_alive = 1'b0;
+reg  stain_e_q   = 1'b0;
+wire stain_now   = mo_stain_s | stain_alive;
+wire stain_brk   = stain_e_q & ~mo_stain_s;
+always @(posedge clk_sys) begin
+    if (visible_x == 10'd0) begin        // first cycle of a new line
+        stain_alive <= 1'b0;
+        stain_e_q   <= 1'b0;
+    end else begin
+        stain_alive <= stain_now & ~stain_brk;
+        stain_e_q   <= mo_stain_e;
+    end
+end
+
+// pens: alpha 0..255 = {3'b000,color6,pix2}; MO 256..511; playfield 512..767;
+// SHADE moves the playfield into 768..1023 (CRA9).  The stain then moves
+// whatever won into the 1024..2047 bank.
 always @(posedge clk_sys)
-    color_vaddr <= alpha_vis ? {3'b000, act_color, pix} : pr_pen;
+    color_vaddr <= (alpha_vis ? {3'b000, act_color, pix}
+                              : pr_pen) | {stain_now, 10'd0};
 
 // palette: IRGB4444 with the 360010 intensity latch
 wire [3:0]  ints  = (eintensity > 4'd4) ? 4'd4 : eintensity;
