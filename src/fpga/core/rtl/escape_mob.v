@@ -32,16 +32,21 @@ module escape_mob (
     output reg  [6:0]  cfg_vaddr,
     input  wire [15:0] cfg_vdata,
 
-    // gfx fetch channels (LANE3o: A/B ping-pong - two fetches in flight
-    // across the CDC so per-tile cost is blit-bound, not round-trip-bound)
-    output reg         gfx_reqA,
-    output reg         gfx_reqB,
-    output reg  [23:0] gfx_addrA,
-    output reg  [23:0] gfx_addrB,
-    input  wire        gfx_doneA,       // toggles
-    input  wire        gfx_doneB,
-    input  wire [31:0] gfx_dataA,
-    input  wire [31:0] gfx_dataB,
+    // MOCHAN-4: gfx fetch channels, now FOUR (was the LANE3o A/B ping-pong).
+    // Per-tile cost is max(8 blit cycles, round_trip/NCH). At the measured
+    // worst-case round trip of 31 pixel clocks, NCH=2 gives max(8,15.5)=15.5
+    // - fetch-concurrency-bound - and NCH=4 gives max(8,7.75)=8, i.e. the
+    // engine becomes blit-bound, which is the floor.
+    //
+    // The ports are PACKED rather than named A/B/C/D so that the request and
+    // completion vectors stay one object each: core_top's SDRAM grant tests a
+    // single registered "some MO channel is pending" bit instead of a widening
+    // OR of per-channel comparators (see core_top.v, MOCHAN-4).
+    // Channel c occupies gfx_addr[c*24 +: 24] and gfx_data[c*32 +: 32].
+    output wire [3:0]  gfx_req,         // toggles, one per channel
+    output wire [95:0] gfx_addr,        // 4 x 24
+    input  wire [3:0]  gfx_done,        // toggles, one per channel
+    input  wire [127:0] gfx_data,       // 4 x 32
 
     // display-side pixel query (current line)
     input  wire [8:0]  disp_x,
@@ -49,6 +54,21 @@ module escape_mob (
     output wire [1:0]  disp_prio,       // MPR1:MPR0 of the sprite that owns this pixel
     output wire        disp_valid
 );
+
+    // MOCHAN-4: per-channel registers behind the packed ports. Keeping the
+    // address in a real register array and flattening it with a concatenation
+    // means every signal that crosses into the 85.9MHz SDRAM domain is still
+    // a plain register output - nothing combinational was added to the
+    // crossing, exactly as MOCOV-1 left it.
+    localparam NCH = 4;
+    reg  [23:0] gaddr [0:3];
+    reg  [3:0]  greq;
+    assign gfx_addr = {gaddr[3], gaddr[2], gaddr[1], gaddr[0]};
+    assign gfx_req  = greq;
+    wire [31:0] gdata0 = gfx_data[31:0];
+    wire [31:0] gdata1 = gfx_data[63:32];
+    wire [31:0] gdata2 = gfx_data[95:64];
+    wire [31:0] gdata3 = gfx_data[127:96];
 
     // LANE3n: TAGGED double line buffers - no clear pass at all. The old
     // S_CLEAR wiped 512 entries per line but a line is only 456 clocks, so
@@ -206,12 +226,14 @@ module escape_mob (
     reg [2:0]  pf_row;
     reg        pf_armed;                // pf_code_row/pf_row describe the park
     reg        sc_pf_valid;             // ...and its tile 0 is in flight
-    reg        sc_pf_ch;                // ...on this channel (0=A, 1=B)
+    reg  [1:0] sc_pf_ch;                // ...on this channel
     // blitter side: the channel the CURRENT sprite's tile 0 lives on, which
-    // sets the parity for every later tile (tile k is on pf_ch ^ k[0]).
-    reg        pf_ch;
+    // sets the ROTATION BASE for every later tile: tile k is on (pf_ch+k)&3.
+    // (MOCHAN-4: was a parity, pf_ch ^ k[0], when there were two channels.)
+    reg  [1:0] pf_ch;
     reg        pf_hit;                  // tile 0 was prefetched, do not re-issue
 
+    integer    ci;                      // MOCHAN-4: per-channel loop index
     reg [3:0]  state;
     reg [8:0]  ly;                      // playfield-space line being built
     reg [9:0]  first_link, link;
@@ -226,19 +248,24 @@ module escape_mob (
     reg [8:0]  spr_x;
     reg [2:0]  width_t, height_t;
     reg        hflip;
-    reg [2:0]  tx, tx_f;
+    reg [2:0]  tx;                      // next tile to LATCH/blit
+    // MOCHAN-4: tx_f is 4 bits. With 3 bits it wrapped to 0 on an 8-tile
+    // sprite (width_t==7) the moment the last tile was issued, which silently
+    // read as "not finished issuing" and suppressed the scout prefetch for the
+    // sprite after it. 4 bits makes tx_f > width_t say what it means.
+    reg [3:0]  tx_f;                    // next tile to ISSUE
     reg [14:0] code_row;                // code + ty*width
     reg [2:0]  row_in_tile;
-    reg        gfx_doneA_last, gfx_doneB_last;
-    reg        pendA, pendB;            // completion seen, not yet consumed
+    reg [3:0]  gfx_done_last;
+    reg [3:0]  pend;                    // completion seen, not yet consumed
     // MOFETCH-2: per-channel in-flight tracking. v87 resynced the done toggles
     // on a line abort, which discards a completion that has ALREADY arrived -
     // but a request issued before the abort and served after it still toggles
     // done, sets pend, and gets consumed by the new line's first tile with the
     // previous request's data. From then on every tile on that channel is
     // paired with the wrong tile-row: real sprite art at the wrong X.
-    reg        inflA, inflB;            // issued, completion not yet seen
-    reg        discA, discB;            // swallow one completion (aborted line)
+    reg [3:0]  infl;                    // issued, completion not yet seen
+    reg [3:0]  disc;                    // swallow one completion (aborted line)
     reg [31:0] rowdata;
     reg [3:0]  blit_n;
     // MOFETCH-5: 7 bits. The 6-bit ceiling of 62 was never the binding
@@ -271,40 +298,68 @@ module escape_mob (
 
     // MOFETCH-2: completion edges as wires - the abort block below needs to
     // know whether a completion is landing in the very cycle it aborts.
-    wire doneA_edge = (gfx_doneA != gfx_doneA_last);
-    wire doneB_edge = (gfx_doneB != gfx_doneB_last);
+    wire [3:0] done_edge = gfx_done ^ gfx_done_last;
 
-    // ---- MOCOV-1: channel selection ------------------------------------
-    // Tile k of the current sprite rides channel pf_ch ^ k[0]. With pf_ch
-    // always 0 this is exactly the old even-A/odd-B parity; pf_ch exists
-    // because the scout issues tile 0 on whichever channel happened to be
-    // free, so the parity base is no longer always A.
-    wire ch_cur = pf_ch ^ tx[0];        // channel the blitter is consuming
-    wire ch_iss = pf_ch ^ tx_f[0];      // channel the blitter will issue on
-    wire pend_cur = ch_cur ? pendB : pendA;
-    wire [31:0] data_cur = ch_cur ? gfx_dataB : gfx_dataA;
-    wire busy_iss = ch_iss ? (inflB || pendB) : (inflA || pendA);
-
+    // ---- MOCHAN-4: channel rotation and the SINGLE issue port -----------
+    // Tile k of the current sprite rides channel (pf_ch + k) & 3. pf_ch is the
+    // channel the scout put tile 0 on (or, with no prefetch, the next channel
+    // in the rotation), so consecutive sprites keep rotating rather than both
+    // restarting at channel 0 and colliding with each other's tail.
+    wire [1:0] ch_cur = pf_ch + tx[1:0];    // channel the blitter is consuming
+    wire [1:0] ch_iss = pf_ch + tx_f[1:0];  // channel the next issue will use
+    wire       pend_cur = pend[ch_cur];
+    wire [31:0] data_cur = ch_cur[1] ? (ch_cur[0] ? gdata3 : gdata2)
+                                     : (ch_cur[0] ? gdata1 : gdata0);
     // A channel is free when nothing is outstanding on it AND nothing has
     // landed on it that somebody still has to consume.
-    wire freeA = !inflA && !pendA;
-    wire freeB = !inflB && !pendB;
-    // The scout may only take a channel the blitter cannot still want. The
-    // blitter claims channels only for tiles it has not issued yet, so
-    // "tx_f > width_t" (every tile of the sprite in progress is already in
-    // flight or done) is the safe window. It opens immediately for a 1-tile
-    // sprite - which is the common case, and exactly where the startup cost
-    // hurt most - and during the last tile's blit for a wider one.
-    // ...and never in the two cycles the hit is changing hands. S_NEXT (with a
-    // hit parked) transitions to S_E0 next cycle, and S_E0 is where the
-    // blitter samples sc_pf_valid; issuing in either would let the blitter
-    // read "no prefetch", issue tile 0 itself, and leave the scout's request
-    // in flight as an orphan that the next sprite would mis-pair with.
-    wire sc_handoff = (state == S_NEXT) || (state == S_E0);
-    wire sc_may_pf = hit_pending && pf_armed && !sc_pf_valid && !sc_handoff
-                     && (tx_f > width_t) && (fetch_budget != 7'd0)
-                     && (freeA || freeB);
-    wire sc_pf_pick = !freeA;           // prefer A, take B when A is busy
+    wire busy_iss = infl[ch_iss] || pend[ch_iss];
+
+    // THE ISSUE PORT. There is exactly ONE fetch issuer in this module now.
+    // Before MOCHAN-4 there were four separate ones (the scout's prefetch, the
+    // blitter's tile-0 issue, its tile-1 issue and its steady-state refill),
+    // each with its own address adder and each writing gfx_req/gfx_addr/infl -
+    // four writers to the same registers, kept apart only by an argument about
+    // states. Collapsing them removes three adders AND makes the mutual
+    // exclusion structural: the arbitration below is an if/else chain, so at
+    // most one request can ever be launched in a cycle. (Same lesson as the
+    // v14-v19 SDRAM misrouting: two grant arms firing on one clock is
+    // last-writer-wins address corruption.)
+    //
+    // The blitter's PUMP: while a sprite is in progress, issue the next
+    // un-issued tile as soon as its rotation slot frees up. One tile per
+    // cycle is plenty - a tile takes 8 cycles to blit - and it fills the pipe
+    // to all four channels without four parallel address adders. It also
+    // costs no dedicated issue cycle at sprite start, which the old
+    // blit_n==15 arm did.
+    wire pump_live  = (state == S_PRIME) || (state == S_BLIT);
+    wire pump_ready = pump_live && (tx_f <= {1'b0, width_t})
+                      && (fetch_budget != 7'd0);
+    // tile 0 was already put in flight by the scout: charge its budget slot
+    // and step tx_f past it, but do NOT issue it again.
+    wire pump_pref  = pump_ready && (tx_f == 4'd0) && pf_hit;
+    wire pump_want  = pump_ready && !pump_pref && !busy_iss;
+
+    // The SCOUT's prefetch. It may only take a channel the blitter cannot
+    // still want, so the window is "every tile of the sprite in progress is
+    // already issued" (!pump_ready while pump_live). That opens immediately
+    // for a 1-tile sprite - the common case, and where startup cost hurt most.
+    // Restricting it to pump_live also makes it safe by construction: tx_f,
+    // width_t and pf_ch only describe the SAME sprite in S_PRIME/S_BLIT. In
+    // the sprite-load window (S_NEXT..S_FETCH) width_t has already been
+    // reloaded from the new entry while tx_f still belongs to the old one, so
+    // the old "tx_f > width_t" test compared two different sprites - and a
+    // prefetch issued there would be an orphan the next sprite mis-pairs with.
+    // The scout continues the same rotation (ch_iss), so the sprite it is
+    // prefetching for starts where this one stopped.
+    wire sc_may_pf = pump_live && !pump_ready
+                     && hit_pending && pf_armed && !sc_pf_valid
+                     && (fetch_budget != 7'd0) && !busy_iss;
+
+    // one address adder, one req toggle, one infl set - for both issuers
+    wire        iss_en   = pump_want || sc_may_pf;
+    wire [14:0] iss_code = pump_want ? (code_row + {11'b0, tx_f}) : pf_code_row;
+    wire [2:0]  iss_row  = pump_want ? row_in_tile : pf_row;
+    wire [23:0] iss_addr = 24'h120000 + {iss_code, 5'd0} + {iss_row, 2'd0};
 
     // MOFETCH-4: OFF-SCREEN REJECTION.
     // S_BLIT already throws away any pixel at column >= 344, and 990 tile-rows
@@ -338,31 +393,27 @@ module escape_mob (
         if(!reset_n) begin
             state <= S_IDLE;
             sstate <= SC_IDLE; hit_pending <= 0; sc_restart <= 0;
-            pf_armed <= 0; sc_pf_valid <= 0; sc_pf_ch <= 0;
-            pf_hit <= 0; pf_ch <= 0;
-            gfx_reqA <= 0; gfx_reqB <= 0;
-            pendA <= 0; pendB <= 0;
-            inflA <= 0; inflB <= 0; discA <= 0; discB <= 0;
+            pf_armed <= 0; sc_pf_valid <= 0; sc_pf_ch <= 2'd0;
+            pf_hit <= 0; pf_ch <= 2'd0; tx_f <= 4'd0;
+            greq <= 4'd0;
+            pend <= 4'd0; infl <= 4'd0; disc <= 4'd0;
             wr_en <= 0;
             build_sel <= 0;
             built_ly0 <= 9'h1FF; built_ly1 <= 9'h1FF;
-            gfx_doneA_last <= 0; gfx_doneB_last <= 0;
+            gfx_done_last <= 4'd0;
         end else begin
             wr_en <= 0;
             sc_restart <= 1'b0;
-            gfx_doneA_last <= gfx_doneA;
-            gfx_doneB_last <= gfx_doneB;
+            gfx_done_last <= gfx_done;
             // completions can land while blitting: LATCH them (an edge is
             // visible for one cycle only - depth-2 lost edges without this)
             // MOFETCH-2: a completion always retires the in-flight marker, but
             // it only becomes a usable tile-row if it belongs to THIS line.
-            if(doneA_edge) begin
-                inflA <= 1'b0;
-                if(discA) discA <= 1'b0; else pendA <= 1'b1;
-            end
-            if(doneB_edge) begin
-                inflB <= 1'b0;
-                if(discB) discB <= 1'b0; else pendB <= 1'b1;
+            for(ci = 0; ci < NCH; ci = ci + 1) begin
+                if(done_edge[ci]) begin
+                    infl[ci] <= 1'b0;
+                    if(disc[ci]) disc[ci] <= 1'b0; else pend[ci] <= 1'b1;
+                end
             end
 
             // v85: the line trigger fires from ANY state - a build stalled
@@ -392,25 +443,25 @@ module escape_mob (
                 end
                 wr_en <= 0;
                 // v87: RESYNC the gfx handshakes on restart (see history)
-                gfx_doneA_last <= gfx_doneA;
-                gfx_doneB_last <= gfx_doneB;
-                pendA <= 1'b0; pendB <= 1'b0;
+                gfx_done_last <= gfx_done;
+                pend <= 4'd0;
                 // MOFETCH-2: v87 discarded completions that had already landed;
                 // this discards the one still in flight. A request outstanding
                 // right now belongs to the line being abandoned, so mark its
                 // completion to be swallowed rather than paired with the new
                 // line's first tile. If the completion is landing in THIS very
                 // cycle it is already being retired above, so no discard is due.
-                discA <= inflA && !doneA_edge;
-                discB <= inflB && !doneB_edge;
+                disc <= infl & ~done_edge;
                 sstate <= SC_IDLE;
                 hit_pending <= 1'b0;
                 // MOCOV-1: the parked prefetch belongs to the line being
                 // abandoned. Its request, if still outstanding, is covered by
-                // the discA/discB marking just above - exactly like a
+                // the disc marking just above - exactly like a
                 // blitter-issued one, since it went out on the same channels.
                 pf_armed <= 1'b0; sc_pf_valid <= 1'b0;
-                pf_hit   <= 1'b0; pf_ch <= 1'b0;
+                // MOCHAN-4: reset the rotation so the first sprite of every
+                // line deterministically starts on channel 0.
+                pf_hit   <= 1'b0; pf_ch <= 2'd0; tx_f <= 4'd0;
                 state <= S_CLEAR;
             end else begin
 
@@ -485,23 +536,15 @@ module escape_mob (
                     pf_row      <= h_ydiff[2:0];
                     pf_armed    <= 1'b1;
                 end else if(sc_may_pf) begin
-                    // A channel is free and the blitter cannot want it: put
-                    // tile 0 in flight NOW, while the previous sprite is still
-                    // blitting. fetch_budget is deliberately NOT decremented
-                    // here - the blitter accounts for tile 0 when it starts the
+                    // A channel is free and the blitter cannot want it: tile 0
+                    // goes in flight NOW, while the previous sprite is still
+                    // blitting. The request itself is launched by the single
+                    // issue port below; all that is recorded here is WHICH
+                    // channel it went to, so S_E0 can adopt it as pf_ch.
+                    // fetch_budget is deliberately NOT decremented here - the
+                    // pump charges tile 0's slot when the blitter reaches the
                     // sprite, which keeps fetch_budget single-writer.
-                    if(sc_pf_pick) begin
-                        gfx_addrB <= 24'h120000 + { pf_code_row, 5'd0 }
-                                                + { pf_row, 2'd0 };
-                        gfx_reqB  <= ~gfx_reqB;
-                        inflB     <= 1'b1;
-                    end else begin
-                        gfx_addrA <= 24'h120000 + { pf_code_row, 5'd0 }
-                                                + { pf_row, 2'd0 };
-                        gfx_reqA  <= ~gfx_reqA;
-                        inflA     <= 1'b1;
-                    end
-                    sc_pf_ch    <= sc_pf_pick;
+                    sc_pf_ch    <= ch_iss;
                     sc_pf_valid <= 1'b1;
                 end
                 // The blitter releases the port one cycle after it takes the
@@ -561,7 +604,11 @@ module escape_mob (
                 // base for every tile of this sprite; pf_hit says tile 0 is
                 // already in flight so S_PRIME must not issue it again.
                 pf_hit      <= sc_pf_valid;
-                pf_ch       <= sc_pf_valid ? sc_pf_ch : 1'b0;
+                // MOCHAN-4: with no prefetch, carry on round the rotation
+                // (ch_iss is the previous sprite's next unused slot) instead
+                // of restarting at channel 0, where a wide previous sprite's
+                // tail may still be in flight.
+                pf_ch       <= sc_pf_valid ? sc_pf_ch : ch_iss;
                 sc_pf_valid <= 1'b0;
                 state <= S_WAIT;
             end
@@ -597,9 +644,13 @@ module escape_mob (
             S_FETCH: begin
                 // MOCOV-1: code_row/row_in_tile were latched at S_WAIT from the
                 // scout's decode, so nothing is read off the bus here any more.
-                tx_f  <= 3'd0;                  // next tile to ISSUE
+                tx_f  <= 4'd0;                  // next tile to ISSUE
                 tx    <= 3'd0;                  // next tile to LATCH/blit
-                blit_n <= 4'd15;                // marker: nothing in flight
+                // MOCHAN-4: 14 == "the tile we are waiting for is (or is about
+                // to be) in flight". The old 15 marked a dedicated issue cycle
+                // in S_PRIME; the issue pump does that work in parallel now,
+                // so S_PRIME's first cycle can already consume a landed tile.
+                blit_n <= 4'd14;
                 // MOFETCH-4: spr_x is known now (S_MATCH, one cycle ago). If
                 // every column this object covers would be clipped away, drop
                 // it here - before any fetch is issued. Not a semantic change:
@@ -609,11 +660,8 @@ module escape_mob (
                 // a wholly off-screen object has to be thrown away. Swallow its
                 // completion rather than let the next sprite mis-pair with it.
                 if(spr_dead && pf_hit) begin
-                    if(pf_ch) begin
-                        if(inflB && !doneB_edge) discB <= 1'b1; else pendB <= 1'b0;
-                    end else begin
-                        if(inflA && !doneA_edge) discA <= 1'b1; else pendA <= 1'b0;
-                    end
+                    if(infl[pf_ch] && !done_edge[pf_ch]) disc[pf_ch] <= 1'b1;
+                    else                                 pend[pf_ch] <= 1'b0;
                     pf_hit <= 1'b0;
                 end
                 state <= spr_dead ? S_NEXT : S_PRIME;
@@ -622,78 +670,19 @@ module escape_mob (
             // LANE3o: FETCH-AHEAD. The serial issue-wait-blit loop paid the
             // full CRAM+CDC round trip (~1us) per tile-row ON TOP of the 8
             // blit cycles - a busy line ran out of time before late links
-            // (Jake) were reached. Now the next tile's fetch is in flight
-            // WHILE the current one blits: effective cost = max(fetch, blit).
-            // LANE3o: keep BOTH channels loaded - tile parity picks the
-            // channel (even tiles on A, odd on B). Issue runs up to two
-            // ahead of latch; per-tile cost = max(8-cycle blit, service/2).
+            // (Jake) were reached. The next tile's fetch is in flight WHILE
+            // the current one blits: effective cost = max(fetch, blit/NCH).
+            //
+            // MOCHAN-4: S_PRIME no longer issues anything. It is purely
+            // "wait for tile tx to land, then hand it to the blit loop" - the
+            // issue pump below keeps all four channels loaded, running in
+            // parallel with this state and with S_BLIT. That removed the old
+            // blit_n==15 dedicated issue cycle per sprite as a side effect.
             S_PRIME: begin
-                // MOFETCH-2: never issue on a channel that still has a request
-                // outstanding. Only reachable straight after a line abort (the
-                // steady-state loop refills a channel exactly when its
-                // completion is consumed), and the wait is bounded by the
-                // fetch service time, but issuing here would toggle req while
-                // the channel is busy and lose the request outright.
-                if(blit_n == 4'd15) begin
-                  if(pf_hit) begin
-                    // MOCOV-1: tile 0 is ALREADY in flight (or landed) on
-                    // pf_ch - the scout put it there during the previous
-                    // sprite's blit, which is the whole saving. Only tile 1
-                    // has to be issued, on the other channel. It still costs
-                    // its budget slot; tile 0's is charged here too, since the
-                    // scout deliberately leaves fetch_budget single-writer.
-                    if(width_t != 3'd0 && fetch_budget > 7'd1
-                       && !(pf_ch ? (inflA || pendA) : (inflB || pendB))) begin
-                        if(pf_ch) begin
-                            gfx_addrA <= 24'h120000
-                                        + { (code_row + 15'd1), 5'd0 }
-                                        + { row_in_tile, 2'd0 };
-                            gfx_reqA  <= ~gfx_reqA;
-                            inflA     <= 1'b1;
-                        end else begin
-                            gfx_addrB <= 24'h120000
-                                        + { (code_row + 15'd1), 5'd0 }
-                                        + { row_in_tile, 2'd0 };
-                            gfx_reqB  <= ~gfx_reqB;
-                            inflB     <= 1'b1;
-                        end
-                        tx_f <= 3'd2;
-                        fetch_budget <= fetch_budget - 7'd2;
-                    end else begin
-                        // tile 1 could not be issued yet (channel still busy);
-                        // the refill arm below picks it up when tile 0 lands.
-                        tx_f <= 3'd1;
-                        fetch_budget <= fetch_budget - 7'd1;
-                    end
-                    blit_n <= 4'd14;
-                  end else if(!inflA && !(width_t != 3'd0 && inflB)) begin
-                    // FALLBACK: the scout could not prefetch (no free channel,
-                    // or it never got the chance). Identical to the pre-MOCOV
-                    // path - tile 0 on A, tile 1 on B - and pf_ch is 0, so the
-                    // parity below degenerates to the old even-A/odd-B rule.
-                    gfx_addrA <= 24'h120000
-                                + { code_row, 5'd0 }
-                                + { row_in_tile, 2'd0 };
-                    gfx_reqA  <= ~gfx_reqA;
-                    inflA     <= 1'b1;
-                    if(width_t != 3'd0 && fetch_budget > 7'd1) begin
-                        gfx_addrB <= 24'h120000
-                                    + { (code_row + 15'd1), 5'd0 }
-                                    + { row_in_tile, 2'd0 };
-                        gfx_reqB  <= ~gfx_reqB;
-                        inflB     <= 1'b1;
-                        tx_f <= 3'd2;
-                        fetch_budget <= fetch_budget - 7'd2;
-                    end else begin
-                        tx_f <= 3'd1;
-                        fetch_budget <= fetch_budget - 7'd1;
-                    end
-                    blit_n <= 4'd14;
-                  end
-                end else if(pend_cur) begin
-                    // tile tx's data has landed on its parity channel
+                if(pend_cur) begin
+                    // tile tx's data has landed on its rotation channel
                     rowdata <= data_cur;
-                    if(ch_cur) pendB <= 1'b0; else pendA <= 1'b0;
+                    pend[ch_cur] <= 1'b0;
                     blit_x  <= blit_x_new;
                     // MOFETCH-4: a tile-row that lands wholly in the clipped
                     // 344..504 window costs one cycle instead of eight. Jumping
@@ -702,25 +691,6 @@ module escape_mob (
                     // rejected by S_BLIT's own blit_x < 344 clip - so not one
                     // line-buffer write changes, only the cycles spent.
                     blit_n  <= tile_dead ? 4'd7 : 4'd0;
-                    // refill the channel just freed with tile tx_f
-                    // (MOCOV-1: on the pf_ch parity, not raw tile parity)
-                    if(tx_f <= width_t && tx_f != 3'd0 && fetch_budget != 7'd0) begin
-                        if(ch_iss) begin
-                            gfx_addrB <= 24'h120000
-                                        + { (code_row + {12'b0, tx_f}), 5'd0 }
-                                        + { row_in_tile, 2'd0 };
-                            gfx_reqB  <= ~gfx_reqB;
-                            inflB     <= 1'b1;
-                        end else begin
-                            gfx_addrA <= 24'h120000
-                                        + { (code_row + {12'b0, tx_f}), 5'd0 }
-                                        + { row_in_tile, 2'd0 };
-                            gfx_reqA  <= ~gfx_reqA;
-                            inflA     <= 1'b1;
-                        end
-                        fetch_budget <= fetch_budget - 7'd1;
-                        tx_f <= tx_f + 3'd1;
-                    end
                     state <= S_BLIT;
                 end
             end
@@ -750,7 +720,11 @@ module escape_mob (
                 blit_x <= (blit_x + 9'd1) & 9'h1FF;
                 if(blit_n == 4'd7) begin
                     if(tx == width_t) state <= S_NEXT;
-                    else if(tx_f == tx + 3'd1 && fetch_budget == 7'd0) state <= S_NEXT;
+                    // the next tile was never issued and the budget is spent,
+                    // so nothing will ever land for it: end the sprite rather
+                    // than wait in S_PRIME for a completion that cannot come.
+                    else if(tx_f == {1'b0, tx} + 4'd1 && fetch_budget == 7'd0)
+                        state <= S_NEXT;
                     else begin
                         tx     <= tx + 3'd1;
                         blit_n <= 4'd14;   // that tile's data is in flight
@@ -778,6 +752,28 @@ module escape_mob (
 
             default: state <= S_IDLE;
             endcase
+
+            // ================= ISSUE PORT =================
+            // The ONLY place a gfx fetch is launched. It runs in parallel with
+            // S_PRIME/S_BLIT, so filling four channels costs no state cycles.
+            // pump_want and sc_may_pf are mutually exclusive by construction
+            // (sc_may_pf requires !pump_ready, pump_want requires pump_ready),
+            // and this if/else makes that structural rather than argued.
+            //
+            // tx_f and fetch_budget are written HERE AND NOWHERE ELSE except
+            // sprite start (S_FETCH: tx_f<=0), line start (S_SLIP1: budget) and
+            // the line abort - all states in which pump_live is false. So they
+            // stay single-writer, which is what let the scout be added without
+            // a second budget accountant.
+            if(iss_en) begin
+                gaddr[ch_iss] <= iss_addr;
+                greq[ch_iss]  <= ~greq[ch_iss];
+                infl[ch_iss]  <= 1'b1;
+            end
+            if(pump_want || pump_pref) begin
+                tx_f         <= tx_f + 4'd1;
+                fetch_budget <= fetch_budget - 7'd1;
+            end
             end
         end
     end
