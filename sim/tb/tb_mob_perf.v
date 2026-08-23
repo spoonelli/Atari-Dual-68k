@@ -234,10 +234,14 @@ module tb_mob_perf;
     integer n_pairslip;
     initial n_pairslip = 0;
     always @(posedge clk) if(measuring) begin
-        if(dut.state == S_PRIME && dut.blit_n != 4'd15
-           && (dut.tx[0] ? dut.pendB : dut.pendA)) begin
-            if((dut.tx[0] ? gfx_dataB : gfx_dataA) !== exp_data)
-                n_pairslip = n_pairslip + 1;
+        // Checked at the point of USE rather than at the channel mux: when the
+        // first pixel of tile tx is about to be blitted, the row the engine
+        // latched must be the row at the address its own code_row/tx name.
+        // Deliberately phrased without naming a channel - MOCOV-1 made the
+        // tile->channel map pf_ch ^ tx[0] instead of tx[0], and this bench has
+        // to keep scoring the pre-MOCOV engine too.
+        if(dut.state == S_BLIT && dut.blit_n == 4'd0) begin
+            if(dut.rowdata !== exp_data) n_pairslip = n_pairslip + 1;
         end
     end
 

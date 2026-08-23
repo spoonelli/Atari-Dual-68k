@@ -149,13 +149,24 @@ module escape_mob (
     // a dedicated /LINK memory slot (SP-332 sheet 7), so list walking never
     // competes with the pixel pipeline. US4894774 calls it the lookahead cycle.
     //
-    // The scout only ever touches w0 (link) and w3 (y/height) - the two words
-    // that decide an entry's fate. When it finds an entry that intersects the
-    // line it parks JUST the link and the raw w3 and stops, so it is never more
-    // than one entry ahead and never decodes a sprite the blitter is still
-    // drawing. The blitter then reads w2/w1 for the parked entry itself, which
-    // keeps every per-sprite field (colour, x, prio, code) decoded at
-    // sprite-load time, on the blitter's side, exactly as before.
+    // The scout's REJECT loop only ever touches w0 (link) and w3 (y/height) -
+    // the two words that decide an entry's fate - so a rejected entry still
+    // costs 2 cycles and the walk stays as cheap as MOFETCH-3 made it.
+    //
+    // MOCOV-1: on a HIT it now reads w1 (the tile code) as well, computes the
+    // sprite's code_row, and ISSUES THE FIRST TILE-ROW FETCH ITSELF. That is
+    // the whole point: the per-sprite startup latency was 54-74% of all
+    // S_PRIME time (see tb_mob_perf's prime_split), because the first tile of
+    // a sprite could not be asked for until the blitter had walked to the
+    // sprite and read its code - and with sprites averaging 1-3 tile-rows
+    // there is nothing to amortise that wait against. Issued from the scout,
+    // the fetch is in flight during the whole of the PREVIOUS sprite's blit.
+    //
+    // The blitter still reads w2 for itself, and still decodes colour, x and
+    // PRIORITY at sprite-load time in S_MATCH - so spr_prio reaches
+    // escape_prio.v from exactly where it always did. Only w1, which carries
+    // no priority information at all, moved to the scout. That is what makes
+    // the prefetch compatible with keeping the priority decode blitter-side.
     localparam SC_IDLE  = 3'd0;
     localparam SC_E0    = 3'd1;
     localparam SC_E1    = 3'd2;
@@ -163,13 +174,30 @@ module escape_mob (
     localparam SC_E3    = 3'd4;
     localparam SC_HOLD  = 3'd5;         // a hit is parked, waiting to be taken
     localparam SC_DONE  = 3'd6;         // list exhausted for this line
+    localparam SC_W1    = 3'd7;         // MOCOV-1: w1 addressed, in the pipe
 
     reg [2:0]  sstate;
     reg        hit_pending;             // a matching entry is parked
     reg [9:0]  hit_link;                // ...this one
     reg [15:0] h_w3;                    // ...with this geometry word
+    reg [8:0]  h_ydiff;                 // ...and its row within the sprite
     reg        sc_last;                 // the parked hit is the list's last entry
     reg        sc_restart;              // blitter -> scout: port is yours again
+
+    // MOCOV-1: the scout's decode of the parked sprite's FIRST tile-row.
+    // pf_code_row/pf_row are computed for every parked hit (so the blitter
+    // always takes code_row from here and no longer multiplies at all - the
+    // multiplier MOVED, it was not duplicated). sc_pf_valid says the fetch was
+    // also already issued, on channel sc_pf_ch.
+    reg [14:0] pf_code_row;
+    reg [2:0]  pf_row;
+    reg        pf_armed;                // pf_code_row/pf_row describe the park
+    reg        sc_pf_valid;             // ...and its tile 0 is in flight
+    reg        sc_pf_ch;                // ...on this channel (0=A, 1=B)
+    // blitter side: the channel the CURRENT sprite's tile 0 lives on, which
+    // sets the parity for every later tile (tile k is on pf_ch ^ k[0]).
+    reg        pf_ch;
+    reg        pf_hit;                  // tile 0 was prefetched, do not re-issue
 
     reg [3:0]  state;
     reg [8:0]  ly;                      // playfield-space line being built
@@ -231,6 +259,38 @@ module escape_mob (
     wire doneA_edge = (gfx_doneA != gfx_doneA_last);
     wire doneB_edge = (gfx_doneB != gfx_doneB_last);
 
+    // ---- MOCOV-1: channel selection ------------------------------------
+    // Tile k of the current sprite rides channel pf_ch ^ k[0]. With pf_ch
+    // always 0 this is exactly the old even-A/odd-B parity; pf_ch exists
+    // because the scout issues tile 0 on whichever channel happened to be
+    // free, so the parity base is no longer always A.
+    wire ch_cur = pf_ch ^ tx[0];        // channel the blitter is consuming
+    wire ch_iss = pf_ch ^ tx_f[0];      // channel the blitter will issue on
+    wire pend_cur = ch_cur ? pendB : pendA;
+    wire [31:0] data_cur = ch_cur ? gfx_dataB : gfx_dataA;
+    wire busy_iss = ch_iss ? (inflB || pendB) : (inflA || pendA);
+
+    // A channel is free when nothing is outstanding on it AND nothing has
+    // landed on it that somebody still has to consume.
+    wire freeA = !inflA && !pendA;
+    wire freeB = !inflB && !pendB;
+    // The scout may only take a channel the blitter cannot still want. The
+    // blitter claims channels only for tiles it has not issued yet, so
+    // "tx_f > width_t" (every tile of the sprite in progress is already in
+    // flight or done) is the safe window. It opens immediately for a 1-tile
+    // sprite - which is the common case, and exactly where the startup cost
+    // hurt most - and during the last tile's blit for a wider one.
+    // ...and never in the two cycles the hit is changing hands. S_NEXT (with a
+    // hit parked) transitions to S_E0 next cycle, and S_E0 is where the
+    // blitter samples sc_pf_valid; issuing in either would let the blitter
+    // read "no prefetch", issue tile 0 itself, and leave the scout's request
+    // in flight as an orphan that the next sprite would mis-pair with.
+    wire sc_handoff = (state == S_NEXT) || (state == S_E0);
+    wire sc_may_pf = hit_pending && pf_armed && !sc_pf_valid && !sc_handoff
+                     && (tx_f > width_t) && (fetch_budget != 7'd0)
+                     && (freeA || freeB);
+    wire sc_pf_pick = !freeA;           // prefer A, take B when A is busy
+
     // MOFETCH-4: OFF-SCREEN REJECTION.
     // S_BLIT already throws away any pixel at column >= 344, and 990 tile-rows
     // per frame (18% of all blit cycles, 17% of all gfx fetches) were being
@@ -263,6 +323,8 @@ module escape_mob (
         if(!reset_n) begin
             state <= S_IDLE;
             sstate <= SC_IDLE; hit_pending <= 0; sc_restart <= 0;
+            pf_armed <= 0; sc_pf_valid <= 0; sc_pf_ch <= 0;
+            pf_hit <= 0; pf_ch <= 0;
             gfx_reqA <= 0; gfx_reqB <= 0;
             pendA <= 0; pendB <= 0;
             inflA <= 0; inflB <= 0; discA <= 0; discB <= 0;
@@ -328,6 +390,12 @@ module escape_mob (
                 discB <= inflB && !doneB_edge;
                 sstate <= SC_IDLE;
                 hit_pending <= 1'b0;
+                // MOCOV-1: the parked prefetch belongs to the line being
+                // abandoned. Its request, if still outstanding, is covered by
+                // the discA/discB marking just above - exactly like a
+                // blitter-issued one, since it went out on the same channels.
+                pf_armed <= 1'b0; sc_pf_valid <= 1'b0;
+                pf_hit   <= 1'b0; pf_ch <= 1'b0;
                 state <= S_CLEAR;
             end else begin
 
@@ -365,7 +433,16 @@ module escape_mob (
                     hit_link    <= link;
                     hit_pending <= 1'b1;
                     sc_last     <= (nlink == first_link) || (ent_count == 7'd63);
-                    sstate      <= SC_HOLD;
+                    // MOCOV-1: ...and go read this entry's w1 (the tile code)
+                    // so the first tile-row can be asked for right away. The
+                    // address is issued now; MO RAM answers two cycles later,
+                    // in SC_W1's successor. The blitter may re-point mo_vaddr
+                    // at w2 in the meantime - harmless, this read has already
+                    // been committed to the RAM's address register.
+                    h_ydiff  <= ydiff_e;
+                    pf_armed <= 1'b0;
+                    mo_vaddr <= {link, 2'd1};
+                    sstate   <= SC_W1;
                 end else if(nlink == first_link || ent_count == 7'd63
                             || fetch_budget == 0) begin
                     // the same three terminators the walk has always applied
@@ -378,9 +455,42 @@ module escape_mob (
                 end
             end
 
+            // MOCOV-1: w1 is in the RAM's pipe. Do NOT touch mo_vaddr here -
+            // the blitter's S_E0 is very likely driving it at w2 this cycle.
+            SC_W1: sstate <= SC_HOLD;
+
             SC_HOLD: begin
+                // MOCOV-1: on the FIRST cycle here, w1 is on the bus. Decode
+                // the sprite's first tile-row: code + ty*width, ty = ydiff>>3.
+                // This is the multiply the blitter used to do in S_FETCH - it
+                // moved here, it is not a second one.
+                if(!pf_armed) begin
+                    pf_code_row <= mo_vdata[14:0]
+                                 + ( h_ydiff[8:3] * ({3'b0, h_w3[6:4]} + 4'd1) );
+                    pf_row      <= h_ydiff[2:0];
+                    pf_armed    <= 1'b1;
+                end else if(sc_may_pf) begin
+                    // A channel is free and the blitter cannot want it: put
+                    // tile 0 in flight NOW, while the previous sprite is still
+                    // blitting. fetch_budget is deliberately NOT decremented
+                    // here - the blitter accounts for tile 0 when it starts the
+                    // sprite, which keeps fetch_budget single-writer.
+                    if(sc_pf_pick) begin
+                        gfx_addrB <= 24'h120000 + { pf_code_row, 5'd0 }
+                                                + { pf_row, 2'd0 };
+                        gfx_reqB  <= ~gfx_reqB;
+                        inflB     <= 1'b1;
+                    end else begin
+                        gfx_addrA <= 24'h120000 + { pf_code_row, 5'd0 }
+                                                + { pf_row, 2'd0 };
+                        gfx_reqA  <= ~gfx_reqA;
+                        inflA     <= 1'b1;
+                    end
+                    sc_pf_ch    <= sc_pf_pick;
+                    sc_pf_valid <= 1'b1;
+                end
                 // The blitter releases the port one cycle after it takes the
-                // hit (it addresses w2 then w1 of the parked entry itself).
+                // hit (it addresses w2 of the parked entry itself).
                 if(sc_restart) begin
                     if(sc_last || fetch_budget == 0) sstate <= SC_DONE;
                     else begin
@@ -432,6 +542,12 @@ module escape_mob (
                 hflip    <= h_w3[3];
                 w3       <= h_w3;
                 hit_pending <= 1'b0;
+                // MOCOV-1: take over the scout's prefetch. pf_ch is the parity
+                // base for every tile of this sprite; pf_hit says tile 0 is
+                // already in flight so S_PRIME must not issue it again.
+                pf_hit      <= sc_pf_valid;
+                pf_ch       <= sc_pf_valid ? sc_pf_ch : 1'b0;
+                sc_pf_valid <= 1'b0;
                 state <= S_WAIT;
             end
 
@@ -441,8 +557,14 @@ module escape_mob (
             // ymatch (the registered form) is valid here - spr_y/height_t were
             // loaded one cycle ago - which is what the existing benches probe.
             S_WAIT: begin
-                mo_vaddr   <= {hit_link, 2'd1};
-                sc_restart <= 1'b1;
+                // MOCOV-1: w1 is the SCOUT's job now, so this cycle no longer
+                // drives an address at all - the port goes back a cycle
+                // cleaner. code_row/row_in_tile come from the scout's decode,
+                // which has been armed since the cycle S_E0 ran (SC_HOLD arms
+                // it two cycles after SC_E3, S_E0 is two cycles after SC_E3).
+                code_row    <= pf_code_row;
+                row_in_tile <= pf_row;
+                sc_restart  <= 1'b1;
                 state <= S_MATCH;
             end
 
@@ -458,14 +580,8 @@ module escape_mob (
             end
 
             S_FETCH: begin
-                // MOFETCH-1: w1 (code) is the LAST word read, so the tile loop
-                // starts straight off the bus. The entry is already known to
-                // match (decided at S_E3), so the old ymatch re-test here is
-                // gone - it can no longer be false.
-                w1 <= mo_vdata;
-                // code for this row: code + ty*width + tx  (ty = ydiff>>3)
-                code_row    <= mo_vdata[14:0] + ( (ydiff[8:3]) * ({3'b0,width_t}+4'd1) );
-                row_in_tile <= ydiff[2:0];
+                // MOCOV-1: code_row/row_in_tile were latched at S_WAIT from the
+                // scout's decode, so nothing is read off the bus here any more.
                 tx_f  <= 3'd0;                  // next tile to ISSUE
                 tx    <= 3'd0;                  // next tile to LATCH/blit
                 blit_n <= 4'd15;                // marker: nothing in flight
@@ -473,6 +589,18 @@ module escape_mob (
                 // every column this object covers would be clipped away, drop
                 // it here - before any fetch is issued. Not a semantic change:
                 // S_BLIT would have discarded all of its pixels anyway.
+                // MOCOV-1: the scout could not know this (spr_dead needs x,
+                // which lives in w2 and stays blitter-side), so a prefetch for
+                // a wholly off-screen object has to be thrown away. Swallow its
+                // completion rather than let the next sprite mis-pair with it.
+                if(spr_dead && pf_hit) begin
+                    if(pf_ch) begin
+                        if(inflB && !doneB_edge) discB <= 1'b1; else pendB <= 1'b0;
+                    end else begin
+                        if(inflA && !doneA_edge) discA <= 1'b1; else pendA <= 1'b0;
+                    end
+                    pf_hit <= 1'b0;
+                end
                 state <= spr_dead ? S_NEXT : S_PRIME;
             end
 
@@ -492,8 +620,42 @@ module escape_mob (
                 // fetch service time, but issuing here would toggle req while
                 // the channel is busy and lose the request outright.
                 if(blit_n == 4'd15) begin
-                  if(!inflA && !(width_t != 3'd0 && inflB)) begin
-                    // sprite start: issue tile 0 (A) and, if any, tile 1 (B)
+                  if(pf_hit) begin
+                    // MOCOV-1: tile 0 is ALREADY in flight (or landed) on
+                    // pf_ch - the scout put it there during the previous
+                    // sprite's blit, which is the whole saving. Only tile 1
+                    // has to be issued, on the other channel. It still costs
+                    // its budget slot; tile 0's is charged here too, since the
+                    // scout deliberately leaves fetch_budget single-writer.
+                    if(width_t != 3'd0 && fetch_budget > 7'd1
+                       && !(pf_ch ? (inflA || pendA) : (inflB || pendB))) begin
+                        if(pf_ch) begin
+                            gfx_addrA <= 24'h120000
+                                        + { (code_row + 15'd1), 5'd0 }
+                                        + { row_in_tile, 2'd0 };
+                            gfx_reqA  <= ~gfx_reqA;
+                            inflA     <= 1'b1;
+                        end else begin
+                            gfx_addrB <= 24'h120000
+                                        + { (code_row + 15'd1), 5'd0 }
+                                        + { row_in_tile, 2'd0 };
+                            gfx_reqB  <= ~gfx_reqB;
+                            inflB     <= 1'b1;
+                        end
+                        tx_f <= 3'd2;
+                        fetch_budget <= fetch_budget - 7'd2;
+                    end else begin
+                        // tile 1 could not be issued yet (channel still busy);
+                        // the refill arm below picks it up when tile 0 lands.
+                        tx_f <= 3'd1;
+                        fetch_budget <= fetch_budget - 7'd1;
+                    end
+                    blit_n <= 4'd14;
+                  end else if(!inflA && !(width_t != 3'd0 && inflB)) begin
+                    // FALLBACK: the scout could not prefetch (no free channel,
+                    // or it never got the chance). Identical to the pre-MOCOV
+                    // path - tile 0 on A, tile 1 on B - and pf_ch is 0, so the
+                    // parity below degenerates to the old even-A/odd-B rule.
                     gfx_addrA <= 24'h120000
                                 + { code_row, 5'd0 }
                                 + { row_in_tile, 2'd0 };
@@ -513,10 +675,10 @@ module escape_mob (
                     end
                     blit_n <= 4'd14;
                   end
-                end else if(tx[0] ? pendB : pendA) begin
+                end else if(pend_cur) begin
                     // tile tx's data has landed on its parity channel
-                    rowdata <= tx[0] ? gfx_dataB : gfx_dataA;
-                    if(tx[0]) pendB <= 1'b0; else pendA <= 1'b0;
+                    rowdata <= data_cur;
+                    if(ch_cur) pendB <= 1'b0; else pendA <= 1'b0;
                     blit_x  <= blit_x_new;
                     // MOFETCH-4: a tile-row that lands wholly in the clipped
                     // 344..504 window costs one cycle instead of eight. Jumping
@@ -526,8 +688,9 @@ module escape_mob (
                     // line-buffer write changes, only the cycles spent.
                     blit_n  <= tile_dead ? 4'd7 : 4'd0;
                     // refill the channel just freed with tile tx_f
+                    // (MOCOV-1: on the pf_ch parity, not raw tile parity)
                     if(tx_f <= width_t && tx_f != 3'd0 && fetch_budget != 7'd0) begin
-                        if(tx_f[0]) begin
+                        if(ch_iss) begin
                             gfx_addrB <= 24'h120000
                                         + { (code_row + {12'b0, tx_f}), 5'd0 }
                                         + { row_in_tile, 2'd0 };
