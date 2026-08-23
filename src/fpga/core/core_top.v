@@ -335,9 +335,9 @@ end
     // EEPROM save slot: APF sends [0080 Data slot request read] and then reads
     // our bridge window out to the SD card. Hold the handshake off until the
     // save engine has refreshed that window, so APF can never capture a
-    // half-built image. Timed out in the ee_rd_to counter below, so a wedged
-    // engine delays the exit rather than hanging the Pocket.
-    wire            dataslot_requestread_ack = ~ee_rd_pending | ee_snapdone_74 | (&ee_rd_to);
+    // half-built image. Driven (and timed out) in the EEPROM save block below,
+    // so a wedged engine delays the exit rather than hanging the Pocket.
+    wire            dataslot_requestread_ack;
     wire            dataslot_requestread_ok = 1;
 
     wire            dataslot_requestwrite;
@@ -891,6 +891,8 @@ synch_3 s_dl(dl_req_74, dl_req_s, clk_sdram);
     wire        ee_swe, ee_wrpulse, ee_ready_c, ee_dirty_c;
     wire        ee_autoen_s, ee_loaded_s;
     wire [7:0]  ee_wr_ok_s, ee_wr_err_s;
+    reg  [7:0]  ee_wr_ok  = 8'd0;    // slot writes APF completed  (diag strip)
+    reg  [7:0]  ee_wr_err = 8'd0;    // slot writes that failed    (diag strip)
 synch_3 s_eeauto(ee_autoen_74, ee_autoen_s, clk_sys_7159);
     // diag-strip status, into the pixel domain
 synch_3 s_eeld(ee_loaded_74, ee_loaded_s, clk_sys_7159);
@@ -931,6 +933,7 @@ ee_save ee (
     // older image, never a partial one.
     wire        ee_rd_pending = dataslot_requestread & (dataslot_requestread_id == EE_SLOT_ID);
     reg  [24:0] ee_rd_to = 25'd0;
+assign dataslot_requestread_ack = ~ee_rd_pending | ee_snapdone_74 | (&ee_rd_to);
 always @(posedge clk_74a) begin
     if(ee_rd_pending) begin
         ee_snapreq_74 <= 1'b1;
@@ -947,8 +950,6 @@ end
     // us one skipped save, not a stuck engine.
     reg  [2:0]  ee_tw     = 3'd0;
     reg  [23:0] ee_tw_to  = 24'd0;
-    reg  [7:0]  ee_wr_ok  = 8'd0;    // slot writes APF completed  (HUD)
-    reg  [7:0]  ee_wr_err = 8'd0;    // slot writes that failed    (HUD)
 always @(posedge clk_74a) begin
     target_dataslot_read     <= 1'b0;
     target_dataslot_getfile  <= 1'b0;

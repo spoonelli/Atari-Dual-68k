@@ -17,6 +17,10 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
    ./support/package.sh path/to/bitstream/output/bitstream.rbf_r
    ```
    and merge the resulting zip's `Cores/ Platforms/ Assets/` onto the SD root.
+   > **Updating from a build older than EEPROM saves?** Copy the whole
+   > `Cores/` folder across, not just `bitstream.rbf_r` — the save slot is
+   > declared in `data.json`, and a bitstream-only update leaves the core
+   > with nowhere to write high scores.
 2. **SD card layout** (Pocket firmware 1.1+, jailbroken for unofficial cores):
    ```
    /Cores/spoonelli.ataridual68k/
