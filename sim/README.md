@@ -43,3 +43,20 @@ Escape's raster (456×262), confirming the System 1 video base matches Escape's 
 `tb_ee_save` needs the longer stop time: it walks all 512 EEPROM bytes through
 a restore, an autosave and an exit-time snapshot, which is ~1.4 ms of core
 clock. See [`../docs/EEPROM_SAVE.md`](../docs/EEPROM_SAVE.md).
+
+## Benches that report "fail" by construction
+
+**`tb_escape_handshake` always reports HANDSHAKE INCOMPLETE at its default
+budget, on every branch, and that is not a regression.** Its check process
+loops a hard-coded 500,000 clocks (5 ms) and then reports, *ignoring the
+`--stop-time` argument* — so passing a bigger stop time changes nothing. The
+main's boot flow does not reach the 360011 release write inside 5 ms (the
+extra's POST alone is ~1 s on device), so all three of `extra_release`,
+`extra read mailbox` and `extra wrote` come back false.
+[`../docs/NIGHT-ANALYSIS.md`](../docs/NIGHT-ANALYSIS.md) (the note above the
+"Build 92 content" heading) recorded this as a bench-budget artifact; the bench
+is kept for long-stoptime nightly use, which means raising the loop bound in
+the bench itself, not the command line.
+
+If you are bisecting a boot problem, this bench will look guilty on both sides
+of the bisect. Use it only after raising that bound.
