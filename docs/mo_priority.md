@@ -163,6 +163,18 @@ too. Implementing stain properly would need a per-line "stain active from X"
 latch driven by marker sprites during the line build; that is a scheduling
 change and was deliberately left out of this one.
 
+**A special sprite no longer masks a normal sprite underneath it.** The
+reference keeps one MO bitmap: if a special object is drawn over a normal one,
+that pixel's value *is* the special one, so the merge skips it and the playfield
+shows through — the special sprite punches a hole in whatever MO pixel it
+covered. We resolve MPR2 at line-buffer write time instead, so the special
+sprite's pixels are simply never written and the normal sprite underneath
+survives. The two differ only where a special object overlaps a normal one.
+Special objects are rare (12 list entries across a 150-second attract+demo
+capture), and holding MPR2 in the buffer to reproduce the masking would cost a
+21st bit per entry — which does not fit the 512x20 M10K geometry and would
+double the line-buffer block count. Not worth it at the current ceiling.
+
 **`FORCEMC0`'s colour-clearing arm is omitted.** Because `FORCEMC0 == PF/M`, the
 signal is never asserted on the branch where the motion object wins, so the
 reference's `mo & DATA_MASK & ~0x70` case is unreachable. The equivalence is
