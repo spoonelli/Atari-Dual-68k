@@ -36,7 +36,18 @@ set_output_delay -clock SDRAM_CLK -min -0.8 [get_ports {SDRAM_A[*] SDRAM_BA[*] S
 
 # The controller runs on PLL output 1; SDRAM_CLK is a quarter period later, so
 # the launch edge for a read return is one full period behind the capture
-# edge.  Same multicycle the reference core applies.
+# edge.  Same multicycle the reference core applies - PLUS the matching hold
+# multicycle, which the reference core omits.
+#
+# Omitting it is not cosmetic: a -setup 2 with -end moves the HOLD check to
+# one destination period after the launch edge, so the analyser then demands
+# that read data still be in flight a whole 27.9 ns later.  Our first build
+# closed setup here but reported -10.922 ns of hold across the SDRAM_DQ
+# inputs purely because of that.  "-hold -end 1" puts the hold check back on
+# the edge it belongs to.
 set_multicycle_path -setup -end \
   -rise_from [get_clocks {SDRAM_CLK}] \
   -rise_to   [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] 2
+set_multicycle_path -hold -end \
+  -rise_from [get_clocks {SDRAM_CLK}] \
+  -rise_to   [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] 1

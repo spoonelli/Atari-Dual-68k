@@ -35,19 +35,20 @@ jobs:
         run: |
           echo "=== Fitter resource usage ==="
           sed -n '1,60p' src/mister/output_files/Arcade-Escape.fit.summary || true
-          echo "=== Timing (worst-case slack per clock) ==="
-          grep -A40 -i "Slow 1100mV 85C Model Setup Summary" \
-            src/mister/output_files/Arcade-Escape.sta.rpt || true
-          grep -A40 -i "Slow 1100mV 85C Model Fmax Summary" \
+          echo "=== Fmax / Setup / Hold summaries ==="
+          awk '/; Fmax Summary/,/; Minimum Pulse Width Summary/' \
             src/mister/output_files/Arcade-Escape.sta.rpt || true
 
-      - name: Fail on negative slack
+      - name: Worst-path timing detail
+        if: always()
         run: |
-          # Project policy: never ship negative timing slack.
-          if grep -qE '^; *-[0-9]' src/mister/output_files/Arcade-Escape.sta.rpt; then
-            echo "Negative slack found in the STA report." >&2
-            exit 1
-          fi
+          docker run --rm -v "$PWD":/work -w /work/src/mister \
+            theypsilon/quartus-lite-c5:18.1 \
+            quartus_sta -t timing_report.tcl Arcade-Escape || true
+
+      - name: Fail on negative slack
+        if: always()
+        run: python3 src/mister/check_slack.py src/mister/output_files/Arcade-Escape.sta.rpt
 
       - name: Stage release files
         run: |
