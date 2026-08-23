@@ -266,6 +266,15 @@ Interact (**+**) menu. Saving on a clean core exit still happens.
 * **Ungraceful power loss inside the ~1.2 s window** loses whatever the game
   wrote in that window. Shortening `IDLE_BITS` in `ee_save.vhd` trades SD writes
   for a tighter window.
+* **Whether `[0184 Data slot write]` can create a file that does not exist yet
+  is not settled by the documentation.** Result code 1 is "slot not defined";
+  it is not spelled out whether a nonvolatile slot whose file is still absent
+  counts as defined. If it does not, the very first autosave fails - the
+  indicator goes magenta - and the file only appears when the core is next
+  exited cleanly, after which every autosave works. Persistence is not lost
+  either way; the first save is just deferred. The indicator makes this visible
+  rather than mysterious, and is worth a glance on the first run with a fresh
+  card.
 * **The save filename is fixed** (`atari_escape.sav`) rather than derived from
   the ROM's name. `data.json` `parameters` bit 2 ("Nonvolatile filename":
   filename cloned from slot 0 with this slot's extension) would make it follow
