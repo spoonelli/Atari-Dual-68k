@@ -198,7 +198,6 @@ module escape_mob (
     reg        discA, discB;            // swallow one completion (aborted line)
     reg [31:0] rowdata;
     reg [3:0]  blit_n;
-    reg [8:0]  blit_x;
     // MOFETCH-5: 7 bits. The 6-bit ceiling of 62 was never the binding
     // constraint while traversal ate half the line (LANE4o tuned a limiter
     // that time ran out before), but with MOFETCH-1/3/4 the engine now
