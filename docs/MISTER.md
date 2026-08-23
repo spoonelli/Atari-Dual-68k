@@ -231,6 +231,61 @@ that as the first thing to measure rather than a surprise.
 
 ---
 
+## Resources and timing
+
+Quartus 18.1 Lite, 5CSEBA6U23I7, whole design including the MiSTer framework:
+
+| Resource | Used | Available | % |
+|---|---|---|---|
+| Logic (ALMs) | 17,954 | 41,910 | 43% |
+| Registers | 20,698 | — | — |
+| Block memory (M10K) | 385 | 553 | 70% |
+| Block memory bits | 2,942,544 | 5,662,720 | 52% |
+| DSP blocks | 76 | 112 | 68% |
+| PLLs | 3 | 6 | 50% |
+| Pins | 145 | 314 | 46% |
+
+**Headroom versus the Pocket.** On the Pocket's 5CEBA4 this design sits at the
+308-M10K ceiling with nothing to spare. Here it uses 385 of 553, leaving **168
+free M10K blocks (~1.68 Mbit)** plus ~24,000 spare ALMs. That is enough to
+consider things the Pocket cannot afford — a larger slice of graphics in BRAM
+to take load off the SDRAM bus being the obvious candidate, since bandwidth is
+this port's weak point. Note the DSP figure: 76 blocks, more than the Pocket
+device even has (66), because the MiSTer scaler and `ascal` use multipliers the
+APF path does not.
+
+### Timing: two real bugs, found and fixed
+
+The first CI build reported **success while carrying -5.538 ns of setup and
+-10.922 ns of hold slack** on the 35.8 MHz SDRAM domain. Both the violation and
+the fact that it got through are worth recording.
+
+**The gate was broken.** The workflow's "fail on negative slack" step grepped
+for `^; *-[0-9]` in the STA report. The slack lives in the *second* column of
+the Setup/Hold Summary tables, so the pattern matched nothing and the step
+passed vacuously — a check that could never fire, reporting success. It is now
+`src/mister/check_slack.py`, which parses the table columns, covers setup, hold,
+recovery, removal and minimum pulse width, and **fails if an expected table is
+missing** rather than reporting a clean bill of health for a table it never
+found. It was verified by running it against the failing report, where it
+correctly flags both violations.
+
+> This is the `docs/LESSONS.md` pattern again, in a new place: a measurement
+> that cannot fail is worse than no measurement, because it manufactures
+> confidence. Any new gate should be tested against a known-bad input before it
+> is trusted.
+
+**The hold violation was self-inflicted.** `escape.sdc` carried
+`set_multicycle_path -setup -end 2` from `SDRAM_CLK` to the controller clock,
+copied from the reference core. A setup multicycle with `-end` also pushes the
+*hold* check out by one destination period, so the analyser demanded that SDRAM
+read data still be in flight 27.9 ns after launch. Adding the matching
+`set_multicycle_path -hold -end 1` puts the hold check back on the edge it
+belongs to. (The reference core omits it too, so it likely carries the same
+latent violation.)
+
+---
+
 ## Video
 
 456 × 262 total, 336 × 240 active, 7.159091 MHz pixel clock → 59.9227 Hz. Same
