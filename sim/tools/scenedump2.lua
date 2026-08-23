@@ -8,6 +8,10 @@
 -- snapshot. Buffering one frame removes that skew.
 local OUT = os.getenv("SCENE_OUT") or "/tmp"
 local IDX = tonumber(os.getenv("SCENE_IDX") or "108")
+-- MOPLACE-3: shots are counted from SCENE_START seconds on. The default keeps
+-- the in-game capture this was written for; set it below the attract/coin
+-- sequence to capture a zero-scroll attract frame instead.
+local TSTART = tonumber(os.getenv("SCENE_START") or "46.0")
 
 local machine = manager.machine
 local mm  = machine.devices[":maincpu"].spaces["program"]
@@ -60,7 +64,7 @@ _G.nb = emu.add_machine_frame_notifier(function()
     elseif phase == 7 and t > 45.4 then start:set_value(0); phase = 8 end
 
     n = n + 1
-    if t <= 46.0 then return end
+    if t <= TSTART then return end
 
     if n % 30 == 0 then
         if shots == IDX and not done and prev then

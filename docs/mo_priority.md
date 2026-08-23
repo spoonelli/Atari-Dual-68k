@@ -205,12 +205,17 @@ into `escape_prio.v`, logging every decision input and the layer that won.
 `sim/tools/check_mob_prio.py` replays that log through the same Python model.
 
 ```
-$ MOB_PARAMS='-PXSCROLL=224 -PYSCROLL=421' ./sim/run_mob_tb.sh
-MO-covered pixels in the replayed frame : 15127
-agreement with reference model          : 15127/15127 = 100.0000%
-layer census : MO drawn=14083  occluded by playfield=1044
-MO priority histogram (MPR1:MPR0) : {1: 3220, 2: 444, 3: 11463}
+$ XSCROLL=224 YSCROLL=421 ./sim/run_mob_tb.sh
+MO-covered pixels in the replayed frame : 11117
+agreement with reference model          : 11117/11117 = 100.0000%
+layer census : MO drawn=10707  occluded by playfield=410
+MO priority histogram (MPR1:MPR0) : {1: 2068, 2: 1321, 3: 7728}
 ```
+
+(These counts read 15127/14083/1044 when this was written; that run was at
+the bench's DEFAULT scroll, not the scene's — MOPLACE-0. The comparator's
+agreement with the reference model is 100% either way, which is what this
+bench checks.)
 
 **Screenshot, against MAME.** `sim/tools/render_scene.py` renders the dumped
 frame and diffs it against MAME 0.289's own snapshot of that exact frame:
@@ -219,6 +224,10 @@ frame and diffs it against MAME 0.289's own snapshot of that exact frame:
 |---|---|
 | old (MO always in front) | 79419/80640 = 98.49% |
 | new (priority comparator) | 80147/80640 = **99.39%** |
+
+(both with `--mo-source mame`, so the comparator is judged on its own. With
+the RTL's own MO layer the same two rules read 96.45% and **96.95%** — see
+`docs/mo_placement.md` for where the remaining 2.4 points go.)
 
 The 493 remaining pixels are one sprite — a single motion object whose entry the
 game updates outside the vblank handler, so it is one animation step ahead in the
@@ -241,7 +250,7 @@ SCENE_OUT=<dir> SCENE_IDX=108 ./mame eprom -rompath <roms> \
 python3 sim/tools/make_scene_hex.py <dir> sim/work
 
 # 3. replay through the RTL and check the decisions
-MOB_PARAMS='-PXSCROLL=224 -PYSCROLL=421' ./sim/run_mob_tb.sh
+XSCROLL=224 YSCROLL=421 ./sim/run_mob_tb.sh
 
 # 4. render + diff against MAME's snapshot
 python3 sim/tools/render_scene.py <dir>                    # RTL MO layer
@@ -251,9 +260,15 @@ python3 sim/tools/render_scene.py <dir> --mo-source mame   # isolate the rule
 `--mo-source mame` swaps in `sim/tools/mame_mo_model.py`, a Python port of
 `atari_motion_objects_device::draw()`, so that the priority rule can be judged
 without the line engine's own fidelity (fetch budget, links per line) in the way.
-With the RTL's MO layer the same frame matches MAME on only ~50% of pixels,
-because the engine's 62-fetch-per-line budget drops roughly half the sprite
-pixels in a scene this busy — a pre-existing limitation, untouched here.
+
+> **Corrected.** This section originally reported that the RTL's own MO layer
+> matched MAME on only ~50% of pixels and blamed the fetch budget. Both halves
+> were wrong. The bench was not running at the scene's scroll at all — see
+> `docs/mo_placement.md`, MOPLACE-0: `sim/run_mob_tb.sh` passed
+> `-PXSCROLL=224`, and iverilog ignores that spelling without a warning. With
+> the scroll applied and the two placement bugs found underneath it fixed, the
+> RTL layer scores 96.95% on this frame, and the fetch budget turns out not to
+> be the limiter at all (raising it from 62 to 4000 changes nothing).
 
 ## Resource impact
 

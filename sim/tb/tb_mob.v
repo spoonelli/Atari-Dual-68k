@@ -13,12 +13,14 @@
 // (sim/tools/mo_priority_model.py). See docs/mo_priority.md.
 //
 // The other question this answers: where do in-game sprites actually land under
-// real nonzero scroll? On device they are invisible in-game while attract
-// sprites (scroll 0) are pixel-perfect. (Still open - the MO layer here overlaps
-// MAME's on only a fraction of its pixels; that is a placement bug in the line
-// engine, not a priority one.)
+// real nonzero scroll? See docs/mo_placement.md - the engine was building each
+// line for ly+1 and letting the LAST list entry win overlaps instead of the
+// first. Both are fixed; what remains is fetch-budget truncation.
 //
-// Run: MOB_PARAMS='-PXSCROLL=224 -PYSCROLL=421' sim/run_mob_tb.sh
+// Run: XSCROLL=224 YSCROLL=421 sim/run_mob_tb.sh
+// (NOT MOB_PARAMS='-PXSCROLL=...': iverilog silently ignores the bare -P form,
+//  so the bench would run at the defaults below while being diffed against a
+//  differently-scrolled scene. run_mob_tb.sh now rejects that spelling.)
 `timescale 1ns/1ps
 
 module tb_mob;
@@ -210,6 +212,7 @@ escape_prio uprio (
     always @(gfx_reqB) reqs = reqs + 1;
     integer fdp;                        // MOPRI-1: per-pixel priority decision log
     initial begin
+        $display("TB_MOB scroll: XSCROLL=%0d YSCROLL=%0d", XSCROLL, YSCROLL);
         fd  = $fopen("sim/build/mob_pixels.txt", "w");
         fdp = $fopen("sim/build/mob_prio.txt", "w");
         $fwrite(fdp, "# x y mo_valid mo_prio mo_color mo_pix pf_color pf_pix ");
