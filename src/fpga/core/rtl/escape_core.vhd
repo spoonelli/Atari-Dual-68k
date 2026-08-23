@@ -23,7 +23,15 @@ entity escape_core is
         -- The legacy single bit passes any 2-bit error - and a passed error
         -- is EXECUTED. Per-byte detection feeds the existing retry path.
         -- 0 = legacy single-bit check only (testbenches).
-        PAR4_EN   : integer := 0
+        PAR4_EN   : integer := 0;
+        -- SDSCHED-88 zero-wait fastpath: 1 = CPU ROM fetches are answered by
+        -- core_top's clk_sdram per-CPU read caches through the fast_* ports
+        -- below, with DTACK at the authentic 4-clock phase; the legacy
+        -- rom_req arbiter still serves any cycle the fast path leaves
+        -- un-ready for 16 clks (never-wedge fallback - also what testbenches
+        -- that drive no fast ports land on). 0 = legacy arbiter exactly as
+        -- before, speculative prefetch included.
+        FASTPATH_EN : integer := 1
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -36,6 +44,23 @@ entity escape_core is
         rom_par4   : in  std_logic_vector(3 downto 0) := "0000";  -- per-byte parity (PAR4_EN=1)
         rom_req    : out std_logic;
         rom_ack    : in  std_logic;
+
+        -- SDSCHED-88 fastpath (core_top clk_sdram service). fast_*_addr /
+        -- fast_*_spec are COMBINATIONAL from the live CPU bus so the 85.9MHz
+        -- side can start its speculative read a full CPU clock before AS
+        -- falls (the TG68K kernel presents the next address one clock
+        -- early); ROM is read-only so a speculative read is always harmless.
+        -- fast_*_ready means "fast_*_data holds the word at this CPU's
+        -- CURRENT address" - tag-compared every 85.9 clock in core_top, so a
+        -- stale serve is structurally impossible.
+        fast_v_addr  : out std_logic_vector(23 downto 0);
+        fast_v_spec  : out std_logic;
+        fast_v_data  : in  std_logic_vector(15 downto 0) := (others=>'0');
+        fast_v_ready : in  std_logic := '0';
+        fast_e_addr  : out std_logic_vector(23 downto 0);
+        fast_e_spec  : out std_logic;
+        fast_e_data  : in  std_logic_vector(15 downto 0) := (others=>'0');
+        fast_e_ready : in  std_logic := '0';
 
         -- v58 hot-code shadows: 64KB BRAM per CPU covering its low address
         -- space (vectors + ISR + main loop + boot). Filled during the ROM
@@ -281,6 +306,11 @@ architecture rtl of escape_core is
     signal rom_addr_i : std_logic_vector(23 downto 0);
     signal rom_req_i  : std_logic;
     signal v_rom_pend, e_rom_pend, v_rom_dtack, e_rom_dtack : std_logic;
+    -- SDSCHED-88 fastpath fallback watchdog + arbiter pend gates
+    signal v_arb_pend, e_arb_pend : std_logic;
+    signal v_fast_to, e_fast_to   : std_logic := '0';
+    signal v_to_ctr, e_to_ctr     : unsigned(3 downto 0) := (others=>'0');
+    signal v_shad_rng, e_shad_rng : std_logic;
     signal v_rom_hold, e_rom_hold : std_logic_vector(15 downto 0);
     signal v_pref_data, e_pref_data : std_logic_vector(15 downto 0);
     signal v_pref_addr, e_pref_addr : std_logic_vector(19 downto 0);
@@ -480,6 +510,55 @@ begin
     v_rom_pend <= '1' when v_sel_rom='1' and v_sel_shad='0' and v_as_n='0' else '0';
     e_rom_pend <= '1' when e_sel_rom='1' and e_sel_shad='0' and e_as_n='0' else '0';
 
+    -- SDSCHED-88: with the fastpath on, the legacy arbiter only sees a CPU
+    -- pend once that cycle's fast watchdog has expired (never-wedge fallback)
+    v_arb_pend <= v_rom_pend when FASTPATH_EN = 0 else (v_rom_pend and v_fast_to);
+    e_arb_pend <= e_rom_pend when FASTPATH_EN = 0 else (e_rom_pend and e_fast_to);
+
+    -- SDSCHED-88 fastpath exports: raw region decodes WITHOUT as_n (so the
+    -- 85.9 side can fill speculatively) plus the same image-address mapping
+    -- the arbiter uses. Combinational on purpose; sampled by single FFs in
+    -- the 85.9 domain (timed paths per the SDSCHED-73 SDC grouping).
+    v_shad_rng <= '1' when SHAD_EN = 1 and (v_addr(23 downto 14) = "0000000000"
+                       or v_addr(23 downto 15) = "000001001"
+                       or v_addr(23 downto 15) = "000001010") else '0';
+    e_shad_rng <= '1' when SHAD_EN = 1 and (e_addr(23 downto 14) = "0000000000"
+                       or e_addr(23 downto 12) = x"00F") else '0';
+    fast_v_spec <= '1' when FASTPATH_EN = 1 and v_shad_rng = '0'
+                        and unsigned(v_addr(23 downto 0)) <= x"09FFFF" else '0';
+    fast_e_spec <= '1' when FASTPATH_EN = 1 and e_shad_rng = '0'
+                        and unsigned(e_addr(23 downto 0)) <= x"09FFFF" else '0';
+    fast_v_addr <= x"0" & v_addr(19 downto 1) & '0';
+    fast_e_addr <= std_logic_vector(
+        unsigned(std_logic_vector'(x"0" & e_addr(19 downto 1) & '0')) + x"080000");
+
+    -- SDSCHED-88 never-wedge watchdog: a ROM cycle the fast path has not
+    -- answered within 16 clks (legit worst case is ~4-5: refresh + both-CPU
+    -- collision) is handed to the legacy arbiter; a late fast serve is then
+    -- ignored for the rest of that bus cycle.
+    fast_wdt : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                v_fast_to <= '0'; e_fast_to <= '0';
+                v_to_ctr <= (others=>'0'); e_to_ctr <= (others=>'0');
+            else
+                if v_rom_pend='0' then
+                    v_fast_to <= '0'; v_to_ctr <= (others=>'0');
+                elsif v_fast_to='0' and fast_v_ready='0' and v_dtack_n='1' then
+                    if v_to_ctr = "1111" then v_fast_to <= '1';
+                    else v_to_ctr <= v_to_ctr + 1; end if;
+                end if;
+                if e_rom_pend='0' then
+                    e_fast_to <= '0'; e_to_ctr <= (others=>'0');
+                elsif e_fast_to='0' and fast_e_ready='0' and e_dtack_n='1' then
+                    if e_to_ctr = "1111" then e_fast_to <= '1';
+                    else e_to_ctr <= e_to_ctr + 1; end if;
+                end if;
+            end if;
+        end if;
+    end process;
+
     rom_arb : process(clk)
     begin
         if rising_edge(clk) then
@@ -513,7 +592,10 @@ begin
                         if rom_ack='1' then
                             null;                        -- wait out previous ack (4-phase)
                         -- prefetch hits: no SDRAM transaction, v57-paced serve
-                        elsif v_rom_pend='1' and v_served='0' and v_hit_dly="00"
+                        -- (SDSCHED-88: *_arb_pend = *_rom_pend gated by the
+                        -- fastpath watchdog, so with FASTPATH_EN=1 this
+                        -- arbiter only ever sees timed-out cycles)
+                        elsif v_arb_pend='1' and v_served='0' and v_hit_dly="00"
                               and v_pref_valid='1'
                               and (v_addr(19 downto 1) & '0') = v_pref_addr then
                             v_rom_hold   <= v_pref_data;
@@ -524,7 +606,7 @@ begin
                             v_last_data  <= v_pref_data;
                             v_last_addr  <= v_pref_addr;
                             v_last_valid <= '1';
-                        elsif e_rom_pend='1' and e_served='0' and e_hit_dly="00"
+                        elsif e_arb_pend='1' and e_served='0' and e_hit_dly="00"
                               and e_pref_valid='1'
                               and (e_addr(19 downto 1) & '0') = e_pref_addr then
                             e_rom_hold   <= e_pref_data;
@@ -535,27 +617,27 @@ begin
                             e_last_addr  <= e_pref_addr;
                             e_last_valid <= '1';
                         -- last-word cache (still gated OFF by LANE4d A/B)
-                        elsif LW_CACHE_EN='1' and v_rom_pend='1' and v_served='0'
+                        elsif LW_CACHE_EN='1' and v_arb_pend='1' and v_served='0'
                               and v_hit_dly="00" and v_last_valid='1'
                               and (v_addr(19 downto 1) & '0') = v_last_addr then
                             v_rom_hold  <= v_last_data;
                             v_hit_dly   <= "10";
                             v_served    <= '1';
                             v_rom_src   <= "10";
-                        elsif LW_CACHE_EN='1' and e_rom_pend='1' and e_served='0'
+                        elsif LW_CACHE_EN='1' and e_arb_pend='1' and e_served='0'
                               and e_hit_dly="00" and e_last_valid='1'
                               and (e_addr(19 downto 1) & '0') = e_last_addr then
                             e_rom_hold  <= e_last_data;
                             e_hit_dly   <= "10";
                             e_served    <= '1';
                         -- v57: no grant while a paced serve counts down
-                        elsif e_rom_pend='1' and e_hit_dly="00" and e_served='0'
-                              and (last_was_v='1' or v_rom_pend='0' or v_hit_dly/="00") then
+                        elsif e_arb_pend='1' and e_hit_dly="00" and e_served='0'
+                              and (last_was_v='1' or v_arb_pend='0' or v_hit_dly/="00") then
                             rom_owner <= OWN_E; last_was_v <= '0';
                             rom_addr_i <= std_logic_vector(
                                 unsigned(std_logic_vector'(x"0" & e_addr(19 downto 1) & '0')) + x"080000");
                             rom_req_i <= '1';
-                        elsif v_rom_pend='1' and v_hit_dly="00" and v_served='0' then
+                        elsif v_arb_pend='1' and v_hit_dly="00" and v_served='0' then
                             rom_owner <= OWN_V; last_was_v <= '1';
                             rom_addr_i <= x"0" & v_addr(19 downto 1) & '0';
                             rom_req_i <= '1';
@@ -582,10 +664,15 @@ begin
                             rom_req_i <= '0'; v_rom_hold <= rom_data(31 downto 16);
                             -- speed2: word 1 never consumed (marginal capture);
                             -- arm a speculative follow-up txn for addr+2 whose
-                            -- word 0 becomes the prefetch (v56 mechanism)
-                            vp_addr <= std_logic_vector(
-                                unsigned(v_addr(19 downto 1) & '0') + 2);
-                            vp_want <= '1';
+                            -- word 0 becomes the prefetch (v56 mechanism).
+                            -- SDSCHED-88: bypassed with the fastpath on - the
+                            -- clk_sdram cache IS the prefetch, and these
+                            -- follow-ups would only steal its SDRAM slots.
+                            if FASTPATH_EN = 0 then
+                                vp_addr <= std_logic_vector(
+                                    unsigned(v_addr(19 downto 1) & '0') + 2);
+                                vp_want <= '1';
+                            end if;
                             v_last_data  <= rom_data(31 downto 16);
                             v_last_addr  <= v_addr(19 downto 1) & '0';
                             v_last_valid <= '1';
@@ -629,9 +716,11 @@ begin
                             retry_cnt <= retry_cnt + 1;
                         elsif rom_ack='1' then
                             rom_req_i <= '0'; e_rom_hold <= rom_data(31 downto 16);
-                            ep_addr <= std_logic_vector(
-                                unsigned(e_addr(19 downto 1) & '0') + 2);
-                            ep_want <= '1';                -- speed2 follow-up
+                            if FASTPATH_EN = 0 then        -- SDSCHED-88: see OWN_V
+                                ep_addr <= std_logic_vector(
+                                    unsigned(e_addr(19 downto 1) & '0') + 2);
+                                ep_want <= '1';            -- speed2 follow-up
+                            end if;
                             e_last_data  <= rom_data(31 downto 16);
                             e_last_addr  <= e_addr(19 downto 1) & '0';
                             e_last_valid <= '1';
@@ -1510,6 +1599,9 @@ begin
     v_di <= vshad3_q   when v_sel_shad3='1' else
             vshad2_q   when v_sel_shad2='1' else
             vshad_q    when v_sel_shad1='1' else
+            -- SDSCHED-88: fastpath data unless this cycle's watchdog expired
+            -- (then the legacy arbiter served it into v_rom_hold)
+            fast_v_data when v_sel_rom='1' and FASTPATH_EN=1 and v_fast_to='0' else
             v_rom_hold when v_sel_rom='1' else
             shr_qa   when v_sel_ram='1' else
             pf_q     when v_sel_pf='1' else
@@ -1549,6 +1641,7 @@ begin
     -- game-start gate. Serve the extra the same port values as the main.
     e_di <= eshad2_q   when e_sel_shad2='1' else
             eshad_q    when e_sel_shad1='1' else
+            fast_e_data when e_sel_rom='1' and FASTPATH_EN=1 and e_fast_to='0' else
             e_rom_hold when e_sel_rom='1' else
             shr_qb   when e_sel_ram='1' else
             (x"F" & not p1_buttons & "1111111" & not step_btn)
@@ -1599,7 +1692,20 @@ begin
                     elsif v_addr(23 downto 1) /= v_addr_q then
                         v_ws <= '0'; v_dtack_n <= '1';
                     elsif v_sel_rom='1' and v_sel_shad='0' then
-                        if v_rom_dtack='1' then v_dtack_n <= '0'; end if;
+                        -- SDSCHED-88: fast path completes at the AUTHENTIC
+                        -- phase. ready is first sampled at the first rising
+                        -- edge after AS falls (as_n is still high at the
+                        -- edge AS asserts on, and the address-change branch
+                        -- above guards back-to-back cycles), so DTACK can
+                        -- never come earlier than the real board's - and
+                        -- when ready is already there, the cycle closes in
+                        -- exactly 4 CPU clocks. Not ready in time = plain
+                        -- waitstates; 16 clks = legacy arbiter (fast_wdt).
+                        if FASTPATH_EN = 1 and v_fast_to = '0' then
+                            if fast_v_ready='1' then v_dtack_n <= '0'; end if;
+                        elsif v_rom_dtack='1' then
+                            v_dtack_n <= '0';
+                        end if;
                     elsif v_ws='1' then
                         v_dtack_n <= '0';
                     else
@@ -1614,7 +1720,11 @@ begin
                     elsif e_addr(23 downto 1) /= e_addr_q then
                         e_ws <= '0'; e_dtack_n <= '1';
                     elsif e_sel_rom='1' and e_sel_shad='0' then
-                        if e_rom_dtack='1' then e_dtack_n <= '0'; end if;
+                        if FASTPATH_EN = 1 and e_fast_to = '0' then
+                            if fast_e_ready='1' then e_dtack_n <= '0'; end if;
+                        elsif e_rom_dtack='1' then
+                            e_dtack_n <= '0';
+                        end if;
                     elsif e_ws='1' then
                         e_dtack_n <= '0';
                     else
