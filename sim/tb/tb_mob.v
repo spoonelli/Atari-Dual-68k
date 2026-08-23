@@ -44,6 +44,14 @@ module tb_mob;
         $readmemh("sim/work/game_mo.hex", momem);
         $readmemh("sim/work/game_cfg.hex", cfgmem);
     end
+    // MOPRI-1: playfield tile RAM + tile "palette" (extmem) RAM for the
+    // priority comparison. 64x64 map, TILEMAP_SCAN_COLS -> index = col*64+row.
+    reg [15:0] pfmem  [0:4095];
+    reg [15:0] pfxmem [0:4095];
+    initial begin
+        $readmemh("sim/work/game_pf.hex",  pfmem);
+        $readmemh("sim/work/game_pfx.hex", pfxmem);
+    end
     wire [11:0] mo_vaddr;
     reg  [15:0] mo_vdata;
     wire [6:0]  cfg_vaddr;
@@ -88,6 +96,7 @@ module tb_mob;
     reg rstn = 0;
     initial begin rstn = 0; repeat (20) @(posedge clk); rstn = 1; end
     wire [7:0] disp_pen;
+    wire [1:0] disp_prio;
     wire       disp_valid;
     escape_mob dut (
         .clk      ( clk ),
@@ -113,14 +122,57 @@ module tb_mob;
         .gfx_dataB( gfx_dataB ),
         .disp_x   ( visible_x[8:0] ),
         .disp_pen ( disp_pen ),
+        .disp_prio( disp_prio ),
         .disp_valid( disp_valid )
     );
+
+    // ---------------- MOPRI-1: playfield pen for this pixel
+    // A direct model of MAME's playfield tilemap for eprom (get_playfield_tile_info
+    // + pfmolayout, chunky-repacked): NOT core_top's prefetch pipeline, which is a
+    // scheduling detail. Keeping it independent means a disagreement here is a
+    // priority-logic disagreement, not a fetch-timing one.
+    // The visible pixel is one clock behind visible_x (registered line-buffer read),
+    // so the playfield must be sampled at visible_x-1 to line up with disp_pen.
+    wire [9:0] pf_sx  = visible_x - 10'd1;
+    wire [8:0] pf_x2  = (pf_sx[8:0] + XSCROLL[8:0]) & 9'h1FF;
+    wire [8:0] pf_y2  = (visible_y[8:0] + YSCROLL[8:0]) & 9'h1FF;
+    wire [11:0] pf_idx = {pf_x2[8:3], pf_y2[8:3]};       // col*64 + row
+    wire [15:0] pf_w1  = pfmem[pf_idx];
+    wire [15:0] pf_wx  = pfxmem[pf_idx];
+    wire [14:0] pf_code = pf_w1[14:0];
+    wire        pf_flip = pf_w1[15];
+    wire [3:0]  pf_color = pf_wx[11:8];
+    wire [2:0]  pf_px   = pf_flip ? (3'd7 - pf_x2[2:0]) : pf_x2[2:0];
+    // chunky: 4 bytes per tile row, high nibble first
+    wire [23:0] pf_rowa = 24'h120000 + {pf_code, 5'd0} + {pf_y2[2:0], 2'd0};
+    wire [7:0]  pf_byte = gfx[pf_rowa + {1'b0, pf_px[2:1]}];
+    wire [3:0]  pf_pix  = pf_px[0] ? pf_byte[3:0] : pf_byte[7:4];
+
+    // ---------------- MOPRI-1: the comparator under test
+    wire        pr_forcemc0, pr_shade, pr_m7, pr_pfm, pr_mo_win;
+    wire [10:0] pr_pen;
+escape_prio uprio (
+    .mo_valid ( disp_valid ),
+    .mo_prio  ( disp_prio ),
+    .mo_color ( disp_pen[7:4] ),
+    .mo_pix   ( disp_pen[3:0] ),
+    .pf_color ( pf_color ),
+    .pf_pix   ( pf_pix ),
+    .forcemc0 ( pr_forcemc0 ),
+    .shade    ( pr_shade ),
+    .m7       ( pr_m7 ),
+    .pfm      ( pr_pfm ),
+    .mo_win   ( pr_mo_win ),
+    .pen      ( pr_pen )
+);
 
     // ---------------- debug: what does the engine actually do per line?
     reg dumping = 0;
     integer n_slip, n_entries, n_ymatch, n_fetch, n_wren, n_wren_off;
     integer n_pend, n_done, n_blitst; reg pendA_d = 0, doneA_d = 0;
-    initial begin n_slip=0; n_entries=0; n_ymatch=0; n_fetch=0; n_wren=0; n_wren_off=0; n_pend=0; n_done=0; n_blitst=0; end
+    integer n_mowin, n_shade, n_m7, n_occl;   // MOPRI-1 decision census
+    initial begin n_slip=0; n_entries=0; n_ymatch=0; n_fetch=0; n_wren=0; n_wren_off=0; n_pend=0; n_done=0; n_blitst=0;
+                  n_mowin=0; n_shade=0; n_m7=0; n_occl=0; end
     reg [3:0] state_d = 0;
     always @(posedge clk) begin
         state_d <= dut.state;
@@ -146,15 +198,22 @@ module tb_mob;
     integer fd, px_seen, reqs;
     always @(gfx_reqA) reqs = reqs + 1;
     always @(gfx_reqB) reqs = reqs + 1;
+    integer fdp;                        // MOPRI-1: per-pixel priority decision log
     initial begin
-        fd = $fopen("sim/build/mob_pixels.txt", "w");
+        fd  = $fopen("sim/build/mob_pixels.txt", "w");
+        fdp = $fopen("sim/build/mob_prio.txt", "w");
+        $fwrite(fdp, "# x y mo_valid mo_prio mo_color mo_pix pf_color pf_pix ");
+        $fwrite(fdp, "forcemc0 shade m7 pfm mo_win pen layer\n");
         px_seen = 0; reqs = 0;
         @(posedge rstn);
         repeat (2 * VID_V_TOTAL * VID_H_TOTAL) @(posedge clk);
         dumping = 1;
         repeat (VID_V_TOTAL * VID_H_TOTAL + 10) @(posedge clk);
         $fclose(fd);
+        $fclose(fdp);
         $display("TB_MOB DONE: %0d pixels, %0d gfx reqs", px_seen, reqs);
+        $display("DBG3 mo_win=%0d shade=%0d m7=%0d occluded=%0d",
+                 n_mowin, n_shade, n_m7, n_occl);
         $display("DBG slips=%0d entries=%0d ymatch=%0d fetch=%0d wren=%0d offscreen_px=%0d",
                  n_slip, n_entries, n_ymatch, n_fetch, n_wren, n_wren_off);
         $display("DBG2 done=%0d pend=%0d blitstate=%0d", n_done, n_pend, n_blitst);
@@ -166,8 +225,23 @@ module tb_mob;
            && y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE) begin
             // disp read is registered: pen for visible_x N is valid one cycle later
             if(disp_valid) begin
-                $fwrite(fd, "%0d %0d %h\n", visible_x - 10'd1, visible_y, disp_pen);
+                $fwrite(fd, "%0d %0d %h %0d\n", visible_x - 10'd1, visible_y,
+                        disp_pen, disp_prio);
                 px_seen = px_seen + 1;
+            end
+            // MOPRI-1: log every pixel the MO layer covers, with the full set of
+            // priority-decision inputs and the layer that won.
+            if(disp_valid) begin
+                $fwrite(fdp, "%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0s\n",
+                        visible_x - 10'd1, visible_y,
+                        disp_valid, disp_prio, disp_pen[7:4], disp_pen[3:0],
+                        pf_color, pf_pix,
+                        pr_forcemc0, pr_shade, pr_m7, pr_pfm, pr_mo_win, pr_pen,
+                        pr_mo_win ? "mo" : "pf");
+                n_mowin = n_mowin + (pr_mo_win ? 1 : 0);
+                n_shade = n_shade + (pr_shade ? 1 : 0);
+                n_m7    = n_m7    + (pr_m7    ? 1 : 0);
+                n_occl  = n_occl  + (pr_mo_win ? 0 : 1);
             end
         end
     end
