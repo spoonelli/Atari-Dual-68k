@@ -71,6 +71,14 @@ module escape_mob (
     // costs ZERO extra blocks - important, the 308-M10K ceiling is spent.
     reg [19:0] buf0 [0:511];            // {fpar, tag[8:0], prio[1:0], color[3:0], pix[3:0]}
     reg [19:0] buf1 [0:511];
+    // M10K comes up zeroed on the device; mirror that for simulation so the
+    // occupancy probe below reads a defined value on the very first line
+    // instead of X. Simulation-only: kept out of synthesis so it can never
+    // perturb RAM inference.
+    // synthesis translate_off
+    integer bi;
+    initial for(bi = 0; bi < 512; bi = bi + 1) begin buf0[bi] = 20'd0; buf1[bi] = 20'd0; end
+    // synthesis translate_on
     reg        fpar = 1'b0;
     reg        built_fp0 = 1'b0, built_fp1 = 1'b0;
     always @(posedge clk)
@@ -78,21 +86,42 @@ module escape_mob (
     reg        build_sel;               // which buffer is being built
     reg [8:0]  built_ly0, built_ly1;    // the ly each buffer was last built for
     reg [19:0] disp_q0, disp_q1;
+    reg [8:0]  blit_x;                  // declared early: feeds the probe read
+    // MOPLACE-2: the buffer being BUILT is not the one being displayed, so its
+    // read port sat idle at disp_x every cycle. Point it at blit_x instead and
+    // it becomes an occupancy probe for first-write-wins (see S_BLIT). Still
+    // one read + one write per buffer, so this is free: no extra M10K, no
+    // extra port, no extra cycle.
+    wire [8:0] rd_addr0 = build_sel ? disp_x : blit_x;
+    wire [8:0] rd_addr1 = build_sel ? blit_x : disp_x;
     always @(posedge clk) begin
-        disp_q0 <= buf0[disp_x];
-        disp_q1 <= buf1[disp_x];
+        disp_q0 <= buf0[rd_addr0];
+        disp_q1 <= buf1[rd_addr1];
     end
+    // "this entry holds a real pixel written for the line this buffer was last
+    // built for". S_BLIT only ever writes pix != 0 (pen 0 is transparent), so
+    // requiring pix != 0 makes an all-zero entry unrepresentable as a hit -
+    // which is what a powered-up (or never-written) M10K location reads.
+    // Without that, an untouched entry aliases the tag {fpar=0, ly=0}.
+    wire hit0 = (disp_q0[19:10] == {built_fp0, built_ly0}) && (disp_q0[3:0] != 4'd0);
+    wire hit1 = (disp_q1[19:10] == {built_fp1, built_ly1}) && (disp_q1[3:0] != 4'd0);
+
     assign disp_pen   = build_sel ? disp_q0[7:0] : disp_q1[7:0];
     assign disp_prio  = build_sel ? disp_q0[9:8] : disp_q1[9:8];
-    assign disp_valid = build_sel ? (disp_q0[19:10] == {built_fp0, built_ly0})
-                                  : (disp_q1[19:10] == {built_fp1, built_ly1});
+    assign disp_valid = build_sel ? hit0 : hit1;
+
+    // Occupancy of the build buffer at the pixel wr_x/wr_en are aiming at: the
+    // probe read and the wr_x/wr_en registers both sample blit_x in the same
+    // cycle, and the buffer write commits one cycle later, so this is exactly
+    // "what is already at wr_x, before this write".
+    wire bld_occupied = build_sel ? hit1 : hit0;
 
     // write port
     reg  [8:0]  wr_x;
     reg  [19:0] wr_data;
     reg         wr_en;
     always @(posedge clk) begin
-        if(wr_en) begin
+        if(wr_en && !bld_occupied) begin
             if(build_sel) buf1[wr_x] <= wr_data; else buf0[wr_x] <= wr_data;
         end
     end
@@ -131,7 +160,6 @@ module escape_mob (
     reg        pendA, pendB;            // completion seen, not yet consumed
     reg [31:0] rowdata;
     reg [3:0]  blit_n;
-    reg [8:0]  blit_x;
     reg [5:0]  fetch_budget;
     reg [9:0]  cur_line_latch;
 
@@ -323,7 +351,17 @@ module escape_mob (
             end
 
             S_BLIT: begin
-                // write pixel blit_n of the row (last-wins; list order relied on)
+                // MOPLACE-3: FIRST-write-wins. eprom's MO config sets
+                // "render in reverse order" (reference/eprom.cpp s_mob_config),
+                // so atarimo draws the linked list from its TAIL back to its
+                // HEAD - the head entry is painted last and therefore wins every
+                // pixel it touches. We must walk head-first (the list is singly
+                // linked), so the equivalent is to refuse to overwrite a pixel
+                // already written for THIS line: earliest entry wins, same
+                // result. The refusal happens in the buffer write enable via
+                // bld_occupied; this used to be last-wins, which handed
+                // overlapping sprites to the wrong object (16% of MO pixels in
+                // the reference frame).
                 // MOPRI-1: spr_prio[2] (mopriority & 4) = "special rendering,
                 // draws nothing" in the normal pass. The reference `continue`s
                 // on it; here we simply suppress the line-buffer write. Note
