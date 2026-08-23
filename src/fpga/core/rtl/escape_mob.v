@@ -100,6 +100,35 @@ module escape_mob (
     localparam S_NEXT   = 4'd12;
     localparam S_PRIME  = 4'd13;
 
+    // MOFETCH-3: the LINK SCOUT - a second, independent state machine that owns
+    // the MO RAM video port and walks the SLIP list continuously, including all
+    // the way through S_PRIME/S_BLIT when the port would otherwise sit idle.
+    // This is the structure the real board has: Escape's PAL16L8 at 70J drives
+    // a dedicated /LINK memory slot (SP-332 sheet 7), so list walking never
+    // competes with the pixel pipeline. US4894774 calls it the lookahead cycle.
+    //
+    // The scout only ever touches w0 (link) and w3 (y/height) - the two words
+    // that decide an entry's fate. When it finds an entry that intersects the
+    // line it parks JUST the link and the raw w3 and stops, so it is never more
+    // than one entry ahead and never decodes a sprite the blitter is still
+    // drawing. The blitter then reads w2/w1 for the parked entry itself, which
+    // keeps every per-sprite field (colour, x, prio, code) decoded at
+    // sprite-load time, on the blitter's side, exactly as before.
+    localparam SC_IDLE  = 3'd0;
+    localparam SC_E0    = 3'd1;
+    localparam SC_E1    = 3'd2;
+    localparam SC_E2    = 3'd3;
+    localparam SC_E3    = 3'd4;
+    localparam SC_HOLD  = 3'd5;         // a hit is parked, waiting to be taken
+    localparam SC_DONE  = 3'd6;         // list exhausted for this line
+
+    reg [2:0]  sstate;
+    reg        hit_pending;             // a matching entry is parked
+    reg [9:0]  hit_link;                // ...this one
+    reg [15:0] h_w3;                    // ...with this geometry word
+    reg        sc_last;                 // the parked hit is the list's last entry
+    reg        sc_restart;              // blitter -> scout: port is yours again
+
     reg [3:0]  state;
     reg [8:0]  ly;                      // playfield-space line being built
     reg [9:0]  first_link, link;
@@ -167,6 +196,7 @@ module escape_mob (
     always @(posedge clk) begin
         if(!reset_n) begin
             state <= S_IDLE;
+            sstate <= SC_IDLE; hit_pending <= 0; sc_restart <= 0;
             gfx_reqA <= 0; gfx_reqB <= 0;
             pendA <= 0; pendB <= 0;
             inflA <= 0; inflB <= 0; discA <= 0; discB <= 0;
@@ -176,6 +206,7 @@ module escape_mob (
             gfx_doneA_last <= 0; gfx_doneB_last <= 0;
         end else begin
             wr_en <= 0;
+            sc_restart <= 1'b0;
             gfx_doneA_last <= gfx_doneA;
             gfx_doneB_last <= gfx_doneB;
             // completions can land while blitting: LATCH them (an edge is
@@ -221,8 +252,75 @@ module escape_mob (
                 // cycle it is already being retired above, so no discard is due.
                 discA <= inflA && !doneA_edge;
                 discB <= inflB && !doneB_edge;
+                sstate <= SC_IDLE;
+                hit_pending <= 1'b0;
                 state <= S_CLEAR;
-            end else
+            end else begin
+
+            // ================= LINK SCOUT =================
+            // Owns mo_vaddr except during the blitter's two sprite-load cycles
+            // (S_E0 / S_WAIT), which it spends parked in SC_HOLD. Runs right
+            // through S_PRIME and S_BLIT, so on a busy line the entire list
+            // walk is hidden behind the pixels.
+            case(sstate)
+            SC_IDLE: begin end
+            SC_DONE: begin end
+
+            SC_E0: begin mo_vaddr <= {link, 2'd0}; sstate <= SC_E1; end
+            SC_E1: begin mo_vaddr <= {link, 2'd3}; sstate <= SC_E2; end
+
+            SC_E2: begin
+                // w0 on the bus: capture the link and immediately start the
+                // NEXT entry's w0 read, matched or not. That hides the MO RAM's
+                // 2-cycle read latency, so the reject loop below is 2 cycles
+                // per entry instead of the 8 the old in-line walk paid.
+                w0    <= mo_vdata;
+                nlink <= mo_vdata[9:0];
+                mo_vaddr <= {mo_vdata[9:0], 2'd0};
+                sstate <= SC_E3;
+            end
+
+            SC_E3: begin
+                // w3 on the bus: the accept/reject verdict, one cycle earlier
+                // than the registered ymatch could give it (see ymatch_e).
+                h_w3 <= mo_vdata;
+                if(ymatch_e && fetch_budget != 0) begin
+                    // Park it. Only the link and the raw geometry word are
+                    // kept - nothing the blitter is currently drawing with is
+                    // touched, which is what makes running ahead safe.
+                    hit_link    <= link;
+                    hit_pending <= 1'b1;
+                    sc_last     <= (nlink == first_link) || (ent_count == 7'd63);
+                    sstate      <= SC_HOLD;
+                end else if(nlink == first_link || ent_count == 7'd63
+                            || fetch_budget == 0) begin
+                    // the same three terminators the walk has always applied
+                    sstate <= SC_DONE;
+                end else begin
+                    ent_count <= ent_count + 7'd1;
+                    link      <= nlink;
+                    mo_vaddr  <= {nlink, 2'd3};
+                    sstate    <= SC_E2;
+                end
+            end
+
+            SC_HOLD: begin
+                // The blitter releases the port one cycle after it takes the
+                // hit (it addresses w2 then w1 of the parked entry itself).
+                if(sc_restart) begin
+                    if(sc_last || fetch_budget == 0) sstate <= SC_DONE;
+                    else begin
+                        ent_count <= ent_count + 7'd1;
+                        link      <= nlink;
+                        sstate    <= SC_E0;
+                    end
+                end
+            end
+
+            default: sstate <= SC_DONE;
+            endcase
+
+            // ================= BLITTER =================
             case(state)
             S_IDLE: begin
             end
@@ -242,72 +340,37 @@ module escape_mob (
                 // while lone sprites render clean) - raise toward the 6-bit
                 // ceiling; the tagged line buffers still bound overruns
                 fetch_budget <= 6'd62;
-                state <= S_E0;
+                sstate <= SC_E0;                         // release the scout
+                state  <= S_NEXT;                        // wait for its first hit
             end
 
-            // MOFETCH-1: PIPELINED EARLY-REJECT WALK.
-            // The old walk read all four words of every entry in a fixed
-            // 8-cycle sequence, matched or not: 18822 entries visited per 3
-            // frames to find 3858 hits meant ~212 of the 456 cycles in a
-            // scanline went to traversal before a single pixel was fetched, and
-            // EVERY active line aborted mid-build. The real board does not pay
-            // this - Escape's PAL16L8 at 70J drives a dedicated /LINK memory
-            // slot (schematic sheet 7), so list walking costs the pixel
-            // pipeline nothing.
-            //
-            // Only two words decide an entry's fate: w3 (y/height -> ymatch)
-            // and w0 (the link to the next entry). Read those two, in that
-            // order, and issue the NEXT entry's w0 in the very cycle this
-            // entry's w0 lands - the MO RAM read latency is then fully hidden
-            // and a rejected entry costs 2 cycles instead of 8:
-            //
-            //   S_E2: w0 arrives -> nlink;  address {nlink,0}   (speculative)
-            //   S_E3: w3 arrives -> verdict; address {nlink,3}  -> back to S_E2
-            //
-            // The speculative {nlink,0} read is free (the MO RAM port is
-            // otherwise idle) and is simply not latched if the entry matches.
-            // w1/w2 are read only for entries that actually intersect the line,
-            // and a matching entry still reaches S_PRIME in 7 cycles - exactly
-            // as before - so nothing about the blit path shifts in time.
-            S_E0: begin mo_vaddr <= {link, 2'd0}; state <= S_E1; end
-            S_E1: begin mo_vaddr <= {link, 2'd3}; state <= S_E2; end
-
-            S_E2: begin
-                // w0 on the bus: capture the link and immediately start the
-                // next entry's w0 read, whether or not this entry matches.
-                w0    <= mo_vdata;
-                nlink <= mo_vdata[9:0];
-                mo_vaddr <= {mo_vdata[9:0], 2'd0};
-                state <= S_E3;
+            // MOFETCH-3: SPRITE LOAD. The scout has already decided this entry
+            // intersects the line and parked its link and geometry word, so all
+            // that is left on the blitter's critical path is reading w2 and w1
+            // - four cycles from taking the hit to S_PRIME, against the eight a
+            // fully in-line walk paid per matched entry, with every rejected
+            // entry between them costing the blitter nothing at all.
+            S_E0: begin
+                mo_vaddr <= {hit_link, 2'd2};
+                spr_y    <= h_w3[15:7];
+                width_t  <= h_w3[6:4];
+                height_t <= h_w3[2:0];
+                hflip    <= h_w3[3];
+                w3       <= h_w3;
+                hit_pending <= 1'b0;
+                state <= S_WAIT;
             end
 
-            S_E3: begin
-                // w3 on the bus: geometry + the accept/reject verdict.
-                w3       <= mo_vdata;
-                spr_y    <= mo_vdata[15:7];
-                width_t  <= mo_vdata[6:4];
-                height_t <= mo_vdata[2:0];
-                hflip    <= mo_vdata[3];
-                if(ymatch_e && fetch_budget != 0) begin
-                    // hit: go read w2 then w1 (that order keeps S_MATCH the
-                    // colour/x/prio state it has always been)
-                    mo_vaddr <= {link, 2'd2};
-                    state <= S_WAIT;
-                end else if(nlink == first_link || ent_count == 7'd63
-                            || fetch_budget == 0) begin
-                    // same three terminators S_NEXT applies, just evaluated
-                    // here for entries that never needed w1/w2
-                    state <= S_IDLE;
-                end else begin
-                    ent_count <= ent_count + 7'd1;
-                    link      <= nlink;
-                    mo_vaddr  <= {nlink, 2'd3};
-                    state     <= S_E2;
-                end
+            // The port is handed straight back: mo_vaddr is driven here for the
+            // last time this sprite, and sc_restart lets the scout resume on the
+            // NEXT cycle, so the two never drive the address in the same cycle.
+            // ymatch (the registered form) is valid here - spr_y/height_t were
+            // loaded one cycle ago - which is what the existing benches probe.
+            S_WAIT: begin
+                mo_vaddr   <= {hit_link, 2'd1};
+                sc_restart <= 1'b1;
+                state <= S_MATCH;
             end
-
-            // one BRAM-latency cycle; ymatch (the registered form) is valid here
-            S_WAIT: begin mo_vaddr <= {link, 2'd1}; state <= S_MATCH; end
 
             S_MATCH: begin
                 w2 <= mo_vdata;                           // color/x/prio
@@ -419,17 +482,19 @@ module escape_mob (
                 end
             end
 
+            // MOFETCH-3: the blitter no longer walks anything. It takes the
+            // next entry the scout has already found, or - only if the scout
+            // has run the list out - ends the line. Sitting here is the only
+            // place the blitter can now be blocked by traversal, and on a busy
+            // line the scout has always got there first.
             S_NEXT: begin
-                ent_count <= ent_count + 7'd1;
-                link <= w0[9:0];
-                if(w0[9:0] == first_link || ent_count == 7'd63 || fetch_budget == 0)
-                    state <= S_IDLE;
-                else
-                    state <= S_E0;
+                if(hit_pending && fetch_budget != 0) state <= S_E0;
+                else if(sstate == SC_DONE || fetch_budget == 0) state <= S_IDLE;
             end
 
             default: state <= S_IDLE;
             endcase
+            end
         end
     end
 
