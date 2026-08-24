@@ -217,6 +217,34 @@ module tb_mob_perf;
     integer n_chclash, qk;
     // lead time per slot, shadowing the queue's own shift
     integer pf_t [0:8];
+    // MODIAG-1: WHERE THE FETCH STALL ACTUALLY IS.
+    // startup/steady splits the S_PRIME stall by tiles-per-sprite, which says
+    // WHICH sprite the engine is waiting on but not WHY. These say why, and
+    // they are what decide whether the next lever is channels or issue time.
+    //   c_pr_unissued - waiting for a tile whose fetch has NOT gone out yet.
+    //                   That is issue bandwidth: a free channel, or the pump's
+    //                   one-issue-per-cycle rate. More channels, deeper queues
+    //                   and row buffers all attack this term.
+    //   c_pr_inflight - the fetch is out and we are waiting for memory. Pure
+    //                   GFX_LAT. Nothing downstream of the issue touches it;
+    //                   only asking EARLIER does.
+    //   c_pr_t1/c_pr_tn - and which tile. The pump cannot ask for a sprite's
+    //                   tile 1 until pump_live, i.e. until the blitter has
+    //                   LOADED that sprite; tile 0 then blits for 8 cycles
+    //                   while tile 1 is still GFX_LAT-8 away. Tiles 2,3,...
+    //                   went out on the following cycles and have nearly
+    //                   caught up by the time they are wanted.
+    //   c_pumpblk     - the pump wanting a channel and not getting one, counted
+    //                   ONLY while the blitter is simultaneously stalled.
+    //                   Unqualified it over-counts wildly: a sprite with all
+    //                   four tiles in flight has no free channel and is not
+    //                   stalled at all.
+    //   c_chbusy      - summed channels held (infl|pend); over the window this
+    //                   is mean channel occupancy out of NCH.
+    // Uses only signals every revision since MOCHAN-4 has, so it scores the
+    // shipping engine without any RTL change.
+    integer c_pr_unissued, c_pr_inflight, c_pr_t1, c_pr_tn, c_pumpblk, c_chbusy;
+    integer chb;
 `endif
     // DRAW-ORDER PROOF. The sequence of sprites the blitter loads, per built
     // line, dumped so the depth engine can be diffed against the depth-1 one:
@@ -253,6 +281,8 @@ module tb_mob_perf;
             c_qd[qk]=0; n_pf_slot[qk]=0; pf_t[qk]=0;
         end
         c_sc_room=0; c_sc_walk=0; c_yield=0; n_chclash=0;
+        c_pr_unissued=0; c_pr_inflight=0; c_pr_t1=0; c_pr_tn=0;
+        c_pumpblk=0; c_chbusy=0; chb=0;
 `endif
         n_orderslip=0; ord_h=0; ord_t=0;
     end
@@ -316,6 +346,20 @@ module tb_mob_perf;
         if(dut.iss_scout) begin
             n_pf_slot[dut.sc_sel] = n_pf_slot[dut.sc_sel] + 1;
             pf_t[dut.sc_sel] = now_t;
+        end
+        // ---- MODIAG-1 census ----------------------------------------------
+        if(dut.state == S_PRIME && !dut.tile_rdy
+           && dut.pump_ready && !dut.pump_pref && !dut.ch_any)
+            c_pumpblk = c_pumpblk + 1;
+        chb = 0;
+        for(qk = 0; qk < NCH; qk = qk + 1)
+            if(dut.infl[qk] || dut.pend[qk]) chb = chb + 1;
+        c_chbusy = c_chbusy + chb;
+        if(dut.state == S_PRIME && dut.blit_n == 4'd14) begin
+            if(!dut.tile_live)      c_pr_unissued = c_pr_unissued + 1;
+            else                    c_pr_inflight = c_pr_inflight + 1;
+            if(dut.tx == 3'd1)      c_pr_t1 = c_pr_t1 + 1;
+            else if(dut.tx > 3'd1)  c_pr_tn = c_pr_tn + 1;
         end
 `endif
 `ifndef MOB_BASE
@@ -539,6 +583,9 @@ module tb_mob_perf;
                  n_pf_slot[0], n_pf_slot[1], n_pf_slot[2], n_pf_slot[3], n_pf_slot[4]);
         $display("PERF scout walk=%0d queue_full=%0d port_yield=%0d chan_clash=%0d order_slips=%0d",
                  c_sc_walk, c_sc_room, c_yield, n_chclash, n_orderslip);
+        $display("PERF primewhy unissued=%0d inflight=%0d tx1=%0d txN=%0d pump_blocked=%0d chan_occupancy=%0d.%02d (of prime %0d)",
+                 c_pr_unissued, c_pr_inflight, c_pr_t1, c_pr_tn, c_pumpblk,
+                 c_chbusy/(240*456), (100*c_chbusy/(240*456))%100, c_prime);
 `endif
         $display("PERF prime_split issue=%0d startup=%0d steady=%0d (startup is %0d%% of prime)",
                  c_pr_issue, c_pr_start, c_pr_steady,
