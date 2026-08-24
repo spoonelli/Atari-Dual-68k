@@ -155,7 +155,13 @@ Thanks: LMSS, DJS, LCS, TBPL, EG
   format, the two-CPU mailbox handshake). **No MAME source code is copied into this
   repository**; the RTL is an independent re-implementation from the driver's documented
   behavior cross-checked against the original schematics, which take precedence where they
-  disagree (autovectored IRQs, SLAPSTIC, serial SCOM — though on CPU type MAME was right: the schematic labels U68010 but production boards carry 68000s). Thank you to the
+  disagree (autovectored IRQs, SLAPSTIC, serial SCOM). On CPU type the two references
+  genuinely differ and the question is **open**: the schematic labels both CPUs `U68010`
+  (45J and 20P), while MAME instantiates `M68000`. We follow MAME, and that choice is
+  safe rather than lucky — the ROM contains no 68010-only instruction, no handler reads
+  an exception-frame format word, and 68010 loop mode is never entered (measured: 0.0000%
+  of the video CPU's per-frame work sits in a loop-mode-eligible `DBcc` loop). See
+  [`docs/CPU_AND_ARBITER.md`](docs/CPU_AND_ARBITER.md). Thank you to the
   MAME developers for decades of preservation work that made this core possible.
 - The **openFPGA** community and **Analogue** for the Pocket core framework
   ([`open-fpga/core-template`](https://github.com/open-fpga/core-template)).
