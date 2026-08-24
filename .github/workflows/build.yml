@@ -26,12 +26,26 @@ jobs:
             theypsilon/quartus-lite-c5:18.1 \
             quartus_sh --flow compile ap_core
 
+      # CLKFIX-106: until now this workflow had NO timing gate -- "never ship
+      # negative slack" was enforced only by a human remembering to grep the
+      # log. This gate parses the STA summary tables by COLUMN (the slack is
+      # the second field; a regex anchored at line start silently passed a
+      # -5.538 ns build on the MiSTer side) and refuses to certify if any
+      # expected table is missing, so it cannot report a clean bill of health
+      # without having actually looked. Verified against synthetic good, bad
+      # and truncated reports before being trusted.
+      - name: Timing gate (fail on negative slack)
+        run: |
+          test -f src/fpga/output_files/ap_core.sta.rpt
+          python3 support/check_slack.py src/fpga/output_files/ap_core.sta.rpt
+
       - name: Bit-reverse .rbf -> .rbf_r
         run: |
           test -f src/fpga/output_files/ap_core.rbf
           mkdir -p output
           python3 support/reverse_bits.py \
-            src/fpga/output_files/ap_core.rbf output/bitstream.rbf_r
+            src/fpga/output_files/ap_core.rbf
+            src/fpga/output_files/ap_core.sta.rpt output/bitstream.rbf_r
 
       - name: Upload bitstream
         uses: actions/upload-artifact@v4
@@ -40,3 +54,4 @@ jobs:
           path: |
             output/bitstream.rbf_r
             src/fpga/output_files/ap_core.rbf
+            src/fpga/output_files/ap_core.sta.rpt
