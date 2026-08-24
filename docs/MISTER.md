@@ -309,26 +309,52 @@ this on hardware.
 
 ## Resources and timing
 
-Quartus 18.1 Lite, 5CSEBA6U23I7, whole design including the MiSTer framework:
+Quartus 18.1 Lite, 5CSEBA6U23I7, **BUILD 105 rebase**, whole design including
+the MiSTer framework:
 
 | Resource | Used | Available | % |
 |---|---|---|---|
-| Logic (ALMs) | 17,954 | 41,910 | 43% |
-| Registers | 20,698 | — | — |
+| Logic (ALMs) | 18,770 | 41,910 | 45% |
+| Registers | 21,122 | — | — |
 | Block memory (M10K) | 385 | 553 | 70% |
 | Block memory bits | 2,942,544 | 5,662,720 | 52% |
 | DSP blocks | 76 | 112 | 68% |
 | PLLs | 3 | 6 | 50% |
-| Pins | 145 | 314 | 46% |
+
+(BUILD 102 was 17,954 ALMs; the 4-channel motion-object engine and the stain
+pass cost about 800 ALMs and no extra M10K.)
+
+**Timing — every analysed clock, Slow 1100 mV 100 °C model. Total negative
+slack is 0.000 on all of them.**
+
+| Clock | Setup slack | Hold slack |
+|---|---|---|
+| `general[0]` — 7.159091 MHz CPU + pixel | **+16.042 ns** | +0.259 ns |
+| `general[1]` — 35.795455 MHz SDRAM controller | **+14.785 ns** | +0.255 ns |
+| `SDRAM_CLK` — 35.795455 MHz @ +90° | +3.434 ns | +17.450 ns |
+| `pll_hdmi` — 148.5 MHz (framework) | +0.744 ns | +0.247 ns |
+| `pll_audio` — 24.576 MHz (framework) | +14.401 ns | +0.245 ns |
+| `FPGA_CLK1_50` | +7.541 ns | +0.406 ns |
+| `FPGA_CLK2_50` | +13.462 ns | +0.404 ns |
+| `spi_sck` | +6.351 ns | +0.371 ns |
+
+Fmax on the two core clocks: **26.24 MHz** on the 7.159091 MHz CPU/pixel domain
+(3.7× headroom) and **76.02 MHz** on the 35.795455 MHz SDRAM domain (2.1×
+headroom). The design is not close to its logic limits on this device; its
+limit is SDRAM *bandwidth*, not clock speed — and the bandwidth ceiling cannot
+be raised by clocking faster, for the CL2 capture reason above.
+
+**These numbers came from a gate that has been proven able to fail.**
+`src/mister/check_slack.py` was run against the earlier known-bad report and
+correctly named both violations before it was trusted for this one.
 
 **Headroom versus the Pocket.** On the Pocket's 5CEBA4 this design sits at the
 308-M10K ceiling with nothing to spare. Here it uses 385 of 553, leaving **168
-free M10K blocks (~1.68 Mbit)** plus ~24,000 spare ALMs. That is enough to
-consider things the Pocket cannot afford — a larger slice of graphics in BRAM
-to take load off the SDRAM bus being the obvious candidate, since bandwidth is
-this port's weak point. Note the DSP figure: 76 blocks, more than the Pocket
-device even has (66), because the MiSTer scaler and `ascal` use multipliers the
-APF path does not.
+free M10K blocks (~1.68 Mbit)** plus ~23,000 spare ALMs. That is enough for
+things the Pocket cannot afford — a tile-row cache to take load off the SDRAM
+bus being the obvious candidate, since bandwidth is this port's weak point.
+Note the DSP figure: 76 blocks, more than the Pocket device even has (66),
+because the MiSTer scaler and `ascal` use multipliers the APF path does not.
 
 ### Timing: one real bug, one broken gate, and a wrong hypothesis
 
