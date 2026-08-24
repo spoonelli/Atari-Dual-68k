@@ -82,7 +82,39 @@ entity escape_core is
         --       leaves the write strobe live. Exists only to demonstrate in
         --       the bench that a DTACK-only interlock does NOT work, because
         --       we_shr_a/we_shr_b assert on every clock of a stalled cycle.
-        TASLOCK_EN : integer := 1
+        TASLOCK_EN : integer := 1;
+        -- CPU-110 CABINET VARIANT SELECT for both TG68K instances.
+        --   0 = 68000, the JAMMA board       (TG68K CPU=>"00")
+        --   1 = 68010, the dedicated cabinet (TG68K CPU=>"01")
+        --
+        -- THIS IS NOT A HEDGE AND NEITHER VALUE IS A FALLBACK. Escape shipped
+        -- in two cabinet variants with different CPUs and both are confirmed
+        -- from photographs: the dedicated board carries MC68010P8 (Motorola,
+        -- date code A71R8813, matching SP-332's "U68010" at 45J/20P - SP-332
+        -- IS the dedicated-cabinet package), and the JAMMA board carries a
+        -- 68000, which is what MAME's eprom driver models. Set this to
+        -- whichever machine you are emulating; both are authentic.
+        --
+        -- DEFAULT IS 1 (dedicated / 68010). BUILD 109 and everything before it
+        -- ran 0, and was a faithful JAMMA machine - that was never a bug.
+        -- Declared integer, like every other generic here, so core_top.v can
+        -- override it across the Verilog/VHDL boundary exactly the way it
+        -- overrides FASTPATH_EN / VSHAD3_EN / TASLOCK_EN. The override in
+        -- core_top.v is the single place to change it.
+        --
+        -- EXPECT NO OBSERVABLE DIFFERENCE BETWEEN THE TWO. Only CPU(0) does
+        -- anything, and it gates exactly two kernel features
+        -- (TG68KdotC_Kernel.vhd:138-145): SR_Read (MOVE from SR becomes
+        -- privileged - inert, all 7 sites in this ROM run supervisor, and
+        -- :2082 permits it whenever SVmode='1') and VBR_Stackframe (VBR plus
+        -- the 8-byte exception frame - inert, VBR provably stays 0 because no
+        -- MOVEC exists at any even offset in either 512 KB image, and no
+        -- handler does pointer arithmetic around the frame). Everything else
+        -- keys on CPU(1), which is 0 for both values.
+        -- 68010 LOOP MODE IS NOT A REASON TO PREFER EITHER: TG68K does not
+        -- implement it at all, and it measures 0.0000% of the video CPU's
+        -- per-frame work on this game regardless. No speed change, either way.
+        CPU_TYPE : integer := 1
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -578,6 +610,12 @@ architecture rtl of escape_core is
     signal retry_cnt  : unsigned(15 downto 0) := (others=>'0');
     signal rom_par_ok : std_logic;
     signal alpha_wr_stretch : unsigned(19 downto 0);
+    -- CPU-110: integer CPU_TYPE -> TG68K's 2-bit CPU generic. 0 => "00"
+    -- (68000 / JAMMA), 1 => "01" (68010 / dedicated). Only those two values
+    -- are supported; TG68K also defines "11" for 68020, which neither board
+    -- ever was.
+    constant CPU_SEL : std_logic_vector(1 downto 0)
+        := std_logic_vector(to_unsigned(CPU_TYPE, 2));
     -- ADC0809 behavioral model (260020-2E)
     signal adc_data : std_logic_vector(7 downto 0) := x"80";
     signal adc_chan : std_logic_vector(1 downto 0) := "00";
@@ -599,12 +637,13 @@ begin
     -- unphotographed inspection in 24d900e which generalised a single board to
     -- all production, and it is retracted - see docs/CPU_AND_ARBITER.md 1.6.)
     --
-    -- We run TG68K in 68000 mode below, which makes this a faithful JAMMA
-    -- machine - not a deviation. Measured, this ROM cannot tell the two parts
+    -- CPU_TYPE (see the generic above) picks which variant we are, via
+    -- CPU_SEL. Both CPUs always take the same value, so the pair can never be
+    -- accidentally mismatched. Measured, this ROM cannot tell the two parts
     -- apart at all (docs/CPU_AND_ARBITER.md 1.3/1.3.1/1.4), so neither setting
     -- can be wrong for a given player's board.
     -- autovectored IRQs via VPA.
-    vcpu : entity work.TG68K generic map ( CPU => "00" )
+    vcpu : entity work.TG68K generic map ( CPU => CPU_SEL )
         port map ( CLK=>clk, RESET=>reset_n, HALT=>reset_n, BERR=>'0', IPL=>v_ipl,
                    ADDR=>v_addr, FC=>v_fc, DATAI=>v_di_r, DATAO=>v_do,
                    AS=>v_as_n, UDS=>v_uds_n, LDS=>v_lds_n, RW=>v_rw_n,
@@ -614,7 +653,7 @@ begin
     e_resn <= reset_n and (extra_release or dbg_force_extra);
     -- Same part as the video CPU on both variants (schematic 20P "ECPU"),
     -- and run in the same mode - see the video CPU comment above.
-    ecpu : entity work.TG68K generic map ( CPU => "00" )
+    ecpu : entity work.TG68K generic map ( CPU => CPU_SEL )
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>e_ipl,
                    ADDR=>e_addr, FC=>e_fc, DATAI=>e_di_r, DATAO=>e_do,
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,
