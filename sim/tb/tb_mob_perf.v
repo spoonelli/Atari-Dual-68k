@@ -217,6 +217,85 @@ module tb_mob_perf;
     integer n_chclash, qk;
     // lead time per slot, shadowing the queue's own shift
     integer pf_t [0:8];
+    // MODIAG-1: WHERE THE FETCH STALL ACTUALLY IS.
+    // startup/steady splits the S_PRIME stall by tiles-per-sprite, which says
+    // WHICH sprite the engine is waiting on but not WHY. These say why, and
+    // they are what decide whether the next lever is channels or issue time.
+    //   c_pr_unissued - waiting for a tile whose fetch has NOT gone out yet.
+    //                   That is issue bandwidth: a free channel, or the pump's
+    //                   one-issue-per-cycle rate. More channels, deeper queues
+    //                   and row buffers all attack this term.
+    //   c_pr_inflight - the fetch is out and we are waiting for memory. Pure
+    //                   GFX_LAT. Nothing downstream of the issue touches it;
+    //                   only asking EARLIER does.
+    //   c_pr_t1/c_pr_tn - and which tile. The pump cannot ask for a sprite's
+    //                   tile 1 until pump_live, i.e. until the blitter has
+    //                   LOADED that sprite; tile 0 then blits for 8 cycles
+    //                   while tile 1 is still GFX_LAT-8 away. Tiles 2,3,...
+    //                   went out on the following cycles and have nearly
+    //                   caught up by the time they are wanted.
+    //   c_pumpblk     - the pump wanting a channel and not getting one, counted
+    //                   ONLY while the blitter is simultaneously stalled.
+    //                   Unqualified it over-counts wildly: a sprite with all
+    //                   four tiles in flight has no free channel and is not
+    //                   stalled at all.
+    //   c_chbusy      - summed channels held (infl|pend); over the window this
+    //                   is mean channel occupancy out of NCH.
+    // Uses only signals every revision since MOCHAN-4 has, so it scores the
+    // shipping engine without any RTL change.
+    //
+    // ---- WHAT THEY SAID, THE FIRST TIME THEY WERE READ -------------------
+    // Recorded here so the next person does not have to re-derive it, and so a
+    // later change can be diffed against a real baseline rather than a memory.
+    // Shipping engine (BUILD 106 escape_mob.v, byte-identical to 105's) at
+    // scene 50/157, GFX_LAT=31, one frame:
+    //
+    //   prime 33,682  =  startup 9,395  +  steady 24,287
+    //   unissued 50      inflight 33,632
+    //   tx1 17,153       txN 7,134
+    //   pump_blocked 16,937            chan_occupancy 2.00 / 4
+    //
+    // Two readings, and they point the same way:
+    //
+    //  1. 99.85% of the fetch stall (33,632 of 33,682) is waiting for MEMORY on
+    //     a fetch that has already gone out. Only 50 cycles a frame are spent
+    //     waiting for a tile nobody has asked for yet. The pump is therefore
+    //     NOT channel-starved, and anything that merely frees channels sooner
+    //     has almost nothing to free. That is not a prediction: MOHARV-1 built
+    //     exactly such a change - harvesting the pump's completed rows out of
+    //     their channels into an in-order row buffer, so a channel is released
+    //     at completion instead of at blit - and measured it. It worked as
+    //     designed (4,383 harvests a frame, chan_occupancy 2.00 -> 1.80, scout
+    //     channel starvation 13,604 -> 7,931 cycles, prime 33,682 -> 33,181)
+    //     and moved COVERAGE NOT AT ALL, in all nine sweep cells and at lat 40,
+    //     48 and 62 as well. It was dropped. See branch mo-harvest if the
+    //     channel theory ever looks attractive again; it is already refuted.
+    //
+    //  2. 71% of the whole steady-state term (17,153 of 24,287) is ONE sprite's
+    //     SECOND tile. The cause is structural, not statistical: pump_ready
+    //     requires pump_live, which is S_PRIME|S_BLIT, so a sprite's tile 1
+    //     cannot be requested until the blitter has already LOADED that sprite.
+    //     Tile 0 then blits for 8 cycles while tile 1 is still GFX_LAT-8 cycles
+    //     away - 23 of them at lat31 - and that is one unavoidable stall per
+    //     sprite. Tiles 2,3,... are issued on the cycles immediately after tile
+    //     1 and have nearly caught up by the time they are wanted, which is why
+    //     txN is a third of tx1 despite covering every later tile of every
+    //     sprite in the frame. (At lat62 the two converge - tx1 18,079 vs txN
+    //     18,237 - because there even the trailing tiles can no longer catch
+    //     up. The lever below widens to tiles 1..n at that point.)
+    //
+    // So the next sprite-throughput lever is ISSUE TIME: the SCOUT prefetching
+    // tile 1 (and, at high latency, tiles 1..n) of a sprite that is still
+    // PARKED, so the fetch is in flight before the blitter ever loads it. The
+    // scout already decodes and holds code_row and row for every queue slot, so
+    // tile k's address is code_row + k with no new decode; and chan_occupancy
+    // of 1.80-2.00 out of 4 says the channels to do it with are sitting idle.
+    // Note that such a prefetch WOULD need MOHARV-1's harvest to come back with
+    // it - a prefetched later tile parked behind the blitter would otherwise
+    // pin its channel from issue all the way to its blit - so the two changes
+    // belong together, in that order, and neither is worth landing alone.
+    integer c_pr_unissued, c_pr_inflight, c_pr_t1, c_pr_tn, c_pumpblk, c_chbusy;
+    integer chb;
 `endif
     // DRAW-ORDER PROOF. The sequence of sprites the blitter loads, per built
     // line, dumped so the depth engine can be diffed against the depth-1 one:
@@ -253,6 +332,8 @@ module tb_mob_perf;
             c_qd[qk]=0; n_pf_slot[qk]=0; pf_t[qk]=0;
         end
         c_sc_room=0; c_sc_walk=0; c_yield=0; n_chclash=0;
+        c_pr_unissued=0; c_pr_inflight=0; c_pr_t1=0; c_pr_tn=0;
+        c_pumpblk=0; c_chbusy=0; chb=0;
 `endif
         n_orderslip=0; ord_h=0; ord_t=0;
     end
@@ -316,6 +397,20 @@ module tb_mob_perf;
         if(dut.iss_scout) begin
             n_pf_slot[dut.sc_sel] = n_pf_slot[dut.sc_sel] + 1;
             pf_t[dut.sc_sel] = now_t;
+        end
+        // ---- MODIAG-1 census ----------------------------------------------
+        if(dut.state == S_PRIME && !dut.tile_rdy
+           && dut.pump_ready && !dut.pump_pref && !dut.ch_any)
+            c_pumpblk = c_pumpblk + 1;
+        chb = 0;
+        for(qk = 0; qk < NCH; qk = qk + 1)
+            if(dut.infl[qk] || dut.pend[qk]) chb = chb + 1;
+        c_chbusy = c_chbusy + chb;
+        if(dut.state == S_PRIME && dut.blit_n == 4'd14) begin
+            if(!dut.tile_live)      c_pr_unissued = c_pr_unissued + 1;
+            else                    c_pr_inflight = c_pr_inflight + 1;
+            if(dut.tx == 3'd1)      c_pr_t1 = c_pr_t1 + 1;
+            else if(dut.tx > 3'd1)  c_pr_tn = c_pr_tn + 1;
         end
 `endif
 `ifndef MOB_BASE
@@ -539,6 +634,9 @@ module tb_mob_perf;
                  n_pf_slot[0], n_pf_slot[1], n_pf_slot[2], n_pf_slot[3], n_pf_slot[4]);
         $display("PERF scout walk=%0d queue_full=%0d port_yield=%0d chan_clash=%0d order_slips=%0d",
                  c_sc_walk, c_sc_room, c_yield, n_chclash, n_orderslip);
+        $display("PERF primewhy unissued=%0d inflight=%0d tx1=%0d txN=%0d pump_blocked=%0d chan_occupancy=%0d.%02d (of prime %0d)",
+                 c_pr_unissued, c_pr_inflight, c_pr_t1, c_pr_tn, c_pumpblk,
+                 c_chbusy/(240*456), (100*c_chbusy/(240*456))%100, c_prime);
 `endif
         $display("PERF prime_split issue=%0d startup=%0d steady=%0d (startup is %0d%% of prime)",
                  c_pr_issue, c_pr_start, c_pr_steady,
