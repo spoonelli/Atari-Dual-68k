@@ -19,6 +19,18 @@ entity escape_core is
         -- 1 = serve low-64KB code from the download-filled shadows (hardware);
         -- 0 = disable (GHDL tbs: shadows unfilled, all fetches via arbiter)
         SHAD_EN   : integer := 1;
+        -- VSHAD3-107: the main CPU's THIRD shadow, 32 KB at 0x50000-0x57FFF,
+        -- 32 M10K blocks. It was added (aca5510, 2026-08-20) when the only
+        -- alternative to BRAM was the legacy 15-25 clock SDRAM arbiter, on a
+        -- MAME page profile of 0x53000 + 0x56000. The zero-wait fastpath
+        -- landed two days later (2b18183) and inverted the premise: a
+        -- fastpath hit closes in 4 CPU clocks, the shadow BRAM path in 5, so
+        -- a shadow now COSTS this CPU a clock on its hottest code and
+        -- v_shad_rng suppresses the fastpath on exactly those addresses.
+        -- 1 = keep vshad3, 0 = un-shadow 0x50000-0x57FFF and let the fastpath
+        -- have it (which also hands 32 M10K back to the 308-block ceiling).
+        -- sim/run_busrate.sh measures both.
+        VSHAD3_EN : integer := 1;
         -- SDSCHED-81: 1 = per-byte parity on the ROM CDC (rom_par4 valid).
         -- The legacy single bit passes any 2-bit error - and a passed error
         -- is EXECUTED. Per-byte detection feeds the existing retry path.
@@ -234,6 +246,25 @@ entity escape_core is
         -- reference - answers "are the processors actually at speed?"
         dbg_vcyc        : out std_logic_vector(15 downto 0);
         dbg_ecyc        : out std_logic_vector(15 downto 0);
+        -- CADENCE-107: the game's OWN logic cadence, not a proxy for it.
+        -- Every bus-cycle figure this core reports is a proxy: it says how
+        -- fast the processors run, not whether the game met its deadline.
+        -- docs/PERF_CADENCE.md measures the original in the units that
+        -- matter - LOGIC UPDATES PER VIDEO FRAME, 0.9977 video / 0.9999
+        -- world in MAME - by tapping the two re-entrancy flags each ISR
+        -- writes: $50 to $16CCD4 (main/video) and $16CCD6 (extra/world)
+        -- starts a logic frame, $00 ends it. These count the $50 writes
+        -- over 256 video frames, so 0100 hex IS 1.0000 updates/frame and
+        -- the number is directly comparable to MAME's without assuming
+        -- anything about clocks, bus cycles or wait states.
+        -- (The docs also name $16C990/$16C992 as "logic-frame counters".
+        -- They are incremented BEFORE the already-running gate - see the
+        -- listing in PERF_CADENCE section 1 - so they count ISR entries,
+        -- i.e. video frames, and would read 1.0000 even on a core that was
+        -- missing every other deadline. The flags are the tap that produced
+        -- the reference numbers, so the flags are what is counted here.)
+        dbg_cadv        : out std_logic_vector(15 downto 0);
+        dbg_cadw        : out std_logic_vector(15 downto 0);
         -- LANE4s: source PC of the extra's last jump into the 0xA62-0xB7F
         -- data table, and a live flag that it is currently executing there
         dbg_ewild       : out std_logic_vector(15 downto 0);
@@ -317,6 +348,12 @@ end escape_core;
 
 architecture rtl of escape_core is
     signal v_addr : std_logic_vector(31 downto 0);
+    -- CADENCE-107 logic-frame cadence meter
+    signal cad_v_ctr, cad_w_ctr : unsigned(15 downto 0) := (others=>'0');
+    signal cad_v_fr,  cad_w_fr  : unsigned(15 downto 0) := (others=>'0');
+    signal cad_fcnt : unsigned(7 downto 0) := (others=>'0');
+    signal cad_vb_d, cad_v_d, cad_w_d : std_logic := '0';
+
     signal v_do, v_di : std_logic_vector(15 downto 0);
     signal v_as_n, v_uds_n, v_lds_n, v_rw_n : std_logic;
     signal v_dtack_n : std_logic;
@@ -618,9 +655,14 @@ begin
     -- 85.9 side can fill speculatively) plus the same image-address mapping
     -- the arbiter uses. Combinational on purpose; sampled by single FFs in
     -- the 85.9 domain (timed paths per the SDSCHED-73 SDC grouping).
+    -- VSHAD3-107: the third term is the vshad3 range. With VSHAD3_EN=0 it
+    -- drops out of BOTH this decode and v_sel_shad3 below, so those addresses
+    -- stop suppressing the fastpath as well as stopping being read from BRAM -
+    -- the two must move together or the range would be served by neither.
     v_shad_rng <= '1' when SHAD_EN = 1 and (v_addr(23 downto 14) = "0000000000"
                        or v_addr(23 downto 15) = "000001001"
-                       or v_addr(23 downto 15) = "000001010") else '0';
+                       or (VSHAD3_EN = 1
+                           and v_addr(23 downto 15) = "000001010")) else '0';
     e_shad_rng <= '1' when SHAD_EN = 1 and (e_addr(23 downto 14) = "0000000000"
                        or e_addr(23 downto 12) = x"00F") else '0';
     fast_v_spec <= '1' when FASTPATH_EN = 1 and v_shad_rng = '0'
@@ -1134,6 +1176,65 @@ begin
     end process;
     dbg_awr <= std_logic_vector(awr_fr);
 
+    -- CADENCE-107: logic-frame starts per 256 video frames, per CPU.
+    -- Register-only (two counters, two latches, an 8-bit frame divider and
+    -- two address comparators), so the M10K delta is structurally zero - the
+    -- same shape as mbox_snoop above, which is why that was the template.
+    -- The write strobes are level-per-clock by design (see the SDSCHED-80
+    -- note on v_wr), so each write is edge-detected on the fully-qualified
+    -- condition exactly as mbox_ledger does it.
+    cadence_meter : process(clk)
+        variable vstart, wstart : std_logic;
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                cad_v_ctr <= (others=>'0'); cad_w_ctr <= (others=>'0');
+                cad_v_fr  <= (others=>'0'); cad_w_fr  <= (others=>'0');
+                cad_fcnt  <= (others=>'0');
+                cad_vb_d  <= '0'; cad_v_d <= '0'; cad_w_d <= '0';
+            else
+                -- $16CCD4 and $16CCD6 are EVEN byte addresses, so the byte
+                -- travels on D15..D8 under UDS. Word index is (addr & FFFF)/2
+                -- in the shared RAM's own 15-bit space, matching mbox_snoop.
+                vstart := '0'; wstart := '0';
+                if we_shr_a='1' and shr_a_addr = "110011001101010"
+                   and shr_a_uds = '0' and shr_a_din(15 downto 8) = x"50"
+                then vstart := '1'; end if;
+                if we_shr_b='1' and e_addr(15 downto 1) = "110011001101011"
+                   and e_uds_n = '0' and e_do(15 downto 8) = x"50"
+                then wstart := '1'; end if;
+
+                cad_vb_d <= vblank_in;
+                if vblank_in='1' and cad_vb_d='0' and cad_fcnt = x"FF" then
+                    -- end of a 256-frame window: publish and restart. A start
+                    -- landing on this very clock is carried into the new
+                    -- window rather than dropped, so no count is ever lost.
+                    cad_v_fr <= cad_v_ctr; cad_w_fr <= cad_w_ctr;
+                    cad_fcnt <= (others=>'0');
+                    if vstart='1' and cad_v_d='0' then
+                        cad_v_ctr <= to_unsigned(1, 16);
+                    else cad_v_ctr <= (others=>'0'); end if;
+                    if wstart='1' and cad_w_d='0' then
+                        cad_w_ctr <= to_unsigned(1, 16);
+                    else cad_w_ctr <= (others=>'0'); end if;
+                else
+                    if vblank_in='1' and cad_vb_d='0' then
+                        cad_fcnt <= cad_fcnt + 1;
+                    end if;
+                    if vstart='1' and cad_v_d='0' then
+                        cad_v_ctr <= cad_v_ctr + 1;
+                    end if;
+                    if wstart='1' and cad_w_d='0' then
+                        cad_w_ctr <= cad_w_ctr + 1;
+                    end if;
+                end if;
+                cad_v_d <= vstart; cad_w_d <= wstart;
+            end if;
+        end if;
+    end process;
+    dbg_cadv <= std_logic_vector(cad_v_fr);
+    dbg_cadw <= std_logic_vector(cad_w_fr);
+
     cyc_meter : process(clk)
     begin
         if rising_edge(clk) then
@@ -1267,7 +1368,7 @@ begin
                             and v_addr(23 downto 14) = "0000000000" else '0';
     v_sel_shad2 <= '1' when SHAD_EN=1 and v_sel_rom='1'
                             and v_addr(23 downto 15) = "000001001" else '0';
-    v_sel_shad3 <= '1' when SHAD_EN=1 and v_sel_rom='1'
+    v_sel_shad3 <= '1' when SHAD_EN=1 and VSHAD3_EN=1 and v_sel_rom='1'
                             and v_addr(23 downto 15) = "000001010" else '0';
     -- MOSDRAM-72: MAME miss-profiles (attract incl. demo gameplay) put 77%
     -- of the extra's SDRAM reads in 0xA000-0xBFFF - eshad3 shadows it.
@@ -1283,7 +1384,7 @@ begin
     e_sel_shad <= e_sel_shad1 or e_sel_shad2;
     vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000000000" else '0';
     vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001001" else '0';
-    vshad3_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001010" else '0';
+    vshad3_we <= '1' when VSHAD3_EN=1 and shad_we='1' and shad_waddr(23 downto 15) = "000001010" else '0';
     eshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000100000" else '0';
     eshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 12) = x"08F" else '0';
     jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
@@ -1300,10 +1401,18 @@ begin
         port map ( wrclk=>shad_wclk, we=>vshad2_we,
                    waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad2_q );
-    vshad3 : entity work.dpram_dc generic map ( awidth => 14 )
-        port map ( wrclk=>shad_wclk, we=>vshad3_we,
-                   waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
-                   rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad3_q );
+    -- VSHAD3-107: generate-guarded so VSHAD3_EN=0 removes the 32 M10K rather
+    -- than leaving an unread RAM for the fitter to keep. vshad3_q is driven
+    -- to zero in that case; v_sel_shad3 is hard 0 above, so nothing reads it.
+    g_vshad3 : if VSHAD3_EN = 1 generate
+        vshad3 : entity work.dpram_dc generic map ( awidth => 14 )
+            port map ( wrclk=>shad_wclk, we=>vshad3_we,
+                       waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
+                       rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad3_q );
+    end generate;
+    g_no_vshad3 : if VSHAD3_EN /= 1 generate
+        vshad3_q <= (others => '0');
+    end generate;
     eshad2 : entity work.dpram_dc generic map ( awidth => 11 )
         port map ( wrclk=>shad_wclk, we=>eshad2_we,
                    waddr=>shad_waddr(11 downto 1), wdata=>shad_wdata,

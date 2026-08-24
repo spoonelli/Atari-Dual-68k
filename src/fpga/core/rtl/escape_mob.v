@@ -167,9 +167,56 @@ module escape_mob (
     reg  [8:0]  wr_x;
     reg  [19:0] wr_data;
     reg         wr_en;
+
+    // GFXDASH-3: SELF-CLEARING READOUT - the thing the real MOHLB does, and
+    // the thing LANE3n's comment above says it does instead of tagging.
+    //
+    // The tag is {fpar, ly[7:0]} and fpar is ONE bit, so it distinguishes this
+    // frame from LAST frame and from nothing else. An entry written two frames
+    // ago carries the same parity as this frame; if nothing has rewritten that
+    // column in that buffer since, it reads back as LIVE. LANE4q fixed the
+    // one-frame ghost and left the two-frame ghost, at half the rate and with
+    // a 30 Hz flicker - which is exactly the 2-frame parity measured on
+    // hardware in docs/GFX_DASH_ARTIFACT.md sections 3(c) and 7.
+    //
+    // It costs pixels twice over. The stale entry DISPLAYS (a sprite in two
+    // places at once), and - worse - it satisfies bld_occupied, so a live
+    // sprite arriving at that column has its write REFUSED by a ghost. When
+    // the refused write is a stain END marker, the automaton in escape_stain.v
+    // never sees its terminator and the stain runs from the marker's
+    // world-anchored left edge to the last screen column. Both failures are
+    // reproduced, before this change, by sim/run_stain_tb.sh (cases D and E).
+    //
+    // Widening the tag is not available: the entry is 20 bits, which is
+    // exactly the native 512x20 M10K geometry, and a 21st bit doubles both
+    // line buffers to 2 blocks each. The design is at the 308-block ceiling.
+    //
+    // So clear on readout instead. Each buffer already has one read port and
+    // one write port; while a buffer is being DISPLAYED its write port is
+    // idle, because blit writes go to the other one. Writing zero there costs
+    // no port, no block and no cycle - and an all-zero entry is unrepresentable
+    // as a hit (S_BLIT only ever writes pix != 0), so it can never alias.
+    //
+    // clr_x is disp_x delayed one cycle, so the clear NEVER touches the address
+    // the display side is reading in the same cycle - no read-during-write
+    // behaviour is relied on, which is what would otherwise cost a bypass mux
+    // or an inference warning. disp_x sweeps 0..394 (and 452..511) every line
+    // and S_BLIT writes only below 344, so every writable column is cleared
+    // exactly once per line. Buffers alternate every line, so each one is
+    // cleared during the line immediately BEFORE it is built: every build now
+    // starts from an empty buffer, and staleness is impossible by construction
+    // rather than by an argument about tag width. The tags stay anyway - they
+    // still cover the reset state and cost nothing.
+    reg [8:0] clr_x;
+    always @(posedge clk) clr_x <= disp_x;
+
     always @(posedge clk) begin
-        if(wr_en && !bld_occupied) begin
-            if(build_sel) buf1[wr_x] <= wr_data; else buf0[wr_x] <= wr_data;
+        if(build_sel) begin
+            if(wr_en && !bld_occupied) buf1[wr_x] <= wr_data;
+            buf0[clr_x] <= 20'd0;
+        end else begin
+            if(wr_en && !bld_occupied) buf0[wr_x] <= wr_data;
+            buf1[clr_x] <= 20'd0;
         end
     end
 
@@ -796,7 +843,11 @@ module escape_mob (
             end
 
             S_CLEAR: begin
-                // no clearing needed: tags invalidate stale pixels
+                // GFXDASH-3: still no clear PASS here - the buffer about to be
+                // built was zeroed column-by-column during the line it spent
+                // being displayed (see the self-clearing readout above), which
+                // is what the real MOHLB does and what the tags were standing
+                // in for. This state is now purely the SLIP address cycle.
                 cfg_vaddr <= {1'b1, ly[8:3]};            // SLIP word 0x40 + band
                 state <= S_SLIP0;
             end
