@@ -6,7 +6,8 @@ Two reference authorities, in this order of precedence:
    hardware actually is.
 2. **MAME's `eprom.cpp` driver** — a behavioural reference, cross-checked against (1).
 
-Where they disagree the schematic wins, with one recorded exception (CPU type, below).
+Where they disagree the schematic wins, with one open question (CPU type, C5 below —
+the schematic says 68010, MAME says 68000, and it is measurably immaterial either way).
 This file lists every known place our implementation is *not* the board. Some are
 unavoidable consequences of the target hardware; some are open bugs; a few are choices.
 
@@ -30,7 +31,7 @@ None of them are "wrong", but all of them are places where our timing can differ
 
 | # | Board | Ours | Status |
 |---|---|---|---|
-| B1 | **Shared RAM is single-ported behind a mux arbiter** (EWAI / PAL16L8 50P, sheet 5 designators 40M/50M/30M), which makes 68000 read-modify-write naturally indivisible | True dual-port RAM plus an **explicit TAS interlock** keyed on the operand address | Functionally equivalent, structurally different. Verified: 114 ownerless locks in 306 trials without it, **0 in 514 with it**. This was the project's dominant bug. |
+| B1 | **Shared RAM is single-ported behind a mux arbiter** (sheet 5: SRAMs 40M/50M, LS158A mux 30M with SEL = EWAI, ownership from a cross-coupled NOR latch 60N/20J; wait states from the 163 counters at 30D/30L — **50P is the ECPU address decoder, not the wait-state generator**), which makes 68000 read-modify-write naturally indivisible | True dual-port RAM plus an **explicit TAS interlock** keyed on the operand address | Functionally equivalent, structurally different. Verified: 114 ownerless locks in 306 trials without it, **0 in 514 with it**. This was the project's dominant bug. **We reproduce indivisibility but not contention**: measured common-bus rates are 2,742/frame (video) and 5,462/frame (world), implying ~502-753 collisions/frame and **0.8-1.9% of each CPU's frame** spent stalled on the real board — a cost neither we nor MAME model. Rebuilding the board's structure is analysed and **not recommended before alpha** in [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md) §2: zero M10K saved, ~1-2% slower, and **not actually atomic on TG68K**, which releases `/AS` for 3 clocks mid-RMW. |
 | B2 | **Motion-object line buffer self-clears as it is read** (MOHLB) | Was a 1-bit frame-parity staleness tag; **now self-clearing as of BUILD 108** | Fixed. The 1-bit tag let two-frame-old entries read back live — the horizontal dash artifact. |
 
 ## C. Behavioural — schematic taken over MAME
@@ -41,13 +42,13 @@ None of them are "wrong", but all of them are places where our timing can differ
 | C2 | SLAPSTIC | Schematic |
 | C3 | Serial SCOM link | Schematic (894.9 kHz, NMI per byte; instant delivery let a fast CPU NMI-storm the sound 6502) |
 | C4 | Vblank latch | Schematic — sheet 7 shows **ONE** 60M LS74 flip-flop, not per-CPU latches. Modelling per-CPU latches killed builds 87-92. |
-| C5 | **CPU type** | **MAME, not the schematic.** The schematic labels U68010; production boards carry 68000s. The one recorded case where MAME wins. |
+| C5 | **CPU type** | **Open — and immaterial.** The schematic says **`U68010`** for both CPUs (sheet 4 designator **45J** `VCPU`; sheet 5 designator **20P** `ECPU`) — re-read at 1200 dpi, unambiguous. MAME instantiates `M68000`; we follow MAME. The claim that production boards carry 68000s traces to one commit message (`24d900e`) describing an inspection of a single board, with **no photo or part marking recorded** — one unverified observation, not a settled fact. It changes nothing: measured, the ROM contains **no** MOVEC/MOVES/RTD on any reachable path (0 illegal-instruction and 0 privilege exceptions in 400 s / 24,000 frames, detector falsified 4 ways), every exception vector but three points at `STOP #$2700` so **no handler reads a frame format word**, and **0.0000%** of the video CPU's per-frame work sits in a loop-mode-eligible `DBcc` loop (ceiling over *all* DBcc loops: 0.137%, vs a 2.5% cadence gap). Needs the physical board to close; see [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md). |
 
 ## D. Known remaining gaps — measured, not yet closed
 
 | # | Gap | Measured | Notes |
 |---|---|---|---|
-| D1 | **Video-CPU cadence tail** | median **0.973** vs MAME **0.9977**; p10 **0.703**, min **0.313** | The median is nearly right; the whole gap is in the tail. This is the perceived sluggishness in crowds. BUILD 109 (`VSHAD3_EN=0`) is the A/B against it. |
+| D1 | **Video-CPU cadence tail** | median **0.973** vs MAME **0.9977**; p10 **0.703**, min **0.313** | The median is nearly right; the whole gap is in the tail. This is the perceived sluggishness in crowds. BUILD 109 (`VSHAD3_EN=0`) is the A/B against it. **Ruled out as causes:** CPU type — 68010 loop mode would save **0.0000%** here (ceiling over all `DBcc` loops 0.137%, vs a 2.5% gap), so the 0.9977 target is not too low on that account; and if anything the real board is *slower* than MAME, which models none of the ~0.8-1.9%/frame common-bus arbitration stalls. A constant few-percent term cannot produce a p10 of 0.703 anyway — the tail shape is the thing to explain. See [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md). |
 | D2 | World-CPU cadence | **0.984** vs MAME **0.9999** | Near-authentic. The original uses only 48% of its cycle budget; this gap is not worth chasing. |
 | D3 | **Sprite "blocks that did not write"** | Not reproduced by three independent detectors | Enclosed-black: **0 ours vs 11 MAME**. Hole rate indistinguishable across builds. Fetch-latency knee refuted three ways. **A sprite fetching wrong-but-plausibly-coloured data cannot be caught by any statistical shape test** — needs a scene dump of the exact failing moment. |
 | D4 | 33-pixel VS-MAME deviation at scroll 50/157 | Identical on 105/106/107 | Pre-existing, not a regression. Likely an un-wrapped `spr_right` in off-screen rejection. |
