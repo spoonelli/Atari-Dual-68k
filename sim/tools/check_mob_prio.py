@@ -74,8 +74,22 @@ def main(path=LOG):
             print('    expected (forcemc0,shade,m7,pfm,mo_win,pen)=%s' % (exp,))
             print('    got      %s' % (got,))
         return 1
-    if total:
-        print('MOB PRIO CHECK PASS')
+    # MOSTAIN-2: a run with nothing in it is not a pass. This used to print no
+    # verdict at all and still exit 0, so a scene the comparator never touched
+    # (the FACTORY MAP has no drawable motion objects - MAME's own MO model
+    # draws 296 pixels there and every one is a "special" that never draws)
+    # read as success to anything checking the exit code, and the only number
+    # left on screen came from a Python model. Say so, and fail.
+    if not total:
+        print('MOB PRIO CHECK VACUOUS - the comparator saw ZERO MO-covered '
+              'pixels, so 0/0 measured nothing at all.')
+        print('  Either the fixtures in sim/work are missing/empty, the bench '
+              'ran at the wrong scroll, or this scene genuinely has no '
+              'drawable motion objects.')
+        print('  In every one of those cases this run is NOT evidence that '
+              'anything works. Do not quote a percentage from it.')
+        return 1
+    print('MOB PRIO CHECK PASS')
     return 0
 
 

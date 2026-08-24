@@ -362,3 +362,173 @@ identical 215/140/24/117 cycles/line split — the masking is free.
 (`sim/tools/mob_golden.py` was updated in the same change: special pixels claim a
 column without drawing in it. An oracle that has drifted from the engine it
 scores is this project's fourth recorded measurement bug.)
+
+## MOSTAIN-2: the stain pass is under-applied on hardware
+
+BUILD 105 shipped the pass above on the 99.75% -> **100.00%** row in that table.
+On a real Pocket it **does fire** — the START marker really does go grey — but
+it covers only a fraction of the marker.
+
+### What hardware actually does
+
+Diffing the FACTORY MAP screen between BUILD 102 and BUILD 105 captures,
+sampled back down to native resolution (3x3 average per native pixel, to beat
+the H.264 blur in a 1920x1080 capture):
+
+```
+native pixels changed 102->105 : 34 over 6 rows
+  y=168 n=4  x=37,38,39,53
+  y=169 n=8  x=37,38,39,40,41,51,52,53
+  y=170 n=8  x=39,40,41,42,43,49,50,51
+  y=171 n=8  x=41,42,43,44,45,47,48,49
+  y=172 n=5  x=43,44,45,46,47
+  y=173 n=1  x=45
+```
+
+Every changed pixel is inside the marker, and the change is orange -> genuine
+grey (R~=G~=B). For comparison, the same measurement on MAME's own frame — the
+render with `apply_stain` diffed against `--no-stain` — is:
+
+```
+MAME-model VISIBLE stain changes: 200 px over 16 rows   (y=158..173)
+```
+
+So hardware converts **34 of ~200**, all of it in rows 168..173, in two runs
+per row that converge downward. Rows 158..167 are untouched.
+
+### What that rules out
+
+* **"The game never writes the upper colour bank."** Dead. Grey pixels appear
+  at all, so bit 10 reaches `color_vaddr` and the upper bank is populated with
+  the right greys by the game itself. (Independently: MAME's `m_paletteram` is
+  plain RAM at `$3E0000` with no initialiser, and the FACTORY MAP dump has 118
+  non-zero upper-bank words. The greys resolve to entries **1537, 1538, 1539,
+  1547, 1549, 1550**, all `0xF888` — exactly `0x400 | 0x201/2/3/B/D/E`, the
+  block's playfield pens with bit 10 set. Six pens mapping to one grey is why
+  a stained block goes flat rather than shaded.)
+* **"Specials never reach the line buffer"** and **"the pen is not 11 bits
+  end-to-end."** Both dead for the same reason.
+* **"The scanline automaton does not match the C loop."** Dead, and measured
+  rather than argued. Replaying the RTL's own 296 special pixels
+  (`sim/build/mob_special.txt`) through both the C `apply_stain` union and the
+  Verilog recurrence gives **320 stained pixels each, with 0 lines differing**.
+  Every special on this screen is pen 6, i.e. `S` and `E` both set.
+* **Fetch latency.** `tb_mob` at `GFX_LAT` 8/16/24/31 reports **296 special
+  pixels at every latency** — the bench cannot reproduce the shortfall, because
+  its gfx model is dedicated and this scene contains exactly one sprite. Real
+  SDRAM contention with the CPUs and the playfield is modelled nowhere.
+
+The marker is a single MO entry: every slip band's pointer is `0x0001`, a 3x3
+tile special sprite at depth 0 of a one-entry list, spanning rows 150..173.
+
+### What is still open
+
+Why only ~17% converts. The counters below are built to answer exactly that,
+because nothing on a workstation can: the shortfall does not reproduce in any
+bench we have, and the hardware capture is a different moment of the attract
+loop from the dumped scene (the block art sits ~3px right and one row lower),
+so per-pixel comparison against the dump is not sound.
+
+### Why the 100.00% never had a chance of catching this
+
+Three things, none of them the shipped code:
+
+1. **`render_scene.py` composites in Python.** The MO/PF merge, the alpha layer
+   and `apply_stain` in that script are its own re-implementation. The
+   automaton that ships is in `core_top.v`, and `sim/run_mob_tb.sh` compiles
+   only `escape_mob.v` and `escape_prio.v`. **`core_top.v` is in no testbench.**
+2. **On that scene both RTL gates were inert.** Re-running the BUILD 105
+   command verbatim:
+
+   ```
+   TB_MOB DONE: 0 pixels, 216 gfx reqs, 296 special pixels
+   MO-covered pixels in the replayed frame : 0
+   agreement with reference model          : 0/0 = 0.0000%
+   MO fixture holds no scene - refusing to score
+   exact-RGB match vs MAME (new rule): 80640/80640 = 100.00%
+   ```
+
+   `MOB PRIO CHECK` printed **no verdict** and still exited 0; `mob_vs_mame.py`
+   **refused to score**. The only surviving number came from the Python.
+3. **The zero was legitimate, which is what made it invisible.** MAME's own MO
+   model draws 296 pixels on that screen and *every one is special* — the
+   FACTORY MAP has no drawable motion objects. The RTL produced exactly 296
+   specials and 0 drawable, i.e. it was **right**. A correct engine, a correct
+   scene, and a gate that measured nothing.
+
+Even a perfect score there could only have told us the Python agreed with MAME
+on a frame whose stain the Python applied. Coverage on silicon was never in it.
+
+### The diagnostic (HUD page 4)
+
+`dbgmode` is now 3 bits and R cycles five pages. Page 4 measures coverage:
+
+| field | contents | MAME truth on the FACTORY MAP |
+|---|---|---|
+| 1 | stained pixels this frame (16-bit, saturating) | `0140` (320) |
+| 2 | special (MPR2) pixels carrying a START/END marker bit (16-bit, saturating) — the same quantity `tb_mob` prints as "special pixels" | `0128` (296) |
+| 3 | `{first, last}` scanline carrying a stained pixel | `96AD` (150..173) |
+
+**Field 3 measures where the stain is APPLIED, not where it is VISIBLE**, and on
+this screen those differ sharply. The specials span rows 150..173, but rows
+150..157 lie over black background where staining changes nothing — MAME's own
+visible change is rows 158..173 (200 px) and hardware's is rows 168..173
+(34 px). A field3 of `96AD` alongside a full field1 therefore means coverage is
+*correct* and the shortfall is in the palette. Do not read field3 against the
+six rows the capture shows.
+
+Field 3 is its own liveness witness: `ln_first` resets to `FF` and `ln_last` to
+`00`, so a live counter that stained nothing reads **`FF00`**, and **`0000` is
+impossible** unless the counter never ran. Read the three together:
+
+| reading | conclusion |
+|---|---|
+| field3 `0000` | counter never ran — the page means nothing, stop |
+| field3 `FF00` | alive, nothing stained this frame |
+| field2 `<< 0128` | specials are not reaching the line buffer — `escape_mob` / tile fetch under real SDRAM contention, which no bench models |
+| field2 `~0128`, field1 `<< 0140` | specials arrive but runs die early — the automaton or its S/E derivation |
+| field2 `~0128`, field1 `~0140`, field3 `96AD` | the compositor applies the stain exactly where MAME does; the shortfall is downstream of `color_vaddr` — the upper bank holds different values here than in MAME for the pens that did **not** turn grey. Grey appearing at all does not refute this: it proves the bank is written for *some* pens, not for all of them. |
+
+Field 3 names the shape independently: a span much shorter than `96AD` with
+field2 near `0128` means whole scanlines are dropped rather than runs truncated.
+
+### Gate hardening
+
+The measurement bug is now mechanical rather than remembered — the project's
+*ninth* recorded instance:
+
+* `check_mob_prio.py`: `total == 0` is a **VACUOUS failure** (exit 1). It used
+  to print no verdict and return 0.
+* `mob_vs_mame.py`: judges the **reference output**, not a byte heuristic over
+  MO RAM (the old guard called the FACTORY MAP "no scene" while the reference
+  was drawing 296 pixels of it). Empty reference -> refuse to score; empty
+  engine against a non-empty reference -> **FAIL** instead of falling through
+  to `wrong == 0` = PASS. Specials are excluded from the drawable comparison,
+  since `tb_mob` logs them to a different file.
+* `render_scene.py`: every exact-RGB line now states that the compositor and
+  `apply_stain` above it are Python and that `core_top.v` is not exercised at
+  any percentage.
+* `sim/tools/check_stain_automaton.py` (new) replays the RTL's own
+  `mob_special.txt` through both the C `apply_stain` union and the scanline
+  recurrence and fails on any per-line difference; an empty input is a VACUOUS
+  failure, not a pass. It is **not** wired into `run_mob_tb.sh`, because the
+  canonical gate scene contains no special sprites — run it on a scene that
+  has them:
+
+  ```
+  ./runscene.sh <factory-map-scene> <worktree>
+  python3 sim/tools/check_stain_automaton.py
+  ```
+
+  Its own docstring states the limitation plainly: the recurrence in it is a
+  *transcription* of the one in `core_top.v`, not the shipped instance, so it
+  cannot catch a divergence introduced in `core_top.v` itself.
+
+### Still outstanding
+
+**Extract the stain automaton from `core_top.v` into its own module** so that
+the thing under test is the thing that ships. Every check in this section
+either exercises a Python model or a transcription; `core_top.v` remains
+uncompiled by any bench, which is the structural reason BUILD 105 could score
+100% and under-apply on silicon. Until that is done, the HUD page above is the
+only instrument that observes the shipped compositor at all.
