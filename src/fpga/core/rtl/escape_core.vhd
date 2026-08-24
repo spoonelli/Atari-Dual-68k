@@ -585,17 +585,24 @@ architecture rtl of escape_core is
     signal adc_rd, adc_rd_d, adc_eoc : std_logic;
 begin
     ---------------------------------------------------------------- CPUs
-    -- The board is a 68010. Photographed on the owner's dedicated-cabinet
-    -- board: Motorola "MC68010P8", date code A71R8813. The SP-332 schematic
-    -- agrees and always did - both CPUs are drawn "U68010" (sheet 4
-    -- designator 45J "VCPU"; sheet 5 designator 20P "ECPU"). MAME's eprom
-    -- driver instantiates M68000, and this core followed MAME; that was the
-    -- error. (The old comment here claimed "real boards carry 68000s" - that
-    -- came from one unphotographed inspection in 24d900e and is FALSE.)
-    -- Whether the JAMMA version of the board differs is still unknown.
-    -- We still run TG68K in 68000 mode below. That is now a deliberate,
-    -- documented deviation, not a belief about the hardware: measured, this
-    -- ROM cannot tell the two parts apart (docs/CPU_AND_ARBITER.md 1.3/1.4).
+    -- ESCAPE SHIPPED IN TWO CABINET VARIANTS WITH DIFFERENT CPUs, and both
+    -- are authentic:
+    --   dedicated cabinet = 68010. Photographed on the owner's board:
+    --       Motorola "MC68010P8", date code A71R8813. SP-332 - which IS the
+    --       dedicated-cabinet package - draws both CPUs "U68010" (sheet 4
+    --       designator 45J "VCPU"; sheet 5 designator 20P "ECPU").
+    --   JAMMA version     = 68000. Also photographed. This is what MAME's
+    --       eprom driver models with M68000.
+    -- So the schematic and MAME never actually contradicted each other; they
+    -- describe different machines. (The old comment here claimed "real boards
+    -- carry 68000s" as against the schematic. That came from one
+    -- unphotographed inspection in 24d900e which generalised a single board to
+    -- all production, and it is retracted - see docs/CPU_AND_ARBITER.md 1.6.)
+    --
+    -- We run TG68K in 68000 mode below, which makes this a faithful JAMMA
+    -- machine - not a deviation. Measured, this ROM cannot tell the two parts
+    -- apart at all (docs/CPU_AND_ARBITER.md 1.3/1.3.1/1.4), so neither setting
+    -- can be wrong for a given player's board.
     -- autovectored IRQs via VPA.
     vcpu : entity work.TG68K generic map ( CPU => "00" )
         port map ( CLK=>clk, RESET=>reset_n, HALT=>reset_n, BERR=>'0', IPL=>v_ipl,
@@ -605,8 +612,8 @@ begin
                    LOCK=>v_lock );
 
     e_resn <= reset_n and (extra_release or dbg_force_extra);
-    -- Also a 68010 on the board (schematic 20P "ECPU"), also run here in
-    -- 68000 mode - same story as the video CPU above.
+    -- Same part as the video CPU on both variants (schematic 20P "ECPU"),
+    -- and run in the same mode - see the video CPU comment above.
     ecpu : entity work.TG68K generic map ( CPU => "00" )
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>e_ipl,
                    ADDR=>e_addr, FC=>e_fc, DATAI=>e_di_r, DATAO=>e_do,

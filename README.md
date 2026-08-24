@@ -49,7 +49,7 @@ present, serial SCOM sound link).
 
 | Block        | Real chip                               | Implementation |
 |--------------|-----------------------------------------|----------------|
-| CPUs ×2      | **68010** @ 7.16 MHz, shared RAM (`MC68010P8`, photographed) | TG68K (`CPU="00"` — 68000 mode; see C5), our decode/arbitration |
+| CPUs ×2      | **68010** dedicated cab / **68000** JAMMA, @ 7.16 MHz, shared RAM | TG68K, our decode/arbitration (see C5) |
 | Sound        | Atari **JSA-I** (6502 + YM2151 + TMS5220) via serial SCOM | ✅ T65 + [jt51](https://github.com/jotego/jt51) + TMS5220 (System 1 core, patched) |
 | Video        | Atari motion objects + playfield + alpha | ✅ re-architected line engine, MAME-scene verified |
 | Protection   | **SLAPSTIC** (present on board)          | watch-item; MAME boots without it |
@@ -156,14 +156,16 @@ Thanks: LMSS, DJS, LCS, TBPL, EG
   repository**; the RTL is an independent re-implementation from the driver's documented
   behavior cross-checked against the original schematics, which take precedence where they
   disagree (autovectored IRQs, SLAPSTIC, serial SCOM). On CPU type the two references
-  genuinely differ, and **the schematic was right**: the owner's dedicated-cabinet board
-  carries `MC68010P8` parts (Motorola, date code `A71R8813`, photographed), matching the
-  schematic's `U68010` at 45J and 20P; MAME instantiates `M68000` and is simply wrong
-  here. This core still runs TG68K in 68000 mode, which is safe rather than lucky — the
-  ROM contains no 68010-only instruction, no handler reads an exception-frame format word
-  or does pointer arithmetic around the frame, and 68010 loop mode is never entered
-  (measured: 0.0000% of the video CPU's per-frame work sits in a loop-mode-eligible
-  `DBcc` loop). See [`docs/CPU_AND_ARBITER.md`](docs/CPU_AND_ARBITER.md). Thank you to the
+  appeared to differ for weeks, and **both turned out to be right about different
+  boards**: Escape shipped in two cabinet variants, and the dedicated cabinet is a
+  **68010** (`MC68010P8`, Motorola, date code `A71R8813`, photographed — matching the
+  schematic's `U68010` at 45J and 20P, since SP-332 *is* the dedicated-cabinet package)
+  while the **JAMMA** version is a **68000**, which is what MAME models. This core
+  supports both, and it is safe rather than lucky either way — the ROM contains no
+  68010-only instruction, no handler reads an exception-frame format word or does
+  pointer arithmetic around the frame, and 68010 loop mode is never entered (measured:
+  0.0000% of the video CPU's per-frame work sits in a loop-mode-eligible `DBcc` loop).
+  See [`docs/CPU_AND_ARBITER.md`](docs/CPU_AND_ARBITER.md). Thank you to the
   MAME developers for decades of preservation work that made this core possible.
 - The **openFPGA** community and **Analogue** for the Pocket core framework
   ([`open-fpga/core-template`](https://github.com/open-fpga/core-template)).

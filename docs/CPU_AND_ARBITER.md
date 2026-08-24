@@ -12,11 +12,18 @@ says so. Where it needs the physical board, it says that too.
 > **2026-08-24 — Question 1 is answered: the board is a 68010.** The owner
 > photographed the part on his dedicated-cabinet board: **`MC68010P8`**,
 > Motorola, date code **`A71R8813`**. The schematic agreed all along. §1.1 was
-> right, §1.2's contested "production boards carry 68000s" claim is **false**,
-> and §1.5 (what to check on the board) is **done**. §1.3 and §1.4 — the
-> measurements showing it makes no observable difference — are unaffected and
-> still stand. The remaining unknown is the **JAMMA** version of the board; see
-> §1.6.
+> right, §1.2's contested "production boards carry 68000s" claim is **false as
+> stated**, and §1.5 (what to check on the board) is **done**.
+>
+> **And there were two boards.** Confirmed from photographs by the owner:
+> **the dedicated cabinet is a 68010, the JAMMA version is a 68000.** Both are
+> authentic; they are different machines. That resolves the whole argument —
+> the schematic, the owner's board and MAME were each describing something
+> real, they were just not all describing the *same* board. See §1.6.
+>
+> §1.3 and §1.4 — the measurements showing the difference is unobservable on
+> this ROM — are unaffected and still stand, and they are what makes supporting
+> both variants free.
 
 ---
 
@@ -54,6 +61,7 @@ the socket is marked:
 | Part number | **`MC68010P8`** |
 | Manufacturer | Motorola |
 | Date code | **`A71R8813`** |
+| Cabinet | **dedicated** (the JAMMA variant is a 68000 — §1.6) |
 
 An `MC68010P8` is a 68010 in a 64-pin plastic DIP, 8 MHz rated — comfortable for
 the board's 7.159 MHz. This is the record that §1.5 asked for and it closes the
@@ -363,14 +371,43 @@ checking was closing a documentation question honestly. It also closed it in
 the *opposite* direction to what the docs had claimed, which is the more useful
 outcome.
 
-### 1.6 What is still open: the JAMMA board
+### 1.6 The JAMMA board — resolved: it is a 68000
 
-Escape also existed in a JAMMA version, and **nothing in this repo can say what
-CPU it carries.** Stated plainly so nobody reads §1.5 as more general than it is:
-the photograph is of **one dedicated-cabinet board**, and the population claim
-that got this wrong the first time was also from one board.
+Escape shipped in two cabinet variants and **they use different CPUs.**
+Confirmed by the owner from photographs:
 
-What the repo's schematic material actually is:
+| Variant | CPU | Corroboration |
+|---|---|---|
+| **Dedicated cabinet** | **68010** | `MC68010P8` photographed, date code `A71R8813`; SP-332 draws `U68010` at 45J and 20P |
+| **JAMMA** | **68000** | photographed |
+
+This is the cleanest possible resolution, and it retires the argument rather
+than deciding it. Every party to the dispute was describing something real:
+
+- **The schematic was right** — SP-332 is the *dedicated-cabinet* package, and
+  the dedicated board is a 68010.
+- **MAME is right too, about the other board** — `eprom.cpp` instantiates
+  `M68000`, which faithfully models the **JAMMA** variant.
+- **The 24d900e inspection was probably right about a board** — its error was
+  generalising one board to "production", and being recorded without a photo.
+  §1.2 stands as written on the process failure; the observation itself may
+  simply have been of a JAMMA board.
+
+**Consequence for this core, stated plainly: every build up to and including
+BUILD 109 ran `CPU => "00"` and was therefore a faithful JAMMA machine.** It
+was never wrong; it was modelling the other cabinet. BUILD 110 switches the
+default to the dedicated board's 68010, and **both settings remain supported**
+— see `DEVIATIONS.md` C5.
+
+Because §1.3/§1.3.1/§1.4 show this ROM cannot distinguish the two parts,
+supporting both variants costs nothing and neither one can be "wrong" for a
+given player's board.
+
+#### 1.6.1 What the repo's schematic material is (for the record)
+
+The SP-332 survey below was done while the JAMMA question was still open. It is
+kept because it documents *which* board the package describes — which turns out
+to be the whole point:
 
 - `reference/schematics/Escape_Schematic_Package.pdf` — **SP-332, 1st printing,
   © 1989 Atari Games Corporation**, 17 pages (cover + 16 sheets). It is a raster
@@ -382,7 +419,12 @@ What the repo's schematic material actually is:
   connector anywhere.**
 - It contains **no parts list, no BOM, no ECN, and no revision-history page**.
 
-Search leads for the JAMMA package, offered as leads and not as findings:
+That SP-332 documents the dedicated cabinet and *only* the dedicated cabinet is
+now the load-bearing fact: it is why the schematic says 68010 and MAME says
+68000 without either being wrong.
+
+Assembly numbers, recorded in case the JAMMA package is ever wanted for other
+reasons (the CPU question no longer needs it):
 
 | Item | Value |
 |---|---|
@@ -391,16 +433,17 @@ Search leads for the JAMMA package, offered as leads and not as findings:
 | Main wiring diagram | `046977-01 A` |
 
 The `-XX` wildcards are the only hint in the package that more than one dash
-number exists. **This is not evidence that a `-02` exists, still less that it is
-JAMMA** — but `046145` is the number to search on.
+number exists — consistent with a second cabinet variant, though the package
+never names one.
 
-MAME is no help here either: `reference/eprom.cpp` defines `eprom`, `eprom2`,
-`klaxp1`, `klaxp2` and `guts`, and `docs/ROMMAP.md:47` records `eprom2` as purely
-a program-ROM revision ("same layout, all-rev-1 program ROMs"). No set
-corresponds to a cabinet style, and all five are instantiated as `M68000`.
-
-If the JAMMA board turns out to carry 68000s, this core already supports that in
-one place — see `DEVIATIONS.md` C5.
+One caution for anyone mapping ROM sets to cabinets: **MAME's sets do not
+distinguish them.** `reference/eprom.cpp` defines `eprom`, `eprom2`, `klaxp1`,
+`klaxp2` and `guts`; `docs/ROMMAP.md:47` records `eprom2` as purely a
+program-ROM revision ("same layout, all-rev-1 program ROMs"). No set corresponds
+to a cabinet style, and all five are instantiated as `M68000`. So the CPU
+variant is **not** inferable from the ROM set the player loads — which is
+precisely why `CPU_TYPE` is a configuration choice rather than something the
+core could auto-detect.
 
 ---
 
@@ -655,12 +698,12 @@ M10K block counts (no Quartus fitter report is committed to this repo — the
 283/308 figure exists only as prose in `docs/VSHAD3.md`); the collision counts in
 §2.3, which are arithmetic on measured rates, not observed collisions.
 
-**Settled by the physical board:** the part marking is **`MC68010P8`** (Motorola,
-date code `A71R8813`), photographed — §1.5. The board is a 68010, as the
-schematic always said. It changes nothing measurable in the RTL.
+**Settled by the physical boards:** there are **two** variants, and both are
+authentic — the dedicated cabinet is a **68010** (`MC68010P8`, date code
+`A71R8813`, photographed; SP-332 draws `U68010` at 45J/20P) and the **JAMMA**
+version is a **68000** (photographed). §1.5, §1.6. It changes nothing measurable
+in the RTL either way, which is what makes supporting both free.
 
-**Still needs evidence from outside this repo:** whether the **JAMMA** version of
-the board carries the same part — §1.6. There is no JAMMA schematic package, no
-parts list and no ECN material here, and a case-insensitive search of the whole
-tree for JAMMA/conversion-kit material returns nothing in any project-authored
-file. Closing that requires the JAMMA package or a photographed JAMMA board.
+**Nothing on the CPU question is open any more.** The one caveat worth keeping
+in view: the variant is not inferable from the ROM set, so which CPU a given
+player's board has is a configuration choice, not something the core can detect.
