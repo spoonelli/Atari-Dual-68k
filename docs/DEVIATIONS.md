@@ -6,8 +6,10 @@ Two reference authorities, in this order of precedence:
    hardware actually is.
 2. **MAME's `eprom.cpp` driver** — a behavioural reference, cross-checked against (1).
 
-Where they disagree the schematic wins, with one open question (CPU type, C5 below —
-the schematic says 68010, MAME says 68000, and it is measurably immaterial either way).
+Where they disagree the schematic wins — including on CPU type (C5 below), where the
+schematic said 68010, MAME said 68000, and a photograph of the owner's board has now
+settled it in the schematic's favour. It is measurably immaterial to this core either
+way.
 This file lists every known place our implementation is *not* the board. Some are
 unavoidable consequences of the target hardware; some are open bugs; a few are choices.
 
@@ -42,7 +44,7 @@ None of them are "wrong", but all of them are places where our timing can differ
 | C2 | SLAPSTIC | Schematic |
 | C3 | Serial SCOM link | Schematic (894.9 kHz, NMI per byte; instant delivery let a fast CPU NMI-storm the sound 6502) |
 | C4 | Vblank latch | Schematic — sheet 7 shows **ONE** 60M LS74 flip-flop, not per-CPU latches. Modelling per-CPU latches killed builds 87-92. |
-| C5 | **CPU type** | **Open — and immaterial.** The schematic says **`U68010`** for both CPUs (sheet 4 designator **45J** `VCPU`; sheet 5 designator **20P** `ECPU`) — re-read at 1200 dpi, unambiguous. MAME instantiates `M68000`; we follow MAME. The claim that production boards carry 68000s traces to one commit message (`24d900e`) describing an inspection of a single board, with **no photo or part marking recorded** — one unverified observation, not a settled fact. It changes nothing: measured, the ROM contains **no** MOVEC/MOVES/RTD on any reachable path (0 illegal-instruction and 0 privilege exceptions in 400 s / 24,000 frames, detector falsified 4 ways), every exception vector but three points at `STOP #$2700` so **no handler reads a frame format word**, and **0.0000%** of the video CPU's per-frame work sits in a loop-mode-eligible `DBcc` loop (ceiling over *all* DBcc loops: 0.137%, vs a 2.5% cadence gap). Needs the physical board to close; see [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md). |
+| C5 | **CPU type** | **Confirmed 68010 on the dedicated board — and immaterial.** The schematic says **`U68010`** for both CPUs (sheet 4 designator **45J** `VCPU`; sheet 5 designator **20P** `ECPU`) — re-read at 1200 dpi, unambiguous — and the owner has now **photographed the part**: **`MC68010P8`**, Motorola, date code **`A71R8813`**. MAME instantiates `M68000` and is wrong here. The earlier claim that production boards carry 68000s traced to one unphotographed inspection (`24d900e`) and is **retracted**. **Still unverified: the JAMMA version of the board.** SP-332 (1st printing, 1989) documents the dedicated cabinet only — its Sheet 1 wiring diagram shows discrete Atari connectors, not a 56-pin JAMMA edge — and no JAMMA package exists in this repo; the owner is seeking one. (Search lead: the Escape Main PCB assembly number is **046145**, drawn here as `A046145-01 D`, with Sheet 1 citing the wildcard `046145-XX`.) It changes nothing measurable: the ROM contains **no** MOVEC/MOVES/RTD on any reachable path (0 illegal-instruction and 0 privilege exceptions in 400 s / 24,000 frames, detector falsified 4 ways), all 7 `MOVE SR` sites run with S=1 so the privilege change is inert, only **8 `RTE` opcode words exist across both 512 KB images** and every reachable one pops exactly what its handler pushed with **no pointer arithmetic around the frame**, and **0.0000%** of the video CPU's per-frame work sits in a loop-mode-eligible `DBcc` loop (ceiling over *all* DBcc loops: 0.137%, vs a 2.5% cadence gap) — and TG68K implements no loop mode regardless. See [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md). |
 
 ## D. Known remaining gaps — measured, not yet closed
 

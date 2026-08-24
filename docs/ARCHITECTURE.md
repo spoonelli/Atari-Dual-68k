@@ -84,16 +84,23 @@ version; note the differences (EEPROM range, per-layer color RAM, SLIP pointers)
 | `360030`   | W   | D0–D7 | Write Sound Processor (SCOM) |
 
 **Findings from the full schematic re-scan (sheets 2–5), 2026-08-07:**
-- **CPU type is an open question; we implement a 68000, and that is safe either way.**
+- **The board is a 68010. Settled by photograph, and the schematic always said so.**
   The schematic labels both CPUs **`U68010`** — sheet 4 (package page 5), designator
   **45J**, `VCPU`; and sheet 5 (page 6), designator **20P**, `ECPU`. Re-read at 1200 dpi:
-  the label is unambiguous. The counter-claim that production boards carry MC68000s
-  traces to a single commit message (`24d900e`) reporting an inspection of one board,
-  with no photograph or part marking recorded — treat it as one unverified observation,
-  not as established fact. It does not matter for this core: the ROM uses no 68010-only
-  instruction, no handler inspects an exception-frame format word, and 68010 loop mode is
-  never entered. Full evidence in [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md). MAME models
-  them as 68000. TG68K `CPU=>"01"` throughout. Exception frames differ; this matters.
+  the label is unambiguous. The owner has now photographed the part on his
+  dedicated-cabinet board: **`MC68010P8`**, Motorola, date code **`A71R8813`**. The
+  former counter-claim that production boards carry MC68000s traced to a single commit
+  message (`24d900e`) reporting one unphotographed inspection — it is **false** and has
+  been retracted everywhere. MAME's `eprom.cpp` instantiates `M68000`; MAME is wrong
+  here. *Whether the JAMMA version of the board uses the same part is unknown* — no
+  JAMMA schematic package exists in this repo (SP-332 documents the dedicated cabinet
+  only) and the owner is looking for one.
+  It still does not matter for this core: the ROM uses no 68010-only instruction, no
+  handler inspects an exception-frame format word or does pointer arithmetic around the
+  frame, and 68010 loop mode is never entered (and TG68K does not implement loop mode
+  in any case). Full evidence in [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md). The
+  synthesizable RTL runs TG68K in **68000 mode** (`CPU=>"00"`), selectable in one place —
+  see `DEVIATIONS.md` C5.
 - **Interrupts are autovectored** via VPA asserted on FC=111 (sheet 4, 60L/55L). VBLANK
   /VINT hits both CPUs (IRQ4); /SINT is the sound IRQ (IRQ6, main CPU only).
 - **SLAPSTIC is physically present** (sheet 4: 60E `SLAPSTK5`, driving ROM bank selects
