@@ -243,6 +243,57 @@ module tb_mob_perf;
     //                   is mean channel occupancy out of NCH.
     // Uses only signals every revision since MOCHAN-4 has, so it scores the
     // shipping engine without any RTL change.
+    //
+    // ---- WHAT THEY SAID, THE FIRST TIME THEY WERE READ -------------------
+    // Recorded here so the next person does not have to re-derive it, and so a
+    // later change can be diffed against a real baseline rather than a memory.
+    // Shipping engine (BUILD 106 escape_mob.v, byte-identical to 105's) at
+    // scene 50/157, GFX_LAT=31, one frame:
+    //
+    //   prime 33,682  =  startup 9,395  +  steady 24,287
+    //   unissued 50      inflight 33,632
+    //   tx1 17,153       txN 7,134
+    //   pump_blocked 16,937            chan_occupancy 2.00 / 4
+    //
+    // Two readings, and they point the same way:
+    //
+    //  1. 99.85% of the fetch stall (33,632 of 33,682) is waiting for MEMORY on
+    //     a fetch that has already gone out. Only 50 cycles a frame are spent
+    //     waiting for a tile nobody has asked for yet. The pump is therefore
+    //     NOT channel-starved, and anything that merely frees channels sooner
+    //     has almost nothing to free. That is not a prediction: MOHARV-1 built
+    //     exactly such a change - harvesting the pump's completed rows out of
+    //     their channels into an in-order row buffer, so a channel is released
+    //     at completion instead of at blit - and measured it. It worked as
+    //     designed (4,383 harvests a frame, chan_occupancy 2.00 -> 1.80, scout
+    //     channel starvation 13,604 -> 7,931 cycles, prime 33,682 -> 33,181)
+    //     and moved COVERAGE NOT AT ALL, in all nine sweep cells and at lat 40,
+    //     48 and 62 as well. It was dropped. See branch mo-harvest if the
+    //     channel theory ever looks attractive again; it is already refuted.
+    //
+    //  2. 71% of the whole steady-state term (17,153 of 24,287) is ONE sprite's
+    //     SECOND tile. The cause is structural, not statistical: pump_ready
+    //     requires pump_live, which is S_PRIME|S_BLIT, so a sprite's tile 1
+    //     cannot be requested until the blitter has already LOADED that sprite.
+    //     Tile 0 then blits for 8 cycles while tile 1 is still GFX_LAT-8 cycles
+    //     away - 23 of them at lat31 - and that is one unavoidable stall per
+    //     sprite. Tiles 2,3,... are issued on the cycles immediately after tile
+    //     1 and have nearly caught up by the time they are wanted, which is why
+    //     txN is a third of tx1 despite covering every later tile of every
+    //     sprite in the frame. (At lat62 the two converge - tx1 18,079 vs txN
+    //     18,237 - because there even the trailing tiles can no longer catch
+    //     up. The lever below widens to tiles 1..n at that point.)
+    //
+    // So the next sprite-throughput lever is ISSUE TIME: the SCOUT prefetching
+    // tile 1 (and, at high latency, tiles 1..n) of a sprite that is still
+    // PARKED, so the fetch is in flight before the blitter ever loads it. The
+    // scout already decodes and holds code_row and row for every queue slot, so
+    // tile k's address is code_row + k with no new decode; and chan_occupancy
+    // of 1.80-2.00 out of 4 says the channels to do it with are sitting idle.
+    // Note that such a prefetch WOULD need MOHARV-1's harvest to come back with
+    // it - a prefetched later tile parked behind the blitter would otherwise
+    // pin its channel from issue all the way to its blit - so the two changes
+    // belong together, in that order, and neither is worth landing alone.
     integer c_pr_unissued, c_pr_inflight, c_pr_t1, c_pr_tn, c_pumpblk, c_chbusy;
     integer chb;
 `endif
