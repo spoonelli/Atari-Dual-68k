@@ -6,13 +6,16 @@ that instantiates **the identical RTL the Pocket build uses** — `escape_core`,
 glue around it. Nothing in the machine is forked; if you fix a bug in
 `src/fpga/core/rtl/`, both platforms get it.
 
-> **Status: compiles clean for the DE10-Nano — non-negative setup and hold
-> slack on every analysed clock — and has never been run on hardware.**
-> Rebased on `tas-atomic` at BUILD 105. Read
+> **Status: BUILD 105 ran on a real DE10-Nano.** It boots, plays, and renders
+> motion objects, alphanumerics and the HUD correctly — and drew a completely
+> flat playfield. That was PFRESET-107, diagnosed and fixed; see
+> [FIRST FLASH RESULT](#first-flash-result-build-105-on-real-hardware--and-what-it-actually-was).
+> **The fixed build has not itself been flashed.** Rebased on `tas-atomic` at
+> BUILD 105. Read
 > [What is verified / what is not](#what-is-verified--what-is-not) before you
 > assume anything works, and
-> [Top three things most likely broken on first flash](#top-three-things-most-likely-broken-on-first-flash)
-> before you debug it.
+> [Three things predicted to break on first flash](#three-things-predicted-to-break-on-first-flash-all-wrong--kept-for-the-record)
+> — all three of which were wrong — before you debug it.
 
 ---
 
