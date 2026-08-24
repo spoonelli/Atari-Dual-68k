@@ -94,6 +94,31 @@ theories poison later reasoning.
   block itself, not in the staging buffer. Had the gate been "does the buffer
   read as all-FF", MLAB would have silently corrupted first-boot settings.
 
+- **A gate must be proven able to FAIL before it is trusted, and must show
+  its work.** Three separate instances in one day: the MiSTer slack gate
+  anchored a regex at line start, matched nothing, and passed a bitstream
+  carrying -5.538 ns setup / -10.922 ns hold; its replacement matched only
+  the FIRST summary table, so multi-corner Quartus (one table per corner)
+  would have passed a design failing at any other corner; and `mob_golden.py`
+  is derived from the engine and structurally cannot catch a reorder, which
+  is why `mob_vs_mame.py` and `mob_order_check.py` had to exist. The rule
+  that falls out: (a) run the check against a known-bad input and confirm it
+  fails, naming the right row; (b) make it refuse to certify when its input
+  is missing or parses to zero rows, rather than reporting a clean bill of
+  health; (c) have it PRINT what it measured -- "All 64 analysed clock/corner
+  rows" is verifiable, "PASS" is not distinguishable from matching nothing.
+- **The Pocket build had no timing gate at all until BUILD 106+.** "Never
+  ship negative slack" was enforced by a human remembering to grep the
+  compile log -- and that human was checking 8 numbers where the report
+  carries 64. Policy enforced by attention is policy that fails silently the
+  first time attention lapses.
+- **`str.replace` in a patch script replaces EVERY occurrence.** Adding
+  `ap_core.sta.rpt` to the artifact list also rewrote the identically
+  indented path inside the `reverse_bits.py` argument line, splitting one
+  command's two arguments across lines and breaking bitstream publication.
+  Anchor edits with enough surrounding context to be unique, or assert the
+  occurrence count first.
+
 ## Process rules that earned their keep
 
 - Every build bumps an on-screen build number; the screen must match the zip.
