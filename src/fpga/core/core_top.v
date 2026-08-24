@@ -2701,7 +2701,14 @@ hall_stick hall_p2 (
 // the hardware does not have - they are kept only for A/B. The entity's own
 // default is still 2 and is overridden here; read THIS line, not the default.
 // (The previous comment here claimed mode 2 while the line passed 0.)
+// VSHAD3-107 EVALUATION BUILD: vshad3 (32 KB at 0x50000-0x57FFF, 32 M10K) is
+// OFF here, so those addresses take the 4-clock fastpath instead of the
+// 5-clock shadow BRAM path. Measured basis, predicted gain and the one risk
+// I could not measure: docs/VSHAD3.md. This branch exists to be built and
+// A/B'd on hardware against HUD page 5; the shipping branch leaves VSHAD3_EN
+// at its default of 1 and is bit-identical to BUILD 107 in this respect.
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
+              .VSHAD3_EN(0),
               .TASLOCK_EN(TASLOCK_EN)) ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
