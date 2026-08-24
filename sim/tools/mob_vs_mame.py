@@ -66,20 +66,35 @@ def main():
     cfg = words(os.path.join(a.work, 'game_cfg.hex'), 128)
     with open(os.path.join(a.work, 'atari_escape.rom'), 'rb') as fh:
         rom = fh.read()
-    # fixture guard: docs/LESSONS.md - a silently empty fixture renders a blank
-    # layer, and a blank layer agrees with a blank reference perfectly.
-    if sum(1 for i in range(1024) if moram[i * 4 + 1]) < 8:
-        print('MO fixture holds no scene - refusing to score')
-        return 2
-
     bm = mame_mo_model.draw(moram, cfg[0x40:0x80], rom,
                             a.xscroll, a.yscroll, W, H)
-    gold = {}
+    # MOSTAIN-2: split the reference the way the engine reports it. A sprite
+    # whose MO priority has bit 2 set is "special": atarimo puts it in the
+    # bitmap, but screen_update_eprom `continue`s on it in the merge loop, so
+    # it never draws. tb_mob logs those to mob_special.txt, NOT mob_pixels.txt.
+    # Scoring them against the drawable log counted every special as "missing"
+    # and made scenes built out of specials unscoreable.
+    gold, gold_spec = {}, 0
     for y in range(H):
         for x in range(W):
             v = bm[y][x]
-            if v != mame_mo_model.TRANSPARENT:
+            if v == mame_mo_model.TRANSPARENT:
+                continue
+            if (v >> 12) & 4:
+                gold_spec += 1
+            else:
                 gold[(x, y)] = v & 0xFF
+
+    # Vacuity guard (replaces the old MO-RAM heuristic, which called the
+    # FACTORY MAP "no scene" while the reference was drawing 296 pixels of it).
+    # Judge the REFERENCE OUTPUT, not the fixture bytes: if the reference draws
+    # nothing there is nothing to be right about, and "0 == 0" is not a pass.
+    if not gold:
+        print('VS-MAME VACUOUS reference draws ZERO drawable MO pixels here '
+              '(%d special pixels present)' % gold_spec)
+        print('  Nothing was scored. This run is not evidence about the MO '
+              'engine either way - do not quote a percentage from it.')
+        return 2
 
     got = {}
     with open(a.mo) as fh:
@@ -92,10 +107,16 @@ def main():
     wrong = sum(1 for k, v in got.items() if k in gold and gold[k] != v)
     extra = sum(1 for k in got if k not in gold)
     missing = len(gold) - hit - wrong
-    print('VS-MAME engine_px=%d mame_px=%d agree=%d wrong_pen=%d '
+    print('VS-MAME engine_px=%d mame_px=%d (+%d special) agree=%d wrong_pen=%d '
           'not_in_mame=%d missing=%d agreement=%.4f%%'
-          % (len(got), len(gold), hit, wrong, extra, missing,
+          % (len(got), len(gold), gold_spec, hit, wrong, extra, missing,
              100.0 * hit / len(got) if got else 0.0))
+    # The reference drew a layer and the engine drew none: that is a total
+    # miss, not a clean sheet. Without this it fell through to wrong==0 = PASS.
+    if not got:
+        print('VS-MAME FAIL engine produced ZERO pixels while the reference '
+              'produced %d - the layer is missing, not matching' % len(gold))
+        return 1
     # A wrong pen where both renderers drew something is the draw-order signal:
     # same pixel, different sprite won it.
     if wrong:
