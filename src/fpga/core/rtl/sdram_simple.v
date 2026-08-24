@@ -107,7 +107,31 @@ module sdram_simple (
         end else begin
             cmd(CMD_NOP);
             refresh_ctr <= refresh_ctr + 10'd1;
-            if (refresh_ctr == 10'd250) begin      // 2.9us @ 85.909MHz (spec: <7.8us/row)
+            // REFRESH-107: this used to read "250 = 2.9us @ 85.909MHz", a
+            // comment left over from a clock this design has not used in a
+            // long time.  The SDRAM domain is 35.795455 MHz on BOTH platforms,
+            // so 250 clocks is 6.984us, and SDSCHED-88's bounded deferral adds
+            // up to another 48 clocks (1.341us) on top:
+            //
+            //     worst case = (250 + 48) / 35.795455 MHz = 8.325 us
+            //     MT48LC16M16A2 requirement                = 7.8125 us
+            //
+            // i.e. 6.6% out of spec whenever the deferral engages, which is
+            // exactly the silent-graphics-corruption bug the Pocket side found
+            // and fixed.  It matters MORE here than on the Pocket: the
+            // deferral only engages under read pressure, and this platform has
+            // no PSRAM, so the playfield graphics client shares this bus too.
+            //
+            // 224 + 48 = 272 clocks = 7.599 us, in spec with ~3% margin, and
+            // the deferral (which the zero-wait CPU fastpath was tuned with)
+            // is left intact.  Average interval 6.258us -> all 8192 rows in
+            // 51.3 ms against the 64 ms tREF window.
+            //
+            // NOTE for the maintainer: the parent project's sdram-sched branch
+            // fixed the same spec violation by DELETING the deferral instead.
+            // Reconcile deliberately when this branch merges - do not let the
+            // two platforms drift apart here again.
+            if (refresh_ctr == 10'd224) begin      // 6.26us @ 35.795455 MHz
                 refresh_due <= 1'b1;
                 refresh_ctr <= 10'd0;
             end
@@ -142,10 +166,10 @@ module sdram_simple (
                 else if (rd_ack && ~rd_req) rd_ack <= 1'b0;
                 // SDSCHED-88: a refresh DEFERS (bounded) to a pending read -
                 // the zero-wait CPU fastpath budgets ~24 spare clocks per bus
-                // cycle and a 10-clk tRFC in front of the fill blows it. The
-                // 250-clk interval is 2.9us against the 7.8us/row spec, so
-                // even the 63-clk deferral cap keeps >2x margin; sustained
-                // read pressure defers to the cap, never past it.
+                // cycle and a 10-clk tRFC in front of the fill blows it.
+                // REFRESH-107: the cap that matters is this 48, not the 63 the
+                // age counter saturates at.  224 + 48 = 7.599us, in spec; see
+                // the interval comment above before changing either number.
                 else if (refresh_due && (!(rd_req && ~rd_ack) || refresh_age >= 6'd48)) begin
                     cmd(CMD_REFRESH);
                     refresh_due <= 1'b0;
