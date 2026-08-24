@@ -834,6 +834,55 @@ active.
 `escape_mister.v` through power-on → download-under-reset → release and counts
 served fetches. See "Verified here".
 
+### BUILD 107 gate results (CI run 32763926809, commit `dba85b4`)
+
+Every step green, including `tb_mister_pf` on a clean checkout (13,794 / 13,794
+fetches) and `check_slack.py`, which reported *All analysed clocks have
+non-negative slack* with TNS 0.000 on all eight.
+
+| clock | setup | vs BUILD 105 | hold |
+|---|---|---|---|
+| `emu\|pll` general[0] — 7.159091 MHz CPU + pixel | **+15.831 ns** | −0.211 | +0.263 |
+| `emu\|pll` general[1] — 35.795455 MHz SDRAM | **+14.587 ns** | −0.198 | +0.254 |
+| `SDRAM_CLK` | +3.442 | — | +17.450 |
+| `pll_hdmi` divclk (tightest in the design) | +0.880 | — | +0.229 |
+| `FPGA_CLK1_50` / `FPGA_CLK2_50` / `spi_sck` / `pll_audio` | +8.636 / +12.556 / +6.061 / +15.976 | — | +0.415 / +0.372 / +0.352 / +0.251 |
+
+The two ~0.2 ns setup regressions on the core's own clocks are the reset fanout
+PFRESET-107 adds to the playfield pipeline. They are declared rather than
+buried: the margins are 15 ns and 14 ns, and the binding clock in this design is
+`pll_hdmi`'s +0.880 ns, which the change does not touch.
+
+Resources: 18,846 / 41,910 ALMs (45%), 386 / 553 M10K (70%), 76 / 112 DSP,
+21,197 registers. M10K went 385 → 386; nothing here spent the DE10-Nano's
+block-RAM headroom deliberately.
+
+### What the NEXT capture confirms or refutes
+
+There is **no debug HUD on this port** (difference 4 in `rtl/escape_mister.v`'s
+header — the Pocket's forensics tooling is deliberately absent), so the reading
+is the picture itself. Fortunately the picture separates the hypotheses cleanly,
+because each failure mode has a different *texture*.
+
+Capture level 1 gameplay for ~60 s, extract frames, and run the same five-patch
+measurement used to diagnose this (`support/` has no tool for it — it is fifteen
+lines of PIL: pick five fixed rectangles on background, report distinct colours
+and σ per patch, and distinct colours over the whole play area as a scene-
+complexity proxy).
+
+| Reading | Verdict |
+|---|---|
+| Background patches go from **1 distinct colour** to **O(1000)**, in the region of the Pocket's 1 241; floor grid and red factory walls present; stairs drawn rather than a black hole | **PFRESET-107 confirmed.** This is the primary result. |
+| Still exactly 1 distinct colour per region, still a black staircase | PFRESET-107 did **not** fix it. The channel is still not completing. Nothing else in this document explains that; re-open at the arbiter. |
+| Textured, but speckled with individually wrong 8-pixel tile rows — scattered, **not** correlated with how busy the scene is | `rd_pre = 0` wrong-row serves. One-line A/B: set the PF grant arm's `rd_pre_q <= 1'b0;` to `1'b1`. See "Timing assumptions that were changed". |
+| Textured, but tile rows go stale or repeat, **worse toward the right of each line** and **worse the more robots are on screen** | Bandwidth. The budget has never been exercised until now. Levers are in "Bandwidth budget". Discriminator: the artifact rate must **track scene complexity** — compare quiet and busy frames explicitly rather than eyeballing. |
+| Random tiles wrong, changing frame to frame, **no** geometric or load correlation | Memory data corruption, not a fetch problem — i.e. REFRESH-107 did not go far enough. Next step is the SDRAM read-capture phase on the DE10-Nano module. |
+
+The first two rows are the ones that matter. Everything below them is a *new*
+problem that BUILD 105 could not have shown, because until this fix the
+playfield client issued zero fetches and therefore exercised none of that
+machinery.
+
 ### Three things predicted to break on first flash (all wrong — kept for the record)
 
 Ordered by the likelihood assigned *before* the flash, with what to look at.
