@@ -228,3 +228,111 @@ CPU and +0.8% on the extra CPU**.
 250 -> 160 refresh threshold, which raised refresh occupancy from 4.4% to 6.9%,
 cost the CPUs nothing measurable.** There is no case for touching it back, and
 doing so would re-open a genuine JEDEC retention violation.
+
+## 9. GFXDASH-3: the gate, and what it found
+
+Section 5 said any work on this must first build a fixture containing stain
+markers. That is `sim/run_stain_tb.sh`, and it changed the answer.
+
+### The gate
+
+Two gaps let this artifact through eleven passing checks:
+
+* `sim/run_mob_tb.sh`'s fixture reports **0 special pixels**, so the only gate
+  that could have caught a stain bug had no stain in its scene;
+* the apply_stain automaton lived **inline in `core_top.v`**, a file no sim
+  script compiles, so `sim/tools/check_stain_automaton.py` tests a
+  *transcription* of it rather than the shipped instance.
+
+Both are closed. `src/fpga/core/rtl/escape_stain.v` is the automaton, extracted
+from `core_top.v` verbatim — same two flip-flops, same reset value, same clear
+condition, same equations — and instantiated by `core_top.v` and by
+`sim/tb/tb_stain.v`, so the bench drives the gates that ship. Pure logic, M10K
+delta structurally zero.
+
+`sim/tools/make_stain_scene.py` builds a six-frame scene whose markers' START/END
+pen bits and screen extents are *chosen*, not discovered, and computes the
+reference answer with `reference/atarimo.cpp`'s own `apply_stain` loop over the
+motion-object bitmap `reference/eprom.cpp` would have produced. The bench diffs
+both the stained columns and the drawn MO pixels, and refuses to certify a run
+with no markers, no stained pixels, or a short frame count.
+
+**It was verified able to fail, on the real RTL, before it was trusted:** against
+BUILD 107 it reports 226 mismatching pixels.
+
+One thing the scene design had to get right, and got wrong first. A marker drawn
+entirely in pen 6 carries **both** bits on every pixel, so however many of its
+pixels go missing the automaton still breaks one pixel past whatever survives —
+it can never run to the end of the line. The unbounded mode needs a START run
+with no END bit in it: a pen-2 body terminated by a **separate** pen-6 column.
+Losing that terminator is what turns a bounded stain into a stain that reaches
+the last screen column. Section 4's "a marker losing its END bit" is right, but
+it has to be the *terminator marker*, not just any of the marker's pixels.
+
+### The bug
+
+The line-buffer staleness tag is `{fpar, ly[7:0]}` and **`fpar` is one bit**, so
+it separates this frame from last frame and from nothing else. An entry written
+**two** frames ago carries this frame's parity; if nothing rewrote that column in
+that buffer since, it reads back live. LANE4q fixed the one-frame ghost and left
+the two-frame ghost, at half the rate and flickering at 30 Hz — which is exactly
+the 2-frame parity measured in sections 3(c) and 7 and independently in the
+killed-playfield capture.
+
+It costs pixels twice over:
+
+* the stale entry **displays** — a sprite in two places at once;
+* it satisfies `bld_occupied`, so a live sprite arriving at that column has its
+  write **refused by a ghost**.
+
+When the refused write is the stain's END terminator, the automaton never sees
+it and the stain runs from the marker's world-anchored left edge to the last
+screen column. Bench case E, frame 3: **`x 265..335` against a reference that
+stops at 264.** One end anchored to world content, the other pinned to x=335, is
+the signature measured in section 3(c) to the pixel.
+
+Note what the bench also shows about *when* a ghost can bite. A stale entry only
+survives if nothing rewrites that column in that buffer in between — the two
+buffers are shared by every line they serve, so the last line to write a column
+owns it. A stationary object overwrites its own stale pixels and is immune; the
+hazard is a sprite **arriving** at a column it did not occupy last frame, which
+is what every moving object in the game does, and which is why the artifact is
+intermittent rather than constant.
+
+### The fix
+
+Self-clearing readout — what the real MOHLB does, and what LANE3n's own comment
+says it does instead of tagging. While a buffer is being displayed its write port
+is idle, because blit writes go to the other one; writing zero there costs no
+port, no block and no cycle, and an all-zero entry is unrepresentable as a hit.
+Buffers alternate every line, so each is cleared during the line immediately
+before it is built: every build starts empty, and staleness is impossible by
+construction rather than by an argument about tag width.
+
+Widening the tag was not available. The entry is 20 bits, which is exactly the
+native 512x20 M10K geometry; a 21st bit doubles both line buffers.
+
+### Evidence, and its limits
+
+| | |
+|---|---|
+| `sim/run_stain_tb.sh` | 226 mismatching px before, **0 after** |
+| `sim/run_mob_tb.sh` | 10047/10047 = 100.0000%, `wrong_pen=0` |
+| `sim/run_mob_order_check.sh` | `b_shorter=0` on all four cells |
+| `sim/run_prio_tb.sh` | 507904/507904 |
+| `sim/run_psram_tb.sh` | PASS, negative control rejected |
+| CI fit | 0 errors — the 308-M10K ceiling is the gate, so this is the M10K delta-0 evidence |
+| CI timing | all 64 clock/corner rows non-negative; worst setup **+4.572 ns**, worst hold **+0.124 ns** (BUILD 107: +5.197 / +0.118) |
+
+The 0.625 ns of setup slack is a real number and it is reported rather than
+explained away — but it is **two builds**, and Quartus seed variance on this
+design is of that order, so it should not be attributed to this change without a
+repeat build. Both are comfortably positive and the gate passes.
+
+**What still needs the owner's hardware.** Whether this is the whole of the
+artifact they see. Everything above is simulation and CI. The mechanism
+reproduces the measured signature exactly — world-anchored left end, right end
+pinned to the last screen column, 2-frame parity — but "reproduces the
+signature" is not "is the only cause of it", and the FACTORY MAP residual
+documented in `docs/mo_priority.md` (a systematic 1-2 px right-displacement) is a
+separate, still-open question that this change does not address.

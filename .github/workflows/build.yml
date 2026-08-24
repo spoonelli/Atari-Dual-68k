@@ -50,6 +50,20 @@ jobs:
             grep -oE '^; [^;]*(Setup|Hold|Recovery|Removal|Pulse Width) Summary' "$f" | sort -u || true
           done
 
+      # M10K is this design's other hard constraint: 308 blocks, all used, and
+      # a single newly inferred block fails the fit outright with Error 170048
+      # (docs/LESSONS.md). The fit failing IS the gate - but "the fit passed"
+      # tells you nothing about how close you came, and docs/mo_priority.md
+      # records M10K deltas being ARGUED rather than measured more than once.
+      # Print the number so the next change starts from a figure.
+      # Diagnostic, never fails: a naming change must not fail a good build.
+      - name: Block-RAM usage (diagnostic)
+        if: always()
+        run: |
+          f=src/fpga/output_files/ap_core.fit.rpt
+          [ -f "$f" ] || { echo "no fit report"; exit 0; }
+          grep -iE 'Total block memory bits|Total RAM Blocks|M10K blocks|Total block memory implementation bits' "$f" | head -20 || true
+
       - name: Timing gate (fail on negative slack)
         run: |
           test -f src/fpga/output_files/ap_core.sta.rpt
@@ -72,3 +86,4 @@ jobs:
             output/bitstream.rbf_r
             src/fpga/output_files/ap_core.rbf
             src/fpga/output_files/ap_core.sta.rpt
+            src/fpga/output_files/ap_core.fit.rpt
