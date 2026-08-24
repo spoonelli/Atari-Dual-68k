@@ -1854,8 +1854,61 @@ end
     // the walk path - it faked a broken floor on the 2026-08-19 video):
     //   0 JSA (resp/coin+credits) | 1 extra-CPU (PC/mbox)
     //   2 main-CPU (PC/wr-region) | 3 engine (actor head/mode bytes)
+    //   4 apply_stain diagnostic (MOSTAIN-2)
     // vidkill stays on R2 HOLD only; CRAM sums retired (sim benches cover).
-    reg [1:0] dbgmode = 2'd0;
+    //
+    // MOSTAIN-2 page 4 answers ONE question: how much of the marker does the
+    // stain actually cover? BUILD 105 does fire on hardware - the START marker
+    // does go grey - but only ~34 native pixels of it, where MAME's own frame
+    // changes 200. These three fields quantify the shortfall and name its shape.
+    //
+    //   field1 = stained pixels this frame      (16-bit, saturating)
+    //   field2 = special (MPR2) pixels carrying a START or END marker bit
+    //            (16-bit, saturating) - the same quantity tb_mob reports as
+    //            "special pixels", which is 296 on this screen
+    //   field3 = {first, last} scanline carrying a stained pixel
+    //
+    // Photograph page 4 ON THE FACTORY MAP. MAME's truth for that screen:
+    //   field1 = 0140 (320 stained)   field2 = 0128 (296 specials)
+    //   field3 = 96AD (rows 150..173)
+    //
+    // CAREFUL: field3 counts where the stain is APPLIED, not where it is
+    // VISIBLE, and here those differ sharply. The specials span rows 150..173,
+    // but rows 150..157 lie over black background where staining changes
+    // nothing: MAME's own VISIBLE change is rows 158..173 (200 px), and
+    // hardware's is rows 168..173 (34 px). So a full 96AD span with a full
+    // 0140 count would mean coverage is CORRECT and the shortfall is in the
+    // palette - do not read field3 against the 6 rows the capture shows.
+    // Read the three together:
+    //
+    //   field3 = 0000       -> the counter block never ran. STOP: the other
+    //                          two fields mean nothing. (A live counter that
+    //                          saw no stain reads FF00, never 0000, because
+    //                          ln_first resets to FF and ln_last to 00.)
+    //   field3 = FF00       -> counter alive, nothing stained this frame.
+    //   field2 << 0128      -> the specials are not reaching the MO line
+    //                          buffer. The stain cannot cover what it is never
+    //                          told about; the fault is in escape_mob / the
+    //                          tile fetch under real SDRAM contention, which
+    //                          no current bench models (tb_mob's gfx model is
+    //                          dedicated and shows 296 at every latency).
+    //   field2 ~= 0128,
+    //     field1 << 0140    -> specials arrive but runs die early: the
+    //                          scanline automaton or its S/E derivation.
+    //   field2 ~= 0128,
+    //     field1 ~= 0140,
+    //     field3 =  96AD    -> the compositor applies the stain exactly where
+    //                          MAME does, so the shortfall is downstream of
+    //                          color_vaddr: the upper colour bank holds
+    //                          different values here than in MAME for the pens
+    //                          that did NOT turn grey. Grey appearing at all
+    //                          does not refute this - it proves the bank is
+    //                          written for SOME pens, not for all of them.
+    // field3 names the SHAPE either way: a span much shorter than 96AD with
+    // field2 near 0128 means whole scanlines are being dropped rather than
+    // runs truncated. See docs/mo_priority.md.
+    // MOSTAIN-2: widened to 3 bits for the apply_stain page (mode 4).
+    reg [2:0] dbgmode = 3'd0;
     // SDSCHED-85 trace view: L2 toggles (demotes the alpha-hide bringup
     // tool); R steps backward through entries while active.
     reg       m_trace = 1'b0;
@@ -1871,7 +1924,7 @@ end
         end
         if(cont1_key[9] & ~rbtn_d) begin
             if(m_trace) tr_back <= tr_back + 7'd1;
-            else        dbgmode <= dbgmode + 2'd1;
+            else        dbgmode <= (dbgmode == 3'd4) ? 3'd0 : dbgmode + 3'd1;
         end
     end
     // LANE3h3: modes 1-5 RETIRED (answered questions - PF map, input probe,
@@ -1885,26 +1938,64 @@ end
     // draws the in-game world; when gameplay fails to populate, this names
     // where it is: field1 = extra-CPU PC (frame-latched; frozen = wedged/
     // quiesced, churning = alive), field3 = last mailbox response word.
-    wire m_eprobe  = (dbgmode == 2'd1);
+    wire m_eprobe  = (dbgmode == 3'd1);
     // LANE3m: mode 3 = MAIN-CPU window (field1 = video-CPU PC frame-latched,
     // field3 = last main data-write addr [23:8]) - names where the game
     // state machine sits when the world is drawn but objects never move.
-    wire m_vprobe  = (dbgmode == 2'd2);
+    wire m_vprobe  = (dbgmode == 3'd2);
     // LANE3r: mode 4 = ENGINE window. field1 = actor-table head word 3F5000
     // (MAME truth: 0000 on attract art pages, 0x12xx when the demo/game has
     // spawned actors); field3 = {mode byte 3F7F16, mode byte 3F7F23} (MAME:
     // 60/18 on art pages, 54/2a during demo play).
-    wire m_gprobe  = (dbgmode == 2'd3);
+    wire m_gprobe  = (dbgmode == 3'd3);
     wire m_pfprobe = 1'b0;
     wire m_mopri_px     = 1'b0;
     wire m_mokill       = 1'b0;
     wire m_mopri_sd;
 synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire m_vidkill_px   = 1'b0;   // LANE3y: cycle slot removed; R2 hold remains
-    wire m_moprobe      = 1'b0;   // LANE3y: CRAM sums retired (muxes prune)
+    // LANE3y retired the CRAM sums; MOSTAIN-2 reuses that already-present
+    // mux level for the apply_stain page, so fields 1 and 3 cost no extra
+    // mux depth in the hex row (only field 2 adds a level).
+    wire m_stain      = (dbgmode == 3'd4);
     reg [7:0] mgreq_cnt, mopen_cnt;
     reg [15:0] moprobe_fr;
     reg [15:0] cst0_px, cst1_px, cst0_m, cst1_m;
+    // ---- MOSTAIN-2: apply_stain hardware diagnostic (dbgmode 4) ----
+    // BUILD 105 shipped the stain pass and NOTHING on screen changed. Two
+    // completely different faults produce that exact symptom - an unstained
+    // pen and a stain into an empty palette bank can both leave the marker
+    // its original colour - so these counters are built to separate them,
+    // and to make a zero reading falsifiable rather than merely quiet.
+    //
+    // Everything saturates (never wraps) so FF/FFFF means "at least this
+    // many", never "none". Latched at vblank into the *_fr registers so the
+    // HUD shows one whole frame, not a partial one.
+    //
+    //   stain_px_fr  pixels whose colour-RAM address had bit 10 set
+    //   spc_px_fr    special (MPR2) pixels present in the MO line buffer
+    //   wit_fr       the liveness witness, as two saturating nibbles:
+    //                  [7:4] active-video pixels seen  -> F if this counter
+    //                        block ran AT ALL this frame
+    //                  [3:0] motion-object pixels drawn -> F on any screen
+    //                        that has sprites, 0 on one that has none
+    //
+    // Two nibbles rather than one count because the screen this diagnostic
+    // exists for - the FACTORY MAP - has NO drawable sprites (MAME's own MO
+    // model draws 296 pixels there and every one of them is special). An
+    // MO-pixel witness is therefore legitimately 0 on exactly the screen
+    // being photographed, which would make it useless. [7:4] does not
+    // depend on the MO path at all, so it separates "nothing to count" from
+    // "this counter never ran":
+    //   wit = F0  counter alive, no sprites on screen  (FACTORY MAP: normal)
+    //   wit = FF  counter alive, sprites present       (gameplay: normal)
+    //   wit = 00  the counter never ran - every other number on this page
+    //             is meaningless and must not be reported as a zero result
+    reg [15:0] stain_px = 16'd0, stain_px_fr = 16'd0;
+    reg [15:0] spc_px   = 16'd0, spc_px_fr   = 16'd0;
+    reg [7:0]  ln_first = 8'hFF, ln_last     = 8'h00;
+    reg [15:0] lnspan_fr = 16'hFF00;
+    // MOSTAIN-2 page field 3: {first, last} scanline carrying a stained pixel
     reg mgreq_d2;
     always @(posedge clk_sys_7159) begin
         mgreq_d2 <= mo_gfx_req[0];
@@ -2012,10 +2103,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // attract NEVER resets after boot (extra released once at T=11s,
         // runs forever) - our ~35s reboot loop = a main-CPU death, and this
         // page names it.
-        4'd0:  hex_digit = m_trace ? tr_step[7:4] : m_moprobe ? cst0_px[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
-        4'd1:  hex_digit = m_trace ? tr_step[3:0] : m_moprobe ? cst0_px[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
-        4'd2:  hex_digit = m_trace ? (trace_frozen ? 4'hF : 4'h0) : m_moprobe ? cst0_px[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
-        4'd3:  hex_digit = m_trace ? tr_addr[23:20] : m_moprobe ? cst0_px[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
+        4'd0:  hex_digit = m_trace ? tr_step[7:4] : m_stain ? stain_px_fr[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
+        4'd1:  hex_digit = m_trace ? tr_step[3:0] : m_stain ? stain_px_fr[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
+        4'd2:  hex_digit = m_trace ? (trace_frozen ? 4'hF : 4'h0) : m_stain ? stain_px_fr[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
+        4'd3:  hex_digit = m_trace ? tr_addr[23:20] : m_stain ? stain_px_fr[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
         // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
@@ -2028,22 +2119,22 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // page 0 field2 = LANE4l max extra bus-cycle length: normal cycles
         // are tiny (< 0x0040); a stuck write shows FFFF = the invisible
         // freeze mode (bus active, rescue can't see it)
-        4'd5:  hex_digit = m_trace ? tr_addr[19:16] : m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
-        4'd6:  hex_digit = m_trace ? tr_addr[15:12] : m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
-        4'd7:  hex_digit = m_trace ? tr_addr[11:8] : m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
-        4'd8:  hex_digit = m_trace ? tr_addr[7:4] : m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
+        4'd5:  hex_digit = m_trace ? tr_addr[19:16] : m_stain ? spc_px_fr[15:12] : m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
+        4'd6:  hex_digit = m_trace ? tr_addr[15:12] : m_stain ? spc_px_fr[11:8] : m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
+        4'd7:  hex_digit = m_trace ? tr_addr[11:8] : m_stain ? spc_px_fr[7:4] : m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
+        4'd8:  hex_digit = m_trace ? tr_addr[7:4] : m_stain ? spc_px_fr[3:0] : m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = m_trace ? tr_data[15:12] : m_moprobe ? cst1_px[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? pg2_f3[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = m_trace ? tr_data[11:8] : m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? pg2_f3[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = m_trace ? tr_data[7:4] : m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? pg2_f3[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = m_trace ? tr_data[3:0] : m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? pg2_f3[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_trace ? tr_data[15:12] : m_stain ? lnspan_fr[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? pg2_f3[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_trace ? tr_data[11:8] : m_stain ? lnspan_fr[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? pg2_f3[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_trace ? tr_data[7:4] : m_stain ? lnspan_fr[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? pg2_f3[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_trace ? tr_data[3:0] : m_stain ? lnspan_fr[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? pg2_f3[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
         // LANE4c: slot 14 (the gap) shows the crash SOURCE digit on page 2
         // (0=BRAM 1=prefetch 2=cache 3=fresh-SDRAM) - names which serve
         // path delivered the wrong opcode word
         4'd14: hex_digit = m_trace ? tr_addr[3:0] : {2'b00, crash_src};
-        4'd15: hex_digit = m_trace ? tr_flag : {2'b00, dbgmode};
+        4'd15: hex_digit = m_trace ? tr_flag : {1'b0, dbgmode};
         default: hex_digit = 4'h0;
         endcase
     end
@@ -2065,7 +2156,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire [1:0] ver_slot = vx0[5:4];
     reg  [3:0] ver_digit;
     always @(*) case(ver_slot)
-        2'd0: ver_digit = {2'b00, dbgmode}; 2'd1: ver_digit = BUILD_ID[15:12];
+        2'd0: ver_digit = {1'b0, dbgmode}; 2'd1: ver_digit = BUILD_ID[15:12];
         2'd2: ver_digit = BUILD_ID[7:4];   default: ver_digit = BUILD_ID[3:0];
     endcase
     wire [2:0] ver_gy  = visible_y[2:0] - 3'd4;      // y228..233 -> rows 0..5
@@ -2426,6 +2517,28 @@ escape_prio uprio (
         end else begin
             stain_alive <= stain_now & ~stain_brk;
             stain_e_q   <= mo_stain_e;
+        end
+    end
+
+    // MOSTAIN-2: count what the stain pass actually did this frame. Gated to
+    // active video so blanking cannot inflate any of the three. Declared up
+    // with the other HUD registers; see the comment there for how to read them.
+    wire stain_dbg_active = (visible_x < VID_H_ACTIVE) && (visible_y < VID_V_ACTIVE);
+    always @(posedge clk_sys_7159) begin
+        if(vblank_w && !vb_hud_d) begin
+            stain_px_fr <= stain_px;  stain_px <= 16'd0;
+            spc_px_fr   <= spc_px;    spc_px   <= 16'd0;
+            lnspan_fr   <= {ln_first, ln_last};
+            ln_first    <= 8'hFF;     ln_last  <= 8'h00;
+        end else if(stain_dbg_active) begin
+            if(stain_now && stain_px != 16'hFFFF)
+                stain_px <= stain_px + 16'd1;
+            if((mo_stain_s | mo_stain_e) && spc_px != 16'hFFFF)
+                spc_px <= spc_px + 16'd1;
+            if(stain_now) begin
+                if(visible_y[7:0] < ln_first) ln_first <= visible_y[7:0];
+                if(visible_y[7:0] > ln_last)  ln_last  <= visible_y[7:0];
+            end
         end
     end
 
