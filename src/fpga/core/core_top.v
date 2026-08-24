@@ -2506,19 +2506,21 @@ escape_prio uprio (
     // A solid marker (pen 6 = both bits) therefore stains its own silhouette
     // plus the one pixel past its right edge, exactly like the C loop; a pen-2
     // marker stains to the end of the line, also exactly like the C loop.
-    reg        stain_alive = 1'b0;
-    reg        stain_e_q   = 1'b0;
-    wire       stain_now   = mo_stain_s | stain_alive;
-    wire       stain_brk   = stain_e_q & ~mo_stain_s;
-    always @(posedge clk_sys_7159) begin
-        if(visible_x == 10'd0) begin        // first cycle of a new line
-            stain_alive <= 1'b0;
-            stain_e_q   <= 1'b0;
-        end else begin
-            stain_alive <= stain_now & ~stain_brk;
-            stain_e_q   <= mo_stain_e;
-        end
-    end
+    //
+    // GFXDASH-3: the automaton itself now lives in src/fpga/core/rtl/escape_stain.v
+    // so that a testbench can drive THE SHIPPED INSTANCE. It was inline here,
+    // in a file no sim script compiles, which is why the only "stain" check in
+    // the tree (sim/tools/check_stain_automaton.py) tests a transcription. The
+    // extraction is behaviour-preserving: same two flip-flops, same reset
+    // value, same clear condition, same two equations. See sim/tb/tb_stain.v.
+    wire       stain_now;
+escape_stain ustain (
+    .clk        ( clk_sys_7159 ),
+    .line_start ( visible_x == 10'd0 ),
+    .s_in       ( mo_stain_s ),
+    .e_in       ( mo_stain_e ),
+    .stain      ( stain_now )
+);
 
     // MOSTAIN-2: count what the stain pass actually did this frame. Gated to
     // active video so blanking cannot inflate any of the three. Declared up
