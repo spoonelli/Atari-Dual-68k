@@ -627,6 +627,20 @@ always @(posedge clk_sdram) begin
         chk_state <= 4'd0;
         chk_done  <= 1'b0;
         sd_rd_req <= 1'b0;
+        // PFRESET-107, same bug class as the playfield channel reset above:
+        // dropping sd_rd_req here abandons whatever read was in flight, but
+        // the owner flag for that client stayed set - and every grant arm
+        // requires !cpu_owner && !mo_owner && !pf_owner && !fpv_owner &&
+        // !fpe_owner.  A second .mra load (or any ioctl_download that lands
+        // while a read is outstanding, which is every load after the first)
+        // therefore wedged the ENTIRE read arbiter, not just one client.
+        // Nothing had exercised that path because the first load happens
+        // before any client is active.  Clear them with the request.
+        cpu_owner <= 1'b0;
+        mo_owner  <= 1'b0;
+        pf_owner  <= 1'b0;
+        fpv_owner <= 1'b0;
+        fpe_owner <= 1'b0;
     end
 end
 
@@ -781,6 +795,51 @@ always @(posedge clk_sys) begin
         pf_rp     <= pf_wp;
         pfq_count <= 3'd0;
         pfq_rd    <= pfq_wr;
+    end
+
+    // ---- PFRESET-107: the playfield fetch channel MUST reset with the core.
+    //
+    // BUILD 105 shipped without this and rendered a completely flat playfield
+    // on hardware.  The mechanism, reproduced in sim/tb/tb_mister_pf.v:
+    //
+    //   * x_count/y_count and this whole pipeline free-run from power-on -
+    //     they are not gated by core_reset_n.  So during the ~2.2 MB ROM
+    //     download, with the machine held in reset, this block reaches active
+    //     video and issues a playfield fetch on channel A and then on channel
+    //     B, setting inflA and inflB.
+    //   * the SDRAM arbiter cannot serve them: its whole video tier lives in
+    //     the chk_state == 4'd10 steady-state arm, and chk_state is pinned at
+    //     0 for the entire download.  pf_pend_q is gated by core_rstn_sd on
+    //     top of that.
+    //   * meanwhile the arbiter's SDSCHED-75 reset resync runs every clock
+    //     that core_rstn_sd is low and does "vg_req_last <= vg_req_s", which
+    //     RETIRES those two pending request edges without ever completing
+    //     them.  That resync is correct for the motion objects, because
+    //     escape_mob zeroes its own request toggles and in-flight state under
+    //     reset - the tracker is following a real reset, not eating a real
+    //     request.  This block had no reset at all, so it was the one client
+    //     for which the resync destroyed work.
+    //   * reset releases with inflA = inflB = 1 and vg_req_last == vg_req_s.
+    //     The issue side requires !inflA / !inflB, so it never toggles a
+    //     request again; the arbiter never sees a pending edge again.  Both
+    //     channels are wedged for the rest of the session, pfring0..3 keep
+    //     their power-on zeros, every tile decodes to pixel index 0, and the
+    //     screen shows one flat colour per playfield colour attribute.
+    //
+    // That is exactly the hardware capture: correct tilemap (the stairs
+    // structure is a correctly shaped silhouette), correct per-tile colour
+    // attributes (two flat regions, not one), constant tile pixels, and no
+    // dependence on scene complexity.  Motion objects were unaffected because
+    // they read the same repacked region through a channel that does reset.
+    //
+    // Giving this channel the same reset the mob gives its own is the whole
+    // fix: while reset is held the request toggles sit at 0, the resync tracks
+    // 0, and release starts both sides in agreement with nothing in flight.
+    if (!core_reset_n) begin
+        vg_reqA_px <= 1'b0;  vg_reqB_px <= 1'b0;
+        inflA      <= 1'b0;  inflB      <= 1'b0;
+        pfq_count  <= 3'd0;  pfq_wr     <= 2'd0;  pfq_rd <= 2'd0;
+        pf_wp      <= 2'd0;  pf_rp      <= 2'd0;
     end
 end
 

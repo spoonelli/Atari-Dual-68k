@@ -30,6 +30,14 @@ jobs:
       - name: Check escape_core port list
         run: python3 src/mister/check_ports.py
 
+      # PFRESET-107 regression. BUILD 105 shipped a playfield graphics channel
+      # that wedged during the ROM download and never fetched again - a flat
+      # playfield on hardware, with no compile-time or STA symptom whatsoever.
+      # This bench counts the fetches the SDRAM arbiter actually serves and
+      # fails at zero, so the regression cannot ship silently a second time.
+      - name: Playfield fetch service (tb_mister_pf)
+        run: ./sim/run_mister_pf_tb.sh
+
       - name: Compile Arcade-Escape
         run: |
           docker run --rm -v "$PWD":/work -w /work/src/mister \

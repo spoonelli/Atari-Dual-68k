@@ -16,6 +16,16 @@ needed at the very end to produce the physical bitstream.
   elaborate under GHDL (our adaptation baseline).
 - `run_tb.sh [tb]` — elaborate + run a testbench from `tb/` (default `tb_syngen`).
 - `tb/` — testbenches.
+- `run_mister_pf_tb.sh` — **MiSTer playfield fetch service** (iverilog, Docker).
+  Drives the real `src/mister/rtl/escape_mister.v` through power-on → ROM
+  download with the core held in reset → release → one measured frame, and
+  counts the playfield fetches the SDRAM arbiter serves. This is the
+  PFRESET-107 regression: BUILD 105 served **zero** and rendered a flat
+  playfield on real hardware. Only the VHDL machine is stubbed, and
+  `sim/tb/stub_escape_core.v` is regenerated from `escape_core.vhd`'s entity by
+  `support/mk_core_stub.py` on every run so it cannot drift. `sim/tb/
+  sdram_model.v` is a behavioural MT48LC16M16A2; the bench validates its own
+  read latency by requiring the core's power-on readback probes to pass.
 
 ## GHDL flags
 `--std=08 -fsynopsys -frelaxed` — the base RTL uses `std_logic_unsigned`/`std_logic_arith`

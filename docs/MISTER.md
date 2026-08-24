@@ -210,12 +210,52 @@ visible artefacts while a mistimed read returns plausible-looking wrong data.
   serve on a playfield read is one wrong tile row for one frame; on a CPU read
   it is a wrong *instruction*, which is why the Pocket added the armor in the
   first place (v39/v42). This buys back ~4 clocks per playfield fetch.
+  **UNEXERCISED UNTIL NOW — read this before the next flash.** Every client on
+  the Pocket uses `rd_pre = 1` (all four call sites in `core_top.v`), and this
+  port's only `rd_pre = 0` client is the playfield, which until PFRESET-107
+  never issued a single fetch. So `sdram_simple`'s no-precharge arm has **never
+  executed on any hardware, on either platform**. It now runs ~13 800 times a
+  frame. In principle it is safe — every access ends with auto-precharge (A10=1
+  on the second beat), so no row should be left open — but v39/v42 added the
+  armor because a wrong-row serve was *empirically* observed, which means
+  something does leave a row open. **If the playfield comes back textured but
+  speckled with individually wrong tile rows, scattered and NOT correlated with
+  scene business, change this one line in `rtl/escape_mister.v` and rebuild:**
+  `rd_pre_q <= 1'b0;` → `rd_pre_q <= 1'b1;` in the PF grant arm. That costs
+  ~4 clocks per playfield fetch (~+10% of a scanline at 57 fetches/line) and
+  moves the risk back onto the bandwidth budget, which is the trade being made.
 * **Playfield and motion objects arbitrate round-robin** rather than the
   Pocket's strict PF-over-MO (which lived on the CRAM chain, where MO was not a
   client at all). Motion objects have hard per-line deadlines; the playfield
   prefetches cells ahead and tolerates sharing.
-* Nothing inside `sdram_simple` was modified. Refresh interval, tRCD/tRP/tRFC
-  waits and the CL2 mode word are as validated on the Pocket.
+* **The refresh interval was out of JEDEC spec and is now fixed (REFRESH-107).**
+  This was previously documented here as "nothing inside `sdram_simple` was
+  modified", on the strength of a comment in that file reading
+  `250 = 2.9us @ 85.909MHz`. That comment referred to a clock this design has
+  not used in a long time. The SDRAM domain is 35.795455 MHz on **both**
+  platforms, so the real numbers were:
+
+  ```
+  interval          250 clk / 35.795455 MHz = 6.984 us
+  SDSCHED-88 defer + 48 clk                 = 1.341 us
+  worst case                                = 8.325 us
+  MT48LC16M16A2 requirement                 = 7.8125 us     -> 6.6% OVER
+  ```
+
+  This is the same class of bug the Pocket side found and fixed the same week,
+  where it was silently corrupting graphics data. It matters **more** here: the
+  deferral only engages under read pressure, and this platform has no PSRAM, so
+  the playfield graphics client shares this bus too — and after PFRESET-107 it
+  actually uses it. The interval is now `224` (6.258 us); `224 + 48 = 7.599 us`,
+  in spec with ~3% margin, with the bounded deferral (which the zero-wait CPU
+  fastpath was tuned against) left intact. Average interval refreshes all 8192
+  rows in 51.3 ms against the 64 ms `tREF` window.
+
+  **Reconcile deliberately on merge:** the parent project's `sdram-sched` branch
+  fixed the same violation by *deleting* the deferral rather than shortening the
+  interval. Two platforms must not drift apart here again.
+* tRCD/tRP/tRFC waits and the CL2 mode word are otherwise unchanged from the
+  Pocket.
 
 ### Bandwidth budget, and why it is the headline risk
 
@@ -567,6 +607,34 @@ power cycle. Save states are explicitly out of scope for this port.
   clock**, checked by a gate that has been **proven able to fail** (see
   "Timing" above — `check_slack.py` was run against the known-bad report and
   correctly named both violations before being trusted).
+* **That the playfield graphics channel is served at all** —
+  `./sim/run_mister_pf_tb.sh`. This drives the **real** `rtl/escape_mister.v`
+  (only the VHDL machine is stubbed, and that stub is regenerated from
+  `escape_core.vhd`'s entity on every run so it cannot drift) against a
+  behavioural SDRAM chip, through the exact hardware sequence: power-on → ROM
+  download with the core held in reset → release → one measured frame. It counts
+  playfield grants and completions.
+
+  **Proven able to fail, both ways, by A/B:**
+
+  | | fetches granted / completed in one frame |
+  |---|---|
+  | BUILD 105 as flashed | **0 / 0**, `inflA=1 inflB=1`, `vg_req == vg_req_last` |
+  | with PFRESET-107 | **13 794 / 13 794** |
+  | second `.mra` load, owner-clear reverted | **0 / 0**, `pf_owner` stuck at 1 |
+  | second `.mra` load, fixed | **13 794 / 13 794** |
+
+  13 794 is exactly 57 cells × 242 lines, i.e. the pipeline's full free-running
+  enqueue rate — not a threshold that was tuned to pass. The bench also checks
+  **its own SDRAM model** by requiring the core's two power-on readback probes
+  to succeed, so a mis-calibrated model latency fails the run rather than
+  silently invalidating it. The phase-2 case synchronises to `pf_owner == 1`
+  before asserting `ioctl_download`, because an unsynchronised version passes by
+  luck roughly two runs in three.
+
+  What this does **not** prove: that the pixels coming back are the right
+  pixels. The machine is stubbed and the SDRAM is behavioural. It proves the
+  channel is alive, which is the thing that was broken.
 * **The ROM path, end to end and byte-exact.** The `.mra` was assembled with the
   real `sebdel/mra-tools-c` tool against a real `eprom.zip`; the loader's
   invert + planar→chunky transform was replayed over the output in Python; the
@@ -584,14 +652,31 @@ power cycle. Save states are explicitly out of scope for this port.
   brief say "85.909 MHz, 12:1". That is **stale**; the PLL IP has said 5× since
   commit *"v22: SDRAM 42.95 → 35.8 MHz"*. Read the PLL, not the comments.
 
-### Not verified — nobody has run this on a DE10-Nano
+### Not verified — the PFRESET-107 / REFRESH-107 build has NOT been on hardware
 
-* That it boots, draws, or makes a sound on real hardware. **Nothing below this
-  line has been observed, only reasoned about.**
+BUILD 105 *has* been on a DE10-Nano (see "FIRST FLASH RESULT"): it boots, runs
+attract mode, takes coins, plays level 1, and renders motion objects,
+alphanumerics and the HUD correctly. Everything in this section is about the
+build that fixes the playfield, which **nobody has flashed**.
+
+* **That the playfield actually renders on hardware.** What is proven is that
+  the channel now services ~13 800 fetches per frame in simulation where it
+  previously serviced zero. Simulation used a *stub* machine and a *behavioural*
+  SDRAM: it proves the fetches are issued, granted and completed, and it does
+  **not** prove the returned pixels are the right pixels or that the picture is
+  correct. The next capture is what confirms that.
+* **`sdram_simple`'s `rd_pre = 0` arm**, which the playfield is the only user of
+  and which has therefore never run on any hardware on either platform. See the
+  "Timing assumptions that were changed" note — this is now the top item to
+  watch, with a one-line A/B if it misbehaves.
+* **REFRESH-107 on hardware.** The arithmetic is unambiguous and the change is a
+  constant, but no capture has been taken with it.
 * SDRAM bandwidth with the playfield added and the BUILD 104 4-channel motion
   object engine — the ~71%-of-a-line figure is arithmetic from `sdram_simple`'s
-  FSM, not measurement. This is the single most likely thing to be visibly
-  wrong.
+  FSM, not measurement. **The budget has still never been exercised**: until
+  PFRESET-107 the playfield client consumed exactly zero bandwidth, so BUILD
+  105's clean motion objects say nothing about it. This remains the most likely
+  thing to be visibly wrong on the next flash.
 * SDRAM read capture on the DE10-Nano's SDRAM module. The clock/phase pair is
   the Pocket's proven one, but it is a different board and a different part.
 * HSync/VSync placement, and therefore HDMI centring and 15 kHz output. The
@@ -601,20 +686,105 @@ power cycle. Save states are explicitly out of scope for this port.
 * EEPROM persistence — deliberately not wired (see BUILD 103 above); high
   scores do not survive a power cycle on MiSTer.
 
-### Top three things most likely broken on first flash
+### FIRST FLASH RESULT (BUILD 105 on real hardware) — and what it actually was
 
-Ordered by likelihood, with what to actually look at rather than which
-subsystem to suspect.
+BUILD 105 booted, ran attract mode, accepted coins and played level 1. Motion
+objects and alphanumerics were pixel-perfect. **The playfield was a flat fill.**
+
+**None of the three predictions below was the cause. The bandwidth prediction,
+which this document led with, was wrong.** Recorded here in full because the
+elimination argument that produced it was sound and still wrong — the project's
+recurring lesson.
+
+**The measurement that killed the bandwidth hypothesis first.** Bandwidth
+starvation degrades *with load*; a dead client does not. Five fixed background
+patches were sampled across 22 frames of the owner's 77.9 s capture:
+
+| | background patch, median | scene complexity across the run |
+|---|---|---|
+| MiSTer BUILD 105 | **1 distinct colour**, σ 14.9 | 22 115 → 87 227 distinct colours (3.9×) |
+| Pocket BUILD 106 | 1 241 distinct colours, σ 51.3 | 22 727 → 119 073 distinct colours (5.2×) |
+
+The MiSTer playfield is *exactly one colour* per region and stays exactly one
+colour while scene complexity moves by 3.9×. That is not starvation. Two further
+observations narrowed it to one signal:
+
+* the stairs structure appeared as a **correctly shaped black silhouette** — so
+  the tilemap fetch and the per-tile colour attributes were both correct, and
+  only the tile *pixels* were constant;
+* **motion objects read the same repacked graphics region at the same byte
+  addresses** (`escape_mob.v:547` and the PF fetch use the identical
+  `0x120000 + code*32 + row*4` formula) and were perfect — which eliminates the
+  ROM image, the `.mra`, and the loader's invert/planar→chunky repack outright.
+
+Constant tile pixels with a correct tilemap means `pfring0..3` never got
+written, i.e. the playfield graphics channel never completed a fetch.
+
+**Root cause (PFRESET-107).** The playfield fetch pipeline in
+`rtl/escape_mister.v` had **no reset**, and the SDRAM arbiter's SDSCHED-75 reset
+resync ate its requests:
+
+1. `x_count`/`y_count` and the whole PF pipeline free-run from power-on — they
+   are not gated by `core_reset_n`. During the ~2.2 MB ROM download, with the
+   machine held in reset, the pipeline reaches active video and issues a fetch
+   on channel A and then channel B, setting `inflA` and `inflB`.
+2. The arbiter cannot serve them: its entire video tier lives inside the
+   `chk_state == 4'd10` steady-state arm, and `chk_state` is pinned at 0 for the
+   whole download. `pf_pend_q` is gated by `core_rstn_sd` on top of that.
+3. Meanwhile the reset resync runs every clock that `core_rstn_sd` is low and
+   does `vg_req_last <= vg_req_s`, **retiring those two pending request edges
+   without ever completing them**. That resync is correct for the motion
+   objects, because `escape_mob` zeroes its own request toggles and in-flight
+   state under reset — the tracker is following a real reset, not eating a real
+   request. The playfield channel had no reset, so it was the one client for
+   which the resync destroyed work.
+4. Reset releases with `inflA = inflB = 1` and `vg_req_last == vg_req_s`. The
+   issue side requires `!inflA` / `!inflB`, so it never toggles again and the
+   arbiter never sees another pending edge. **Both channels are wedged for the
+   rest of the session**, `pfring0..3` keep their power-on zeros, every tile
+   decodes to pixel index 0, and the screen shows one flat colour per playfield
+   colour attribute — black where that attribute's entry 0 is black.
+
+**Why the Pocket does not show this.** Same resync, same un-reset pipeline — but
+`core_top.v`'s CRAM service arm (line ~1470) is **not** gated by `core_rstn_sd`,
+where this port's `pf_pend_q` is. On the Pocket a pending PF request is served
+as soon as the CRAM chain is free, so the resync only ever rewrites a value that
+already matches. Moving the playfield onto the SDRAM arbiter put it behind that
+extra gate, and nothing here reset the client to compensate. The divergence was
+real, just not the bandwidth one.
+
+**The fix** is to give the playfield channel the same reset the mob gives its
+own: while reset is held the request toggles sit at 0, the resync tracks 0, and
+release starts both sides in agreement with nothing in flight. Ten lines in the
+pixel-domain block.
+
+A second instance of the same bug class was found and fixed alongside it: the
+`if (ioctl_download)` teardown dropped `sd_rd_req` but left the client *owner*
+flags set, and every grant arm requires `!cpu_owner && !mo_owner && !pf_owner &&
+!fpv_owner && !fpe_owner`. Any `ioctl_download` that lands while a read is
+outstanding — i.e. every `.mra` load after the first — wedged the **entire** read
+arbiter. It was invisible because the first load happens before any client is
+active.
+
+**Both are covered by `sim/run_mister_pf_tb.sh`**, which drives the real
+`escape_mister.v` through power-on → download-under-reset → release and counts
+served fetches. See "Verified here".
+
+### Three things predicted to break on first flash (all wrong — kept for the record)
+
+Ordered by the likelihood assigned *before* the flash, with what to look at.
 
 **1. Sprite and tile rows dropping out in busy scenes** — the bandwidth
-prediction above. *Where to look:* play past the attract mode into a crowded
-level and watch sprites specifically, not the whole screen. The signature is
-sprite rows that vanish or repeat the previous line's content, worst on the
-right-hand side of the screen (the deficit accumulates rightward as a line runs
-out of fetch slots), and worse the more robots are on screen. The playfield may
-show the same thing as horizontal bands of stale tile rows. *What it is not:*
-if the machine boot-loops, misbehaves, or the sound breaks up, it is not this.
-*Cheapest response:* lever 1 in the bandwidth section — one line, obvious A/B.
+prediction. **This did not happen.** *Where to look if it ever does:* play past
+the attract mode into a crowded level and watch sprites specifically, not the
+whole screen. The signature is sprite rows that vanish or repeat the previous
+line's content, worst on the right-hand side of the screen (the deficit
+accumulates rightward as a line runs out of fetch slots), and worse the more
+robots are on screen. *What it is not:* if the machine boot-loops, misbehaves,
+or the sound breaks up, it is not this. *Cheapest response:* lever 1 in the
+bandwidth section — one line, obvious A/B. Note that until PFRESET-107 the
+playfield client was consuming **zero** bandwidth, so the budget has not yet
+been exercised at all: the bandwidth question is still open, not disproved.
 
 **2. No picture, or a picture the scaler will not lock to** — sync generation
 is the least-transcribed part of this port. The Pocket emitted one-clock HS/VS
