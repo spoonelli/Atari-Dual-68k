@@ -30,6 +30,11 @@ entity escape_jsa is
         irq_strict : in std_logic := '0';
         uvol_ym    : in  std_logic_vector(2 downto 0) := "111";
         uvol_tms   : in  std_logic_vector(2 downto 0) := "111";
+        -- MIX-100 added uvol_fm to the real entity; a stub that does not
+        -- track the entity it stands in for stops every GHDL bench that uses
+        -- it from elaborating at all (which is how run_worldwake.sh and
+        -- run_vecrace.sh came to be unrunnable on this branch).
+        uvol_fm    : in  std_logic_vector(23 downto 0) := (others => '1');
         audio_l   : out std_logic_vector(15 downto 0);
         audio_r   : out std_logic_vector(15 downto 0);
         dbg_cpu_addr : out std_logic_vector(15 downto 0);

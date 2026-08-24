@@ -1924,7 +1924,7 @@ end
         end
         if(cont1_key[9] & ~rbtn_d) begin
             if(m_trace) tr_back <= tr_back + 7'd1;
-            else        dbgmode <= (dbgmode == 3'd4) ? 3'd0 : dbgmode + 3'd1;
+            else        dbgmode <= (dbgmode == 3'd5) ? 3'd0 : dbgmode + 3'd1;
         end
     end
     // LANE3h3: modes 1-5 RETIRED (answered questions - PF map, input probe,
@@ -1958,6 +1958,23 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // mux level for the apply_stain page, so fields 1 and 3 cost no extra
     // mux depth in the hex row (only field 2 adds a level).
     wire m_stain      = (dbgmode == 3'd4);
+    // CADENCE-107: page 5 = THE CADENCE PAGE, and the only page here that is
+    // not a proxy. field1 = video-CPU logic frames per 256 video frames,
+    // field2 = world-CPU ditto, field3 = the video CPU's bus cycles/frame so
+    // the proxy and the thing it was proxying for can be photographed
+    // together. 0100 hex = 1.0000 updates/frame; MAME's reference for the
+    // same measurement is 0.9977 video / 0.9999 world (docs/PERF_CADENCE.md),
+    // i.e. 00FF/0100. Anything appreciably under 0100 is a missed deadline
+    // rate, in the units the arcade board is quoted in.
+    wire m_cadence    = (dbgmode == 3'd5);
+    // Frame-latched in escape_core; re-latched here at the HUD's own vblank
+    // edge so a digit can never be sampled mid-update. Registers only.
+    reg [15:0] cadv_fr = 16'd0, cadw_fr = 16'd0;
+    always @(posedge clk_sys_7159)
+        if(vblank_w && !vb_hud_d) begin
+            cadv_fr <= dbg_cadv;
+            cadw_fr <= dbg_cadw;
+        end
     reg [7:0] mgreq_cnt, mopen_cnt;
     reg [15:0] moprobe_fr;
     reg [15:0] cst0_px, cst1_px, cst0_m, cst1_m;
@@ -2103,10 +2120,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // attract NEVER resets after boot (extra released once at T=11s,
         // runs forever) - our ~35s reboot loop = a main-CPU death, and this
         // page names it.
-        4'd0:  hex_digit = m_trace ? tr_step[7:4] : m_stain ? stain_px_fr[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
-        4'd1:  hex_digit = m_trace ? tr_step[3:0] : m_stain ? stain_px_fr[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
-        4'd2:  hex_digit = m_trace ? (trace_frozen ? 4'hF : 4'h0) : m_stain ? stain_px_fr[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
-        4'd3:  hex_digit = m_trace ? tr_addr[23:20] : m_stain ? stain_px_fr[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
+        4'd0:  hex_digit = m_trace ? tr_step[7:4] : m_cadence ? cadv_fr[15:12] : m_stain ? stain_px_fr[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
+        4'd1:  hex_digit = m_trace ? tr_step[3:0] : m_cadence ? cadv_fr[11:8]  : m_stain ? stain_px_fr[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
+        4'd2:  hex_digit = m_trace ? (trace_frozen ? 4'hF : 4'h0) : m_cadence ? cadv_fr[7:4]   : m_stain ? stain_px_fr[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
+        4'd3:  hex_digit = m_trace ? tr_addr[23:20] : m_cadence ? cadv_fr[3:0]   : m_stain ? stain_px_fr[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
         // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
@@ -2119,17 +2136,17 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // page 0 field2 = LANE4l max extra bus-cycle length: normal cycles
         // are tiny (< 0x0040); a stuck write shows FFFF = the invisible
         // freeze mode (bus active, rescue can't see it)
-        4'd5:  hex_digit = m_trace ? tr_addr[19:16] : m_stain ? spc_px_fr[15:12] : m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
-        4'd6:  hex_digit = m_trace ? tr_addr[15:12] : m_stain ? spc_px_fr[11:8] : m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
-        4'd7:  hex_digit = m_trace ? tr_addr[11:8] : m_stain ? spc_px_fr[7:4] : m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
-        4'd8:  hex_digit = m_trace ? tr_addr[7:4] : m_stain ? spc_px_fr[3:0] : m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
+        4'd5:  hex_digit = m_trace ? tr_addr[19:16] : m_cadence ? cadw_fr[15:12] : m_stain ? spc_px_fr[15:12] : m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
+        4'd6:  hex_digit = m_trace ? tr_addr[15:12] : m_cadence ? cadw_fr[11:8]  : m_stain ? spc_px_fr[11:8] : m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
+        4'd7:  hex_digit = m_trace ? tr_addr[11:8] : m_cadence ? cadw_fr[7:4]   : m_stain ? spc_px_fr[7:4] : m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
+        4'd8:  hex_digit = m_trace ? tr_addr[7:4] : m_cadence ? cadw_fr[3:0]   : m_stain ? spc_px_fr[3:0] : m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = m_trace ? tr_data[15:12] : m_stain ? lnspan_fr[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? pg2_f3[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = m_trace ? tr_data[11:8] : m_stain ? lnspan_fr[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? pg2_f3[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = m_trace ? tr_data[7:4] : m_stain ? lnspan_fr[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? pg2_f3[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = m_trace ? tr_data[3:0] : m_stain ? lnspan_fr[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? pg2_f3[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_trace ? tr_data[15:12] : m_cadence ? vcyc_fr[15:12] : m_stain ? lnspan_fr[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? pg2_f3[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_trace ? tr_data[11:8] : m_cadence ? vcyc_fr[11:8]  : m_stain ? lnspan_fr[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? pg2_f3[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_trace ? tr_data[7:4] : m_cadence ? vcyc_fr[7:4]   : m_stain ? lnspan_fr[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? pg2_f3[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_trace ? tr_data[3:0] : m_cadence ? vcyc_fr[3:0]   : m_stain ? lnspan_fr[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? pg2_f3[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
         // LANE4c: slot 14 (the gap) shows the crash SOURCE digit on page 2
         // (0=BRAM 1=prefetch 2=cache 3=fresh-SDRAM) - names which serve
         // path delivered the wrong opcode word
@@ -2586,6 +2603,9 @@ escape_stain ustain (
     wire        e_dead;                           // LANE4i freeze rescue
     wire [15:0] dbg_estall;                       // LANE4l stall probe (unused in HUD now)
     wire [15:0] dbg_vcyc, dbg_ecyc;               // LANE4s speed meters
+    // CADENCE-107: logic-frame STARTS per 256 video frames, per CPU, counted
+    // off the game's own re-entrancy flags. 0100 = 1.0000 updates/frame.
+    wire [15:0] dbg_cadv, dbg_cadw;
     wire [15:0] dbg_ewild;                        // LANE4s wild-jump source PC
     wire        dbg_eintab;                       // extra executing data table now
     wire [15:0] dbg_awr;                          // SDSCHED-75 alpha writes/frame
@@ -2764,6 +2784,8 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .dbg_estall     ( dbg_estall ),
     .dbg_vcyc       ( dbg_vcyc ),
     .dbg_ecyc       ( dbg_ecyc ),
+    .dbg_cadv       ( dbg_cadv ),
+    .dbg_cadw       ( dbg_cadw ),
     .dbg_ewild      ( dbg_ewild ),
     .dbg_eintab     ( dbg_eintab ),
     .dbg_awr        ( dbg_awr ),
