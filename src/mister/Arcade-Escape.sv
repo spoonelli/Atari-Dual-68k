@@ -144,6 +144,75 @@ localparam CONF_STR = {
 	"-;",
 	"R[0],Reset;",
 	"-;",
+	// ---------------------------------------------------------------------
+	// About / credits pages.
+	//
+	// MECHANIC: this is the stock MiSTer framework facility, not a hand-rolled
+	// screen.  CONF_STR is a passive byte ROM that hps_io streams to the ARM
+	// side (hps_io.sv command 0x14); the HPS menu renderer does all parsing and
+	// drawing, and sys/osd.v is only a bitmap framebuffer.  So a credits screen
+	// is pure CONF_STR: "Pn,Title;" declares submenu page n, and "Pn-,text;"
+	// puts a non-selectable text line on it.  Same grammar the vendored
+	// third_party/Arcade-Atari-system1_MiSTer uses for its "-;" separators -
+	// a "-" entry with a label is just the non-empty form of the same entry.
+	// No sys/ change, no extra RTL, no new ports.
+	//
+	// FORMAT LIMITS, and what they cost us: sys/osd.v is OSD_WIDTH = 256 px
+	// with an 8 px font = 32 columns, less the selection gutter, so lines are
+	// kept to <= ~26 characters and wrap by hand.  CONF_STR uses ',' as its
+	// field separator and ';' as its terminator, so NEITHER can appear inside
+	// a label - that is the only reason the "Thanks" line below is not comma
+	// separated.  docs/MISTER.md carries the full, unabridged attributions
+	// with the punctuation and the URLs intact; nothing is dropped here.
+	"P1,About;",
+	"P1-;",
+	"P1-,Atari Dual 68k - EPROM;",
+	"P1-;",
+	"P1-,@spoonelli_dev;",
+	"P1-;",
+	"P1-,Escape from the Planet;",
+	"P1-,of the Robot Monsters;",
+	"P1-,Atari Games 1989;",
+	"P1-;",
+	"P1-,Core is GPL-3.0.;",
+	"P1-,Requires your own MAME;",
+	"P1-,eprom romset. No ROM;",
+	"P1-,data is included.;",
+	"P2,Credits 1/2;",
+	"P2-;",
+	"P2-,Thanks:;",
+	"P2-,LMSS DJS LCS TBPL EG;",
+	"P2-;",
+	"P2-,RTL base (GPL-3.0):;",
+	"P2-,MiSTer-devel;",
+	"P2-,Arcade-Atari-system1;",
+	"P2-,by d18c7db (Alex);",
+	"P2-,incl. TMS5220 speech;",
+	"P2-;",
+	"P2-,Both 68000s: TG68K.C;",
+	"P2-,Tobias Gubener;",
+	"P2-,(TobiFlex) LGPL-3.0;",
+	"P2-,patches by MikeJ;",
+	"P2-,Till Harbaum and;",
+	"P2-,Rok Krajnc + others;",
+	"P3,Credits 2/2;",
+	"P3-;",
+	"P3-,JSA-I 6502: T65 by;",
+	"P3-,Daniel Wallner;",
+	"P3-;",
+	"P3-,YM2151: jt51 by Jose;",
+	"P3-,Tejada (jotego);",
+	"P3-,GPL-3.0;",
+	"P3-;",
+	"P3-,Behavioral reference;",
+	"P3-,only: MAME and Aaron;",
+	"P3-,Giles (eprom.cpp;",
+	"P3-,BSD-3-Clause). No;",
+	"P3-,MAME source copied.;",
+	"P3-;",
+	"P3-,Pocket framework:;",
+	"P3-,openFPGA + Analogue;",
+	"-;",
 	"J1,Jump,Fire,Duck,Bomb,Start,Coin;",
 	"jn,A,B,X,Y,Start,Select;",
 	"V,v",`BUILD_DATE

@@ -597,6 +597,67 @@ there is no `<switches>` block in the `.mra` and no `ioctl_index == 254` path.
 and it resets with the core, so bookkeeping and high scores do not survive a
 power cycle. Save states are explicitly out of scope for this port.
 
+### About / Credits pages
+
+Three OSD submenu pages — **About**, **Credits 1/2**, **Credits 2/2** — sit
+between `Reset` and the joystick entries.
+
+**The mechanic is the stock MiSTer framework's, not something invented here.**
+In this framework the FPGA never parses `CONF_STR`: `sys/hps_io.sv` stores it as
+a passive byte ROM and streams it to the ARM side one byte per strobe (HPS
+command `0x14`, `hps_io.sv` line 394), and `sys/osd.v` is a dumb 256×64 bitmap
+framebuffer with no font and no menu logic. All grammar and drawing happen in
+`Main_MiSTer`'s C++. A credits screen is therefore pure `CONF_STR`:
+
+* `"Pn,Title;"` declares submenu page *n* (1–9),
+* `"Pn-,some text;"` puts a non-selectable text line on that page.
+
+`"-,text;"` is simply the non-empty form of the `"-;"` separator that
+`third_party/Arcade-Atari-system1_MiSTer` already uses six times in its own
+`CONF_STR` (`Arcade-atarisys1.sv` lines 261–277). No `sys/` change, no new
+ports, no new RTL — only the string in `src/mister/Arcade-Escape.sv`.
+
+**Two format limits, and what they cost.** `osd.v` is `OSD_WIDTH = 256` px with
+an 8 px font, so 32 columns before the selection gutter; lines here are kept to
+about 26 characters and wrapped by hand. More awkwardly, `CONF_STR` uses `,` as
+its field separator and `;` as its terminator, so **neither character can appear
+inside a label**. That is the only reason the thanks line renders as
+`LMSS DJS LCS TBPL EG` rather than the comma-separated original. Nothing is
+dropped; the unabridged text is immediately below and in `README.md`.
+
+### Full attribution (unabridged)
+
+The OSD pages are a hand-wrapped rendering of this. This section is normative;
+the OSD is a convenience.
+
+> Thanks: LMSS, DJS, LCS, TBPL, EG
+
+* This core is **GPL-3.0**. It requires the user's own MAME `eprom` romset.
+  **No ROM data is included** in this repository or in any artifact it builds.
+* **d18c7db (Alex)** and **MiSTer-devel** for
+  [`Arcade-Atari-system1_MiSTer`](https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer)
+  (GPL-3.0), the schematic-based Atari System 1 core this project's RTL base was
+  derived from — including the MAME-faithful **TMS5220** speech chip model
+  (vendored at `src/fpga/core/rtl/TMS5220.vhd` with a lattice-filter arithmetic
+  fix, provenance noted in the file header). **This is the MiSTer-devel lineage
+  this port stands on and it is credited first on the Credits pages.**
+* **Tobias Gubener (TobiFlex)** for the **TG68K.C** 68000 soft-CPU core
+  (LGPL-3.0, with patches by MikeJ, Till Harbaum, Rok Krajnc and others) — both
+  of this core's 68000s are TG68K instances, via the System 1 tree.
+* **Daniel Wallner** for the **T65** 6502 core (BSD-style license, via OpenCores
+  / the System 1 tree), reused for the JSA-I sound board's 6502.
+* **Jose Tejada (jotego)** for [`jt51`](https://github.com/jotego/jt51), the
+  YM2151 FM synthesis core used by the JSA-I audio subsystem (GPL-3.0, included
+  as a git submodule with license and history intact).
+* **MAME** and **Aaron Giles**, author of the Atari Escape driver
+  (`src/mame/atari/eprom.cpp`, `license:BSD-3-Clause`,
+  `copyright-holders: Aaron Giles`) and the supporting device models
+  (`atarijsa`, `atarimo`, `slapstic`). The MAME driver was used purely as a
+  **behavioral reference**; **no MAME source code is copied into this
+  repository**.
+* The **openFPGA** community and **Analogue** for the Pocket core framework
+  ([`open-fpga/core-template`](https://github.com/open-fpga/core-template)).
+
 ---
 
 ## What is verified / what is not
