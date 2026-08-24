@@ -98,7 +98,10 @@ headroom on an average frame. The **tail** sits at 96-99% of the deadline, so a
 crowd tips individual frames over and the game visibly hitches. Recovering a
 clock moves the tail from the edge to ~90%.
 
-It also **frees 32 M10K blocks** against the 308-block ceiling, which is the
+It also **frees 25 M10K blocks** against the 308-block ceiling — measured, not
+estimated: the `vshad3-off` CI build fits at **283/308** against the shipping
+branch's **308/308**. (The instance is 32 KB, i.e. 32 blocks' worth of data, but
+the fitter repacks; 25 is the number that matters.) That ceiling is the
 constraint every other change in this project has to fight.
 
 ## 4. Why it is NOT flipped in this branch
@@ -123,7 +126,11 @@ one risk I cannot measure and one methodological point.
 
 1. In `src/fpga/core/core_top.v`, add `.VSHAD3_EN(0)` to the `escape_core`
    instantiation (or change the generic default in `escape_core.vhd:23`).
-2. Build. The fit is the M10K gate: it should now have 32 blocks of headroom.
+2. Build — or just use the `vshad3-off` branch, which is exactly this change
+   and has already been through CI: **fit 283/308 M10K**, timing gate green on
+   all 64 clock/corner rows, worst setup **+5.031 ns**, worst hold **+0.041 ns**
+   (shipping branch: 308/308, +4.903, +0.093). So the fit and the timing are
+   known before anyone flashes it; only the speed question is open.
 3. On the device, **HUD page 5** (press R to cycle to mode 5 — the mode digit is
    the rightmost slot of the hex row). Field 3 is the video CPU's bus
    cycles/frame, the same proxy as page 0: expect it to rise from ~22,200
