@@ -600,6 +600,38 @@ The measurement bug is now mechanical rather than remembered — the project's
   *transcription* of the one in `core_top.v`, not the shipped instance, so it
   cannot catch a divergence introduced in `core_top.v` itself.
 
+### Resource check: NOT MEASURED in this session
+
+The M10K delta for the HUD page was **not** measured. Quartus 18.1 runs under
+x86 emulation on this ARM machine at roughly 60+ minutes for a full compile and
+30+ minutes for Analysis & Synthesis alone; neither the base nor the changed
+tree finished. Saying so rather than quoting a number is the point of this
+whole document.
+
+The static argument is strong but it is an argument, not a measurement: the
+change declares **only scalar registers** —
+
+```
+reg [15:0] stain_px, stain_px_fr, spc_px, spc_px_fr, lnspan_fr;
+reg [ 7:0] ln_first, ln_last;
+```
+
+— and no array of any kind, and Quartus can only infer block RAM from an array
+indexed by a variable. It also *removes* the last consumers of `cst0_px` /
+`cst1_px` and the CRAM-sum path, which can only reduce logic. Expected M10K
+delta is therefore 0, but **confirm it before flashing**:
+
+```bash
+docker run --rm --platform linux/amd64 \
+  -v <worktree>:/work -v <repo>/third_party:/work/third_party:ro -w /work/src/fpga \
+  theypsilon/quartus-lite-c5:18.1 \
+  bash -c "quartus_sh --flow compile ap_core"
+grep -iE "M10K|block memory" src/fpga/output_files/ap_core.fit.rpt
+```
+
+and diff that against the same grep on `origin/tas-atomic`. The design sits at
+the 308-M10K ceiling, so a single newly inferred block fails the fit outright.
+
 ### Still outstanding
 
 **Extract the stain automaton from `core_top.v` into its own module** so that
