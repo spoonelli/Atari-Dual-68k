@@ -174,3 +174,57 @@ $MAME/mame eprom -rompath <romdir> -video none -sound none -nothrottle \
 # detector + its three controls
 python3 sim/tools/dash_detect.py /tmp/pfm/frames.raw
 ```
+
+## 7. Independent confirmation: the killed-playfield capture
+
+`nz/vdbg.raw` (1145 frames) is the RT debug view: flat background
+`rgb(75,110,106)`, the alpha layer, and the black index-0 playfield silhouette.
+Anything else on that background is unambiguous.
+
+Two cautions first, both learned the hard way in this session:
+
+* A naive "non-background pixel" scan returns **1,496 stray pixels** on frames
+  892-903. Those are the **"Tap JUMP to speed up" alpha banner** — legitimate
+  game content. Alpha-layer text is the third thing (after our hex bar and the
+  status line) that an automated stray-pixel detector will rediscover.
+* HUD rows must be excluded **with margin**: status `0-11`, hex bar `96-128`,
+  game HUD `192-239`.
+
+What survives both: a small cluster of genuinely black pixels at **native rows
+35-40, x 222-227** on frame 900. The flat background sums to 291 across RGB
+(75+110+106); those pixels sum to **2, 8, 12, 13, 15, 17**. Compression noise
+around a 291 background does not produce 2.
+
+Their persistence against frame 892, for frames 892-903, is
+
+```
+1 0 1 0 1 0 1 0 1 0 1 0
+```
+
+i.e. **exactly a 2-frame alternation** — identical on even offsets, different
+on odd. This is the same 30 Hz parity toggle measured independently in
+`nz/v107b.raw` frames 68-73, and it is decisive against corrupt data at rest.
+
+So in a mode where the playfield is disabled, **pen-0 pixels still reach the
+screen, on a flat background, toggling with frame parity**. Combined with
+section 3(c) — one end world-anchored, the other pinned to the end of the
+scanline — the surviving mechanism is the MO/stain path, not playfield tile
+data and not the scaler.
+
+## 8. Task 2 note: what BUILD 107 actually runs at
+
+`sim/tools/read_hud.py` over 173 cleanly decoded HUD frames of the BUILD 107
+capture (t=30-118 s), HUD page 0:
+
+| | BUILD 107 measured | MAME 1P reference | ratio |
+|---|---|---|---|
+| video CPU bus cycles/frame | **22,203** (p10 21,673 / p90 22,820) | 25,630 | **0.866** |
+| extra CPU bus cycles/frame | **20,509** (p10 19,201 / p90 22,681) | 22,244 | **0.922** |
+
+This reproduces the BUILD 106 figures (22,233 / 20,340) to **-0.1% on the video
+CPU and +0.8% on the extra CPU**.
+
+**That answers the open question about the refresh change directly: BUILD 106's
+250 -> 160 refresh threshold, which raised refresh occupancy from 4.4% to 6.9%,
+cost the CPUs nothing measurable.** There is no case for touching it back, and
+doing so would re-open a genuine JEDEC retention violation.
