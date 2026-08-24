@@ -421,6 +421,82 @@ per row that converge downward. Rows 158..167 are untouched.
 The marker is a single MO entry: every slip band's pointer is `0x0001`, a 3x3
 tile special sprite at depth 0 of a one-entry list, spanning rows 150..173.
 
+### BUILD 106: the shortfall was mostly MEMORY TIMING, and the "100%" target was wrong
+
+BUILD 106 changed **no graphics RTL** — the stain path is byte-identical to 105.
+It corrected two constants derived from a wrong `clk_sdram` figure (35.795455
+MHz, not 85.909): the PSRAM controller's wait states, and an SDRAM refresh
+interval that was **8.33 us worst case against a 7.81 us JEDEC retention
+limit** — i.e. genuinely out of spec on the memory holding sprite graphics.
+Stain coverage went 0.3% -> 3.2% -> 27% across 102/105/106. An 8.4x change from
+memory timing alone says most of the missing stain was **corrupted sprite tile
+data**, not a compositor fault.
+
+**The remaining gap is much smaller than it looked, because the target was
+wrong.** The marker *blinks*, 10 frames on / 10 frames off, and MAME blinks
+identically. Measuring the same 32x23 box, same grey threshold, in the same
+blink phase:
+
+| | grey / lit | share |
+|---|---|---|
+| MAME **phase A** (grey hexagon) | 195 / 292 | **66.8%** |
+| MAME **phase B** (coloured cube) | 0 / 292 | **0.0%** |
+| hardware 102 | 1 / 292 | 0.3% |
+| hardware 105 | 17 / 292 | 5.8% |
+| hardware 106 | 179 / 292 | **61.3%** |
+
+MAME never stains the whole box — it also contains the neighbouring blue
+canal-maze block and the "START" text, which are never stained. **66.8% is the
+ceiling, and BUILD 106 is at 61.3% of 292, a residual of ~16-21 pixels.** Any
+comparison that does not match the blink phase is meaningless: a phase-B frame
+should contain *no* grey at all, so grey measured there is excess, not
+shortfall.
+
+Aligning the two grey masks (best fit `dx=0, dy=0`, overlap 174/195) the
+residual is systematic and one-sided:
+
+```
+ y    MAME span      HW106 span     dLeft dRight
+163   34..52(19)     36..53(18)      +2    +1
+164   34..52(19)     36..53(18)      +2    +1
+165   34..51(18)     36..51(16)      +2    +0
+166   34..51(18)     36..51(16)      +2    +0
+167   34..51(18)     36..51(16)      +2    +0
+168   34..51(18)     36..51(16)      +2    +0
+169   34..51(18)     35..51(17)      +1    +0
+171   38..47(10)     40..47( 8)      +2    +0
+```
+
+21 pixels are MAME-grey but not hardware-grey, almost all in columns 34-35 and
+along the lower-left diagonal; 6 are hardware-grey but not MAME-grey, all on
+the right edge. **Each row's stain starts 1-2 pixels late and ends on time.**
+
+### Which candidate explains the residual
+
+* **(d) "the whole silhouette should convert" — WRONG, and it was the biggest
+  error.** MAME stains 66.8% of that box, not 100%. Quantify the reference
+  before calling something a shortfall.
+* **(a) ownership vs coverage — REFUTED.** MAME's `apply_stain` also reads a
+  single MO bitmap, so it is ownership-based too; and every slip band on this
+  screen points at the same **one-entry** list, so there is nothing that could
+  overdraw the special.
+* **(b) automaton terminating runs early — REFUTED, measured.** Replaying the
+  RTL's own 296 special pixels through the C loop and the recurrence gives
+  **320 stained each, 0 lines differing** (`check_stain_automaton.py`).
+* **(c) residual data corruption — not excluded, but unlikely to be all of
+  it.** The residual is a systematic edge, not random pixels.
+
+That leaves a **1-2 pixel right-displacement of the stain relative to the
+playfield**, which is exactly the class of bug no bench here can see:
+`tb_mob.v` explicitly compensates the registered line-buffer read with
+`pf_sx = visible_x - 1`, and `core_top.v` — where the stain and the colour
+address actually live — is in no bench at all. **Do not ship a one-pixel shift
+on this evidence:** the same capture shows gameplay frames matching MAME at
+**0 differing pixels**, which says the MO layer as a whole is correctly
+aligned, so a global shift would break more than it fixes. Bench the
+compositor first (see "Still outstanding"), and note that H.264 ringing at a
+high-contrast edge is itself worth +-1 px of the measurement.
+
 ### What is still open
 
 Why only ~17% converts. The counters below are built to answer exactly that,
