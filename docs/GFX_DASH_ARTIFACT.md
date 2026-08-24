@@ -321,13 +321,15 @@ native 512x20 M10K geometry; a 21st bit doubles both line buffers.
 | `sim/run_mob_order_check.sh` | `b_shorter=0` on all four cells |
 | `sim/run_prio_tb.sh` | 507904/507904 |
 | `sim/run_psram_tb.sh` | PASS, negative control rejected |
-| CI fit | 0 errors — the 308-M10K ceiling is the gate, so this is the M10K delta-0 evidence |
-| CI timing | all 64 clock/corner rows non-negative; worst setup **+4.572 ns**, worst hold **+0.124 ns** (BUILD 107: +5.197 / +0.118) |
+| CI fit | **M10K 308/308**, block memory bits 2,496,512 — byte-identical to BUILD 107. M10K delta **0, measured**, not argued |
+| CI timing | all 64 clock/corner rows non-negative; worst setup **+4.903 ns**, worst hold **+0.093 ns** |
 
-The 0.625 ns of setup slack is a real number and it is reported rather than
-explained away — but it is **two builds**, and Quartus seed variance on this
-design is of that order, so it should not be attributed to this change without a
-repeat build. Both are comfortably positive and the gate passes.
+Setup slack across three builds of this design: **+5.197** (BUILD 107),
+**+4.572** (this change alone), **+4.903** (this change plus the cadence page,
+which adds a mux level to the HUD hex row). The middle build is the *smaller* of
+the two that contain the change, so the spread is seed variance, not a cost of
+the fix; nothing here should be attributed to a single 0.6 ns move. All three are
+comfortably positive and the gate passes on every row.
 
 **What still needs the owner's hardware.** Whether this is the whole of the
 artifact they see. Everything above is simulation and CI. The mechanism
