@@ -9,6 +9,15 @@ Everything below is either a schematic citation, a measurement with the command
 that produced it, or an explicitly-labelled model. Where a claim is inferred, it
 says so. Where it needs the physical board, it says that too.
 
+> **2026-08-24 — Question 1 is answered: the board is a 68010.** The owner
+> photographed the part on his dedicated-cabinet board: **`MC68010P8`**,
+> Motorola, date code **`A71R8813`**. The schematic agreed all along. §1.1 was
+> right, §1.2's contested "production boards carry 68000s" claim is **false**,
+> and §1.5 (what to check on the board) is **done**. §1.3 and §1.4 — the
+> measurements showing it makes no observable difference — are unaffected and
+> still stand. The remaining unknown is the **JAMMA** version of the board; see
+> §1.6.
+
 ---
 
 ## Part 1 — CPU type
@@ -37,9 +46,29 @@ Nothing else on those sheets discriminates. The 68000 and 68010 are pin-identica
 
 **The owner is right about the schematic. The README was wrong to imply otherwise.**
 
-### 1.2 Provenance of "production boards carry 68000s" — traced
+**And the board agrees with the schematic.** Photographed 2026-08-24, the part in
+the socket is marked:
 
-This half of the README claim traces to exactly one place:
+| Field | As photographed |
+|---|---|
+| Part number | **`MC68010P8`** |
+| Manufacturer | Motorola |
+| Date code | **`A71R8813`** |
+
+An `MC68010P8` is a 68010 in a 64-pin plastic DIP, 8 MHz rated — comfortable for
+the board's 7.159 MHz. This is the record that §1.5 asked for and it closes the
+question for the dedicated-cabinet board.
+
+A third, independent corroboration was sitting in the reference material the
+whole time: Atari's own JSA documentation, reproduced in MAME's
+`reference/atarijsa.cpp:50,58`, labels the host interface the "Read/Write
+**68010** Port".
+
+### 1.2 Provenance of "production boards carry 68000s" — traced, and refuted
+
+**This claim is false.** The photograph above settles it. This section is kept
+because *how* a false claim got into six documents and two RTL comments is worth
+recording. It traces to exactly one place:
 
 ```
 commit 24d900e  "docs: CPUs are 68000s on real boards, not 68010s"
@@ -52,11 +81,12 @@ Co-Authored-By: Claude Fable 5
 ```
 
 That commit is the origin of every downstream restatement (`README.md`,
-`docs/ARCHITECTURE.md:87`, `docs/POCKET_TEST.md`, and the `DEVIATIONS.md` C5 row
-written on top of them).
+`docs/ARCHITECTURE.md:87`, `docs/HISTORY.md:12`, the two `escape_core.vhd`
+comments, and the `DEVIATIONS.md` C5 row written on top of them). All have now
+been corrected.
 
-**Assessment: weakly sourced, not fabricated.** It is attributed to the owner's
-own board, which is a real source. But:
+**Assessment: weakly sourced, and wrong.** It was attributed to the owner's own
+board, which is a real source — but:
 
 - no photograph, part marking, date code, or designator was recorded;
 - the commit message was drafted by an LLM in the owner's session, so the chain
@@ -70,9 +100,16 @@ regardless of the schematic label" is a claim about *all* production, from a
 sample of one board, and `DEVIATIONS.md` C5's framing ("the one recorded case
 where MAME wins") presents a contested point as settled.
 
-**So: treat the schematic label as established fact, and the 68000 population
-claim as a single unphotographed observation of one board.** Corrections have
-been made to `README.md`, `docs/ARCHITECTURE.md` and `docs/DEVIATIONS.md`.
+Worse, `docs/HISTORY.md:12` recorded it as "**photo-verified**" — a photograph
+that did not exist. That single word is what made the claim look unassailable
+for two weeks.
+
+**Verdict: the schematic label was established fact and always was; the 68000
+population claim was a single unphotographed observation, and it was wrong.**
+The lesson is not "trust the schematic over the board" — it is that an
+unrecorded glance at a chip is not a measurement, and that this project's own
+standard (a check that can fail, with the evidence attached) applies to
+hardware inspection exactly as it applies to a simulation.
 
 ### 1.3 Does it matter for CORRECTNESS? No — measured, not assumed
 
@@ -129,6 +166,70 @@ There is one vestigial 68000 idiom (extra `$0384`, `$097C`): a hand-built 6-byte
 user-mode RTE frame. On a 68010 that would take a format error — but the `rte`
 was replaced by `jsr $F93A`, so the frame is never consumed. Inert either way.
 
+#### 1.3.1 The stack frame, re-verified independently — and the stronger claim
+
+"No handler reads a format word" is **not** the claim that matters. Push and pop
+are both in 68010 mode, so `RTE` is self-consistent by construction: TG68K's
+`trap0`→`trap1` pushes the extra word and `rte1`→`rte2`→`rte3` pops it
+(`TG68KdotC_Kernel.vhd:3760, 3835-3843`). What would actually break a live
+machine is a handler doing **pointer arithmetic around the frame** — indexing
+past it, or discarding it with a hard-coded `addq #6,A7`.
+
+That was re-checked from scratch, by a different method than §1.3's:
+
+**The bound that makes this tractable.** `RTE` is the only instruction that
+consumes an exception frame, it is the single opcode word `$4E73`, and the
+68000/68010 fetch instructions only at even addresses. So scanning both images
+for `$4E73` at every even offset is not a sample — it is **exhaustive over
+everything that can possibly execute an RTE**. Result:
+
+| Image | `$4E73` at any even offset | Real, reachable handlers |
+|---|---|---|
+| maincpu (512 KB) | **4** — `$005E2`, `$00692`, `$01398`, `$202E0` | 3 (`$202E0` is ASCII: it is the `"Ns"` inside padding after `"15 Maximum\0"`) |
+| extra (512 KB) | **4** — `$00306`, `$00318`, `$00842`, `$00942` | 3 (`$00842` sits in a zero-filled data table) |
+
+**Every reachable handler is stack-balanced, and not one touches the frame.**
+
+| Handler | Entry | Body | A7 depth at `RTE` |
+|---|---|---|---|
+| main L4 vblank | `$005CC` `movem.l D0-D1/A0-A1,-(A7)` (−16) | two exits: `$005DE` and `$0068E`, both `movem.l (A7)+,D0-D1/A0-A1` (+16) | **0** at `$005E2` and `$00692` |
+| main L6 sound | `$0134C` `movem.l D0/A0-A1,-(A7)` (−12) | operands are all `d(A1)` off `$3F7F62`, never `d(A7)` | **0** at `$01398` |
+| extra L6 sound | `$00306` | bare `rte` — the handler is one instruction | **0** |
+| extra L4 vblank | `$00308` | `btst`/`beq $318` (bare `rte`) or `jmp $8F6` | **0** |
+| extra vblank body | `$008F6` `movem.l D0-D1/A0-A1,-(A7)` (−16) | all three exits converge on `$0093E` `movem.l (A7)+,…` (+16) | **0** at `$00942` |
+
+**Zero `d(A7)` accesses occur anywhere inside any handler body**, and no
+`addq/subq/lea/adda/suba` on `A7` occurs between any handler entry and its
+`RTE`. The abundant `addq.l #4,A7` / `lea $10(A7),A7` sites elsewhere in both
+images (437 and 154 respectively) are ordinary caller-side argument cleanup
+after `jsr`, at stack depths *below* any exception frame; the general point is
+that the extra 2 bytes shift only what lies **at and above the handler's entry
+A7**, and everything a handler pushes afterwards moves with it en bloc.
+
+Two near-misses, both checked and both benign:
+
+- **extra `$0098E move.w $6(A7),SR`** — superficially a format-word read. It is
+  not a handler: nothing vectors to it, it ends in `RTS` not `RTE`, and its
+  `6(A7)` is a caller-pushed argument relative to its own `jsr` return address.
+- **The reboot idiom** (main `$0060A`, extra `$0095E`): `suba.l A0,A0` /
+  `movea.l (A0)+,A7` / `movea.l (A0),A0` / `jmp (A0)`. This *abandons* the frame
+  rather than unwinding it — it reloads A7 from the reset SSP at `$000000` and
+  re-enters via the reset PC at `$000004`. Frame-size-agnostic by construction.
+
+**VBR is provably zero for the life of the machine.** TG68K resets it to zero
+(`TG68KdotC_Kernel.vhd:4056`) and only `MOVEC` can write it (`:4064`) — and the
+even-offset opcode scan finds **no `$4E7A`/`$4E7B` anywhere in either 512 KB
+image**. So vector fetching in 68010 mode is bit-identical to 68000. (This
+reproduces §1.3's `MOVEC` result by an independent method.)
+
+**Only two kernel features actually change.** Read off the generic defaults at
+`TG68KdotC_Kernel.vhd:138-145`: `SR_Read` and `VBR_Stackframe` key on `CPU(0)`,
+while `extAddr_Mode`, `MUL_Mode`, `DIV_Mode` and `BitField` key on `CPU(1)` —
+which is `0` for both `"00"` and `"01"`. So `"00"→"01"` flips exactly those two,
+and both are inert here: the frame change per above, and the privilege change
+because `:2082` permits `MOVE from SR` whenever `SVmode='1'`, which §1.3 measured
+to be true at all 7 sites on every sample.
+
 **Dynamic confirmation, with the detector proven able to fire.** A vector-fetch
 tap (with PC attribution, so genuine exception fetches are distinguished from the
 ROM self-test's checksum sweep of the same bytes) over 400 s / ~24,000 frames of
@@ -154,9 +255,11 @@ per-frame body at `$0924`, *after* the ROM self-test passes:
 freezes and its PC sticks inside the `STOP` catch-all. The detector fires; the
 clean run is a real negative.
 
-> **Correctness verdict.** The code requires no 68010 behaviour. TG68K as a
-> 68000 is correct. Note the finding is *one-directional*: the code would also
-> run unmodified on a 68010. Nothing in the ROM distinguishes the two parts.
+> **Correctness verdict.** The code requires no 68010 behaviour, and it
+> tolerates all of it. Nothing in the ROM distinguishes the two parts, in
+> either direction — TG68K is correct here as `CPU=>"00"` **and** as
+> `CPU=>"01"`. Since the board is a 68010, `"01"` is the authentic setting;
+> since the ROM cannot tell, the choice is free.
 
 ### 1.4 The one that could have mattered: LOOP MODE — measured, and it is zero
 
@@ -243,27 +346,61 @@ The cadence gap being chased is 0.973 vs 0.9977 ≈ **2.5 %**. The ceiling is
 > **This line of inquiry is closed.** (See Part 2.3 for the effect that pushes
 > the real board the *other* way.)
 
-### 1.5 What the owner should check on the physical board
+### 1.5 What the owner checked on the physical board — DONE
 
-The question is not settled by anything in the repo, and only the board can
-settle it. Two 64-pin DIPs:
+This section used to say what to record. It has been recorded.
 
-| Which CPU | Designator | Where to look |
+| Which CPU | Designator | Result |
 |---|---|---|
-| **Video CPU** (`VCPU`) | **45J** | Near the IPL/interrupt logic and the 60H/60F LS257 address muxes; adjacent to the SLAPSTIC at 60E |
-| **World CPU** (`ECPU`) | **20P** | Adjacent to the 10S/17S/25S and 10U/17U/25U 27512 EPROM banks |
+| **Video CPU** (`VCPU`) | **45J** | drawn `U68010` on sheet 4 |
+| **World CPU** (`ECPU`) | **20P** | drawn `U68010` on sheet 5 |
+| **Photographed part** | — | **`MC68010P8`**, Motorola, date code **`A71R8813`** |
 
-Atari's grid designators are column-letter + row-number, silkscreened next to the
-socket. What to record: **the full part marking on the chip**, e.g.
-`MC68000P8` / `MC68000P10` vs `MC68010P8` / `MC68010P10`, plus the date code —
-and a photograph, so the answer does not have to be taken on trust a second time.
-Check **both** sockets: there is no guarantee they are populated with the same
-part.
+**And it changed nothing in this core**, exactly as predicted: §1.3 shows the
+code needs no 68010 feature and tolerates all of them, §1.3.1 shows no handler
+does frame arithmetic, and §1.4 shows loop mode is never entered. The value of
+checking was closing a documentation question honestly. It also closed it in
+the *opposite* direction to what the docs had claimed, which is the more useful
+outcome.
 
-**But note what the answer changes: nothing in this core.** Whatever the marking
-says, §1.3 shows the code needs no 68010 feature and §1.4 shows loop mode is
-never entered. The value of checking is closing a documentation question
-honestly, not unblocking any RTL work.
+### 1.6 What is still open: the JAMMA board
+
+Escape also existed in a JAMMA version, and **nothing in this repo can say what
+CPU it carries.** Stated plainly so nobody reads §1.5 as more general than it is:
+the photograph is of **one dedicated-cabinet board**, and the population claim
+that got this wrong the first time was also from one board.
+
+What the repo's schematic material actually is:
+
+- `reference/schematics/Escape_Schematic_Package.pdf` — **SP-332, 1st printing,
+  © 1989 Atari Games Corporation**, 17 pages (cover + 16 sheets). It is a raster
+  scan with **no text layer**, so it cannot be grep'd; everything above came from
+  high-DPI renders of specific fields.
+- It is **dedicated-cabinet documentation**. Sheet 1's Main Wiring Diagram shows
+  discrete keyed Atari connectors (`PPWR`, `JSCM`, `JPL`, `JPJS`, `JCOM`, plus
+  separate video/coin-door/fluorescent harnesses) — **no 56-pin JAMMA edge
+  connector anywhere.**
+- It contains **no parts list, no BOM, no ECN, and no revision-history page**.
+
+Search leads for the JAMMA package, offered as leads and not as findings:
+
+| Item | Value |
+|---|---|
+| Escape Main PCB assembly | **`046145`** — sheets 2-10 stamped `A046145-01 D`; Sheet 1 cites the wildcard `046145-XX` |
+| Stand-alone audio PCB | `043713` — sheets 11-14 stamped `A043713-XX D` |
+| Main wiring diagram | `046977-01 A` |
+
+The `-XX` wildcards are the only hint in the package that more than one dash
+number exists. **This is not evidence that a `-02` exists, still less that it is
+JAMMA** — but `046145` is the number to search on.
+
+MAME is no help here either: `reference/eprom.cpp` defines `eprom`, `eprom2`,
+`klaxp1`, `klaxp2` and `guts`, and `docs/ROMMAP.md:47` records `eprom2` as purely
+a program-ROM revision ("same layout, all-rev-1 program ROMs"). No set
+corresponds to a cabinet style, and all five are instantiated as `M68000`.
+
+If the JAMMA board turns out to carry 68000s, this core already supports that in
+one place — see `DEVIATIONS.md` C5.
 
 ---
 
@@ -452,7 +589,7 @@ the board pays ~1-2 % per frame that neither we nor MAME model. That is a
 Worth stating on its own, because it inverts the premise that motivated
 Question 1.
 
-The concern was that if the board were a 68010 with loop mode, **MAME would be
+The concern was that since the board is a 68010 with loop mode, **MAME might be
 slower than the board**, our 0.9977 target would be too low, and the gap would be
 unclosable by memory tuning. Both halves of this investigation push the *other*
 way:
@@ -502,7 +639,8 @@ fields need ~1200 dpi and a crop, and the labels are rotated 90°.
 
 ## What is measured, what is inferred, what needs the board
 
-**Measured:** the schematic part numbers and designators; the arbiter topology;
+**Measured:** the part marking and date code on the physical CPU (photograph);
+the schematic part numbers and designators; the arbiter topology;
 image-equality between our ROM builds and MAME's program space; the complete
 vector tables and every handler's disassembly; absence of MOVEC/RTD at any
 alignment; 400 s of vector-fetch counts with the detector falsified four ways;
@@ -517,6 +655,12 @@ M10K block counts (no Quartus fitter report is committed to this repo — the
 283/308 figure exists only as prose in `docs/VSHAD3.md`); the collision counts in
 §2.3, which are arithmetic on measured rates, not observed collisions.
 
-**Needs the physical board:** the actual part marking on **45J** and **20P**.
-That is the only open question, and §1.5 says what to record. It changes nothing
-in the RTL either way.
+**Settled by the physical board:** the part marking is **`MC68010P8`** (Motorola,
+date code `A71R8813`), photographed — §1.5. The board is a 68010, as the
+schematic always said. It changes nothing measurable in the RTL.
+
+**Still needs evidence from outside this repo:** whether the **JAMMA** version of
+the board carries the same part — §1.6. There is no JAMMA schematic package, no
+parts list and no ECN material here, and a case-insensitive search of the whole
+tree for JAMMA/conversion-kit material returns nothing in any project-authored
+file. Closing that requires the JAMMA package or a photographed JAMMA board.
