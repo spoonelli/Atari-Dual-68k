@@ -94,7 +94,10 @@ sim/                                     GHDL simulation harness + testbenches
 support/build_rom.py                     assemble user ROM dumps -> atari_escape.rom
 support/package.sh                       build a Pocket SD-layout release zip (no ROMs)
 reference/                               MAME driver sources; schematics stay local-only
+docs/PIPELINES.md                        how the data/processing pipelines should work
+docs/RETROSPECTIVE.md                    how it was debugged, incl. the false turns
 docs/ARCHITECTURE.md                     hardware map, roadmap, schematic findings
+docs/DEVIATIONS.md                       where this core is not the board, measured
 docs/ROMS.md, docs/POCKET_TEST.md        ROM building; on-device test guide
 third_party/                             Arcade-Atari-system1_MiSTer submodule (RTL base)
 ```

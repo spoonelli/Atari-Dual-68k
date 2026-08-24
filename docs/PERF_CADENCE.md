@@ -200,14 +200,27 @@ different implementations and need not issue identical prefetches for the same
 code, and a slower CPU also shifts its own mix of work-code and idle-spin,
 which have different bus densities. Treat the ratios as +/- 5 points.
 
-### The measurement that would end the argument
+### The measurement that ended the argument
 
-Both counters the game keeps for itself live in shared RAM, which the core can
-already read: **`$16C992` (world) and `$16C990` (video)**. Sample either one
-at vblank, subtract, and show "logic frames per 256 video frames" on the HUD.
-That number is *directly* comparable to the 0.9999 / 0.9977 above, needs no
-proxy and no assumption about prefetch models, and is worth more than any
-amount of further inference from bus-cycle counts.
+**This section originally proposed reading `$16C992` (world) and `$16C990`
+(video), and asserted that the core "can already read" them. Both halves were
+wrong, and the correction is recorded here rather than deleted.** Nothing in the
+core read either address at the time. More importantly, those counters are
+incremented **before** the already-running gate — see the listing in section 1,
+where `404fe addq.w #1,$16c990` precedes `40510 tst.b $16ccd4 / bne -> exit` — so
+they count ISR *entries*, i.e. video frames, and would read a flat 1.0000 even on
+a core missing every other deadline.
+
+The right tap is the one that produced MAME's reference figures above: the
+re-entrancy **flags**, `$50` to `$16CCD4` (video) / `$16CCD6` (world) starting a
+logic frame and `$00` ending it. `cadence_meter` in `escape_core.vhd` counts those
+`$50` writes over 256 video frames and reports them on **HUD page 5**, where `0100`
+hex *is* 1.0000 updates per video frame. That number is directly comparable to the
+0.9999 / 0.9977 above, needs no proxy and no assumption about prefetch models.
+
+Measured on the BUILD 108 capture, 100 samples over 143 s: video median **0.973**
+(p10 0.703, min 0.313), world median **0.984** (p10 0.883, min 0.781). See
+[`VSHAD3.md`](VSHAD3.md) §6 and [`RETROSPECTIVE.md`](RETROSPECTIVE.md) §8.2.
 
 ## 5. What the videos can and cannot support
 
