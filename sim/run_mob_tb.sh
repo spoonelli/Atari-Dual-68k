@@ -36,7 +36,7 @@ echo "iverilog params:${PARAMS:-  (bench defaults)}"
 
 docker run --rm -v "$REPO":/work -w /work "${IVERILOG_IMAGE:-hdlc/iverilog:latest}" bash -c "
   iverilog -g2012 $PARAMS -o sim/build/tb_mob.vvp \
-    src/fpga/core/rtl/escape_mob.v src/fpga/core/rtl/escape_prio.v sim/tb/tb_mob.v &&
+    src/fpga/core/rtl/escape_mob.v src/fpga/core/rtl/escape_prio.v src/fpga/core/rtl/escape_mo_cache.v sim/tb/tb_mob.v &&
   timeout 600 vvp sim/build/tb_mob.vvp"
 python3 sim/tools/check_mob_prio.py
 # MODEPTH-1: ...and score the MO layer itself against MAME's own atarimo

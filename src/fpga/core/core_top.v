@@ -1320,6 +1320,46 @@ psram #(.CLOCK_SPEED(35.795455)) cram0 (
     wire [3:0] mg_req_s;
     wire [3:0]  mo_gfx_req;
     wire [95:0] mo_gfx_addr;              // 4 x 24
+
+    // MOCACHE-119: shared tile-row cache in front of the MO fetch channels.
+    //
+    // The tile-hole artifact peaks where sprite density peaks - an explosion,
+    // a crowd - and on this game dense means MANY COPIES OF THE SAME SPRITE,
+    // so the identical tile row is fetched many times per line, each a
+    // separate transaction on a bus where MO is the lowest-priority client.
+    // Demand peaks exactly where supply is worst, and a cache is the only
+    // lever whose benefit GROWS with density.
+    //
+    // It sits between escape_mob and the SDRAM fetcher with the same interface
+    // on both sides, so the MO state machine is untouched and cannot tell a
+    // hit from a very fast miss. Same clock domain as escape_mob (pixel), and
+    // mg_done_s is already synchronised into it, so the CDC structure at the
+    // clk_sdram boundary is exactly what it was.
+    //
+    // Storage is ramstyle=MLAB: the fit is at 299/308 M10K and this must not
+    // take a block.
+    //
+    // HONEST STATUS: correct and transparent in simulation (pixel-identical to
+    // the reference with jitter off). Its BENEFIT is not proven to this
+    // project's standard - across four jitter seeds the missing-pixel totals
+    // were 51 without and 19 with, but one seed went 0 -> 10, i.e. worse, and
+    // single-run comparisons are dominated by timing perturbation because
+    // changing the hit/miss pattern re-rolls which request draws which jitter
+    // value. Device evidence is what will settle it.
+    wire [3:0]   moc_req;
+    wire [95:0]  moc_addr;
+    wire [3:0]   moc_done;
+    wire [127:0] moc_data;
+    wire [15:0]  moc_hit, moc_miss;
+
+    escape_mo_cache #(.ENTRIES(32), .IDXBITS(5)) u_mo_cache (
+        .clk(clk_sys_7159), .reset_n(core_reset_n),
+        .mo_req(moc_req),   .mo_addr(moc_addr),
+        .mo_done(moc_done), .mo_data(moc_data),
+        .mem_req(mo_gfx_req), .mem_addr(mo_gfx_addr),
+        .mem_done(mg_done_s), .mem_data(mg_data),
+        .hit_cnt(moc_hit),  .miss_cnt(moc_miss)
+    );
     // SDSCHED-74: same-family crossings (7.159 -> 35.795, timed since the
     // '73 SDC grouping) - single capture FFs. The 3-stage done-return
     // chains cost ~400ns per fetched sprite row (~1/3 of the row budget).
@@ -2294,7 +2334,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3118;   // Developer HUD address 0x154 -> 0x160 (unaligned = never landed) - screen shows '18'
+    localparam [15:0] BUILD_ID = 16'h3119;   // MO tile-row cache (32 entries, MLAB) - screen shows '19'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2668,10 +2708,10 @@ escape_mob umob (
     .mo_vdata ( mo_vdata ),
     .cfg_vaddr( cfg_vaddr ),
     .cfg_vdata( cfg_vdata ),
-    .gfx_req  ( mo_gfx_req ),
-    .gfx_addr ( mo_gfx_addr ),
-    .gfx_done ( mg_done_s ),
-    .gfx_data ( mg_data ),
+    .gfx_req  ( moc_req ),
+    .gfx_addr ( moc_addr ),
+    .gfx_done ( moc_done ),
+    .gfx_data ( moc_data ),
     .disp_x   ( visible_x[8:0] ),
     .disp_pen ( mo_pen ),
     .disp_prio( mo_prio ),

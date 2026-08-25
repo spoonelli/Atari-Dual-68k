@@ -43,6 +43,12 @@ module tb_mob;
     // The LFSR is used rather than $random so a failing run is reproducible
     // from GFX_SEED alone and can be handed to someone else.
     parameter GFX_JIT  = 0;
+    // MOCACHE-118: 0 = DUT talks straight to the gfx model, every existing
+    // gate bit-identical. 1 = escape_mo_cache spliced between them, exactly
+    // as core_top would wire it.
+    parameter CACHE_EN = 0;
+    parameter CACHE_N  = 32;
+    parameter CACHE_IB = 5;
     parameter GFX_SEED = 16'hACE1;
 
     reg clk = 0;
@@ -97,6 +103,15 @@ module tb_mob;
     localparam NCH = 4;
     wire [3:0]   gfx_req;
     wire [95:0]  gfx_addr;
+    // MOCACHE-118 DUT-side nets; the splice itself lives after `rstn` is
+    // declared, because a generate that references rstn earlier makes iverilog
+    // invent an undriven implicit wire and the cache then sits in permanent
+    // reset - which is exactly how this first failed.
+    wire [3:0]   mo_req_w;
+    wire [95:0]  mo_addr_w;
+    wire [3:0]   mo_done_w;
+    wire [127:0] mo_data_w;
+    wire [15:0]  cache_hit, cache_miss;
     reg  [3:0]   gfx_done = 4'd0;
     reg  [127:0] gfx_data;
     reg  [3:0]   req_d = 4'd0;
@@ -131,6 +146,26 @@ module tb_mob;
     // ---------------- DUT
     reg rstn = 0;
     initial begin rstn = 0; repeat (20) @(posedge clk); rstn = 1; end
+
+    generate
+        if(CACHE_EN) begin : g_cache
+            escape_mo_cache #(.ENTRIES(CACHE_N), .IDXBITS(CACHE_IB)) moc (
+                .clk(clk), .reset_n(rstn),
+                .mo_req(mo_req_w),   .mo_addr(mo_addr_w),
+                .mo_done(mo_done_w), .mo_data(mo_data_w),
+                .mem_req(gfx_req),   .mem_addr(gfx_addr),
+                .mem_done(gfx_done), .mem_data(gfx_data),
+                .hit_cnt(cache_hit), .miss_cnt(cache_miss)
+            );
+        end else begin : g_nocache
+            assign gfx_req    = mo_req_w;
+            assign gfx_addr   = mo_addr_w;
+            assign mo_done_w  = gfx_done;
+            assign mo_data_w  = gfx_data;
+            assign cache_hit  = 16'd0;
+            assign cache_miss = 16'd0;
+        end
+    endgenerate
     wire [7:0] disp_pen;
     wire [1:0] disp_prio;
     wire       disp_valid;
@@ -149,10 +184,10 @@ module tb_mob;
         .mo_vdata ( mo_vdata ),
         .cfg_vaddr( cfg_vaddr ),
         .cfg_vdata( cfg_vdata ),
-        .gfx_req  ( gfx_req ),
-        .gfx_addr ( gfx_addr ),
-        .gfx_done ( gfx_done ),
-        .gfx_data ( gfx_data ),
+        .gfx_req  ( mo_req_w ),
+        .gfx_addr ( mo_addr_w ),
+        .gfx_done ( mo_done_w ),
+        .gfx_data ( mo_data_w ),
         .disp_x   ( visible_x[8:0] ),
         .disp_pen ( disp_pen ),
         .disp_prio( disp_prio ),
