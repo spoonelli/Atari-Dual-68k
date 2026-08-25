@@ -26,7 +26,7 @@ Two sequencing facts drive the order:
 | A2 | **Third-party attribution / GPL-3.0 compliance** | TODO | The most-missed item. We vendor TG68K (Tobias Gubener), jt51 (Jose Tejada), T65, TMS5220, and the Atari System 1 MiSTer RTL. A public GPL release needs a CREDITS/NOTICE naming each upstream, its licence, and preserved file headers. |
 | A3 | Single combined history rewrite (marquee blob + `output/` dirs) | BLOCKED | Rewritten mirror is prepared and verified; force-push needs approval. Pre-purge backup: `Documents/Lloyd Projects/atari-dual68k-prepurge-backup.bundle`. |
 | A4 | `input.json` vs RTL audit — **all** buttons, **both** players | TODO | The P2 bomb was a declared-vs-actual mismatch. Do not assume it was the only one; check the whole table rather than the one entry we already found. |
-| A5 | Debug HUD is on **L1/R1**, with no menu entry | TODO | A player who presses L1 on a "commercial-looking" release gets a developer overlay. Options and recommendation in **section F**. |
+| A5 | Debug HUD gated behind a menu toggle, default off | **DONE (build 114)** | `interact.json` id 38 'Developer HUD', default unchecked. With it clear, `diag_on` is forced low, so L1/R1/R/L2 do nothing and no debug path reaches video. RTL still compiled in -- see **section F**; the `DIAG_EN` compile-time half remains open. |
 | A6 | Save-path device test on real hardware | TODO | Gates the alpha/RC tag. |
 | A7 | Clean-boot look on real hardware | TODO | Gates the alpha/RC tag. |
 
@@ -124,7 +124,8 @@ Four options, and the trap in the obvious one:
 4. **Both**: `DIAG_EN` compile-time (default **1**, so anyone pulling the core
    gets it) *plus* the runtime menu gate defaulted off.
 
-**Recommendation: option 4.** It is the only one that satisfies all three
+**Recommendation: option 4.** *(Runtime half shipped in build 114; the
+`DIAG_EN` compile-time half is still to do.)* It is the only one that satisfies all three
 constituencies at once — the player never sees a developer overlay, the person
 filing a bug report can turn it on without a toolchain, and anyone who pulls the
 core to build on it gets the diagnostics unchanged and unsurprising. It also
