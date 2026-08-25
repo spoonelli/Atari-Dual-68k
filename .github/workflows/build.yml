@@ -64,6 +64,28 @@ jobs:
           [ -f "$f" ] || { echo "no fit report"; exit 0; }
           grep -iE 'Total block memory bits|Total RAM Blocks|M10K blocks|Total block memory implementation bits' "$f" | head -20 || true
 
+      # HOLD-108: name the worst HOLD paths with full node names. The compile
+      # writes summary tables only - a clock, a slack, a TNS - so when a hold
+      # row came in at +0.005 ns nobody could say which register pair it was,
+      # and the only available move was to guess which recent change looked
+      # likeliest. Diagnostic, never fails.
+      # RESTORED 2026-08-24: this step was written for BUILD 108, used, and
+      # never merged to tas-atomic. BUILD 110 hit the same problem with no
+      # per-path report available. See docs/TIMING.md Part 2.
+      - name: Worst hold paths (diagnostic)
+        if: always()
+        run: |
+          docker run --rm -v "$PWD":/work -w /work/src/fpga \
+            theypsilon/quartus-lite-c5:18.1 \
+            quartus_sta -t ../../support/report_hold_paths.tcl || true
+          f=src/fpga/output_files/ap_core.hold_paths.rpt
+          if [ -f "$f" ]; then
+            echo "--- worst hold path endpoints ---"
+            grep -E 'Slack|From Node|To Node|Launch Clock|Latch Clock' "$f" | head -60
+          else
+            echo "no hold path report produced"
+          fi
+
       - name: Timing gate (fail on negative slack)
         run: |
           test -f src/fpga/output_files/ap_core.sta.rpt
@@ -87,3 +109,4 @@ jobs:
             src/fpga/output_files/ap_core.rbf
             src/fpga/output_files/ap_core.sta.rpt
             src/fpga/output_files/ap_core.fit.rpt
+            src/fpga/output_files/ap_core.hold_paths.rpt
