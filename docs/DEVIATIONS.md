@@ -69,7 +69,109 @@ Worth stating, because the list above is longer than the list of things that are
 | Pixel clock / refresh rate | 7.159091 MHz, **59.9227 Hz** = 7,159,090 / (456 x 262) — exact |
 | ROM contents | 28/28 CRC-verified against MAME known-good |
 
-## F. How to keep this honest
+## F. Cross-platform: where Pocket and MiSTer must NOT drift
+
+The MiSTer playfield bug was caused by a fetch channel with no reset, because the
+Pocket's equivalent sat behind a different gate. Anything both platforms share needs a
+single source of truth, or a written reason why not.
+
+### F1. SDRAM refresh interval — reconciled to ONE policy (REFRESH-111)
+
+**Status: reconciled. `REFRESH_INTERVAL = 160`, `DEFER_CAP = 48`, both platforms.**
+
+The same JEDEC retention violation was "fixed" three different ways on three branches,
+each justified by hand arithmetic and none by measurement:
+
+| Branch | Interval | Deferral | Believed | **Measured worst case** | Verdict |
+|---|---|---|---|---|---|
+| (original) | 250 | kept (48) | "2.9 µs, >2x margin" | **8.772 µs** (314 clk) | **FAIL** — 112.3% of budget |
+| `mister-port` | 224 | kept (48) | "7.599 µs, in spec with ~3% margin" | **8.046 µs** (288 clk) | **FAIL** — 103.0% of budget |
+| `sdram-sched` | 250 | **deleted** | — | **7.431 µs** (266 clk) | pass, but only 4.9% margin |
+| `tas-atomic` (Pocket) | 160 | kept (48) | "5.81 µs worst" | **6.258 µs** (224 clk) | **PASS** — 80.1% of budget |
+
+Limit: MT48LC16M16A2, 8192 rows / 64 ms = **7.8125 µs** per row = 279.7 clocks at
+35.795455 MHz (27.936508 ns). The SDRAM domain is 35.795455 MHz on **both** platforms —
+verified from the PLL IP on each, not from comments: Pocket
+`src/fpga/core/mf_pllbase/mf_pllbase_0002.v` `output_clock_frequency2`, MiSTer
+`src/mister/rtl/pll/pll_0002.v` `output_clock_frequency1`. Both also use an identical
++6984 ps chip clock. Different reference clocks (74.25 vs 50.0 MHz), same output.
+
+**Everyone's arithmetic was wrong in the same safe-looking direction.** All three
+branches assumed `worst case = INTERVAL + DEFER_CAP`. Measured against the real FSM the
+answer is `INTERVAL + DEFER_CAP + 16` — exact across every point sampled. The missing 16
+clocks are the transaction still in flight when the deferral cap expires (a
+precharge-armored `rd_pre` read is 15 clocks) plus one clock to clear the read ack.
+`refresh_due` is only consumed from `S_IDLE`, so the controller cannot drop what it is
+doing to service a refresh.
+
+That correction is what convicts `mister-port`: **224 is not a fix.** It was chosen to
+land at 7.599 µs; it actually lands at 8.046 µs and is still out of spec — on the
+platform where the playfield is *also* on this bus, which is the worse place to have a
+retention violation.
+
+**So "the two platforms legitimately need different values" is not available as an
+answer here.** It would require MiSTer's value to be in spec, and it is not.
+
+**Why 160/48 and not something cheaper.** The bound is
+`INTERVAL + DEFER_CAP + 16 <= 279.7`. Keeping `DEFER_CAP = 48` (which the zero-wait CPU
+fastpath was tuned against — changing it would force a retune on `mister-port`), the
+largest interval that still meets spec is 215, and that lands at 99.8% of the JEDEC
+budget: no engineering margin at all, for a failure mode that is silent, temperature
+dependent (the 7.8125 µs figure halves above 85 °C) and manifests as graphics
+corruption rather than a crash. 160 is the value that keeps ~20% margin with the
+deferral intact. Measured trade-off:
+
+| Interval (DEFER_CAP=48) | Worst case | % of JEDEC budget | Refresh occupancy |
+|---|---|---|---|
+| 160 | 6.258 µs | 80.1% | **6.831%** |
+| 176 | 6.705 µs | 85.8% | 6.214% |
+| 192 | 7.152 µs | 91.5% | 5.700% |
+| 208 | 7.599 µs | 97.2% | 5.263% |
+| 215 | 7.738 µs | 99.8% | 5.092% |
+
+**Bandwidth cost.** Refresh occupancy goes 4.890% (MiSTer's 224) → 6.831% (160), i.e.
+**+1.94 percentage points** of the SDRAM bus, taken from the lowest-priority client,
+which is sprites. On MiSTer that bus is genuinely busier: the playfield moved onto it and
+adds **13,794 read transactions per frame** (57 cells/line × 242 lines — verified from
+`escape_mister.v:714`; the enqueue has no horizontal gate, so it free-runs at 57/line,
+not the 42 that `docs/MISTER.md:277` assumes) = 27,588 word accesses ≈ 32.3% of frame
+clocks. Pocket issues the same 13,794 fetches but as PSRAM reads on a physically
+separate chip, so its SDRAM sees none of them. That is a real asymmetry — it is just not
+one that can buy MiSTer an out-of-spec refresh interval. Losing ~2% of sprite bandwidth
+is strictly better than corrupting the memory the sprites are stored in.
+
+**The mechanism that stops this recurring.** `REFRESH_INTERVAL` and `DEFER_CAP` are now
+module parameters on `sdram_simple` rather than hardcoded literals, defaulting to
+160/48. One FSM, one source of truth; a platform that wants a different value must say
+so at its instantiation, in the open, next to the other one. `mister-port`'s hardcoded
+224 will now surface as a **merge conflict** in the parameter default rather than as two
+files that quietly disagree.
+
+**The gate:** `sim/run_sdram_refresh_tb.sh` measures worst-case row interval against the
+real FSM. It carries **two negative controls** — the original 250/48 and
+`mister-port`'s 224/48 — both of which must be reported FAIL, so the bench is proven able
+to reject the specific values that hand arithmetic blessed.
+
+**Do not re-derive this on paper. Run the bench.** The bench itself contains the same
+trap in miniature: under *constant* read pressure the measured gap collapses to
+`INTERVAL + 1` and every policy above looks fine, because `refresh_ctr` is reset when a
+refresh becomes *due*, not when it is *serviced*, so a constant service delay cancels out
+of the gap. Only a **bursty** adversary (`READ_PRESSURE=3`) — an undelayed refresh
+followed by a maximally delayed one — reaches the true worst case. Two earlier, weaker
+adversaries are kept in the bench precisely because they are the trap.
+
+### F2. Still divergent — `mister-port` carries a live CLKFIX-106 regression
+
+`origin/mister-port`'s `src/fpga/core/core_top.v:1080` still reads
+`psram #(.CLOCK_SPEED(85.909)) cram0`. That branch carries **both** project trees, and
+while the MiSTer build (`src/mister/Arcade-Escape.qsf` → `files.qip`, top `sys_top`)
+does not compile `core_top.v` or `psram.sv` at all, the **Pocket** build on that same
+branch (`src/fpga/ap_core.qsf:741`, `:813`) does. So the Pocket `.rbf` built from
+`mister-port` still has the BUILD 106 bug: 7-cycle PSRAM waits where 3 suffice, on every
+playfield fetch. Not fixed here — this branch is off `tas-atomic` — but it must be
+fixed before `mister-port` merges or ships anything Pocket-side.
+
+## G. How to keep this honest
 
 Every entry above is a measurement or a schematic citation, not a recollection. The
 project has been burned repeatedly by checks that could not fail — a slack regex that

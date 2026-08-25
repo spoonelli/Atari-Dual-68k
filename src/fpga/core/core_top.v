@@ -1306,7 +1306,8 @@ psram #(.CLOCK_SPEED(35.795455)) cram0 (
     // path where it used to be a 2:1 mux. Combinational depth on the
     // CPU-shared grant therefore goes DOWN, not up, at four channels.
     //
-    // Cost: one clk_sdram cycle (11.6ns) of extra arbitration latency per MO
+    // Cost: one clk_sdram cycle (27.94ns; CLKFIX-106 - the old "11.6ns" here
+    // was the 85.909MHz period) of extra arbitration latency per MO
     // fetch, against a round trip of ~1.1us. Fixed priority 0>1>2>3 keeps the
     // old "A before B" order.
     //
