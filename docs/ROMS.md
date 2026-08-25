@@ -17,7 +17,7 @@ python3 support/build_rom.py /path/to/eprom.zip ./atari_escape.rom
 
 Both forms produce a byte-identical image. With no arguments it looks for an
 `eprom` folder next to the repository and writes to
-`dist/assets/atari_escape/common/atari_escape.rom`; pass both paths explicitly
+`dist/assets/eprom/common/atari_escape.rom`; pass both paths explicitly
 if you want them somewhere else.
 
 Every chip is **CRC32-verified** against MAME's known-good values, and its size

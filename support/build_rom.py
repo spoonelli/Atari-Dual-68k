@@ -23,7 +23,8 @@ Combined image layout (SDRAM byte offsets):
                               chunky 4bpp. This is NOT a raw MAME region dump.
 
 Usage: build_rom.py [romset_dir_or_zip] [out_file]
-  defaults: romset_dir = ../eprom (next to project), out_file = dist/assets/.../atari_escape.rom
+  defaults: romset_dir = ../eprom (next to project), out_file = dist/assets/eprom/common/atari_escape.rom
+  ("eprom" is the core platform id -- the same folder name the SD card uses)
 """
 import os, sys, zipfile, zlib
 
@@ -96,7 +97,7 @@ def main() -> int:
         raise SystemExit(f"no such romset directory: {romdir}\n"
                          f"pass a folder of 136069-* chip dumps, or a MAME eprom.zip")
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
-        repo, "dist", "assets", "atari_escape", "common", "atari_escape.rom")
+        repo, "dist", "assets", "eprom", "common", "atari_escape.rom")
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     img = bytearray(0x220000)
