@@ -504,10 +504,14 @@ BUILD 106's commit message claims to "correct everything". It does not:
 - `sdram_simple.v:3` still says "28.636 MHz SDRAM domain (4x CPU)", contradicting line
   14 of the same header; `:151-156` still argues from "250-clk = 2.9 µs", 33 lines after
   the block that repudiates both numbers.
-- **`sim/tb/tb_pf_cram.v:101` still instantiates `psram #(.CLOCK_SPEED(85.909))`** and
+- ~~**`sim/tb/tb_pf_cram.v:101` still instantiates `psram #(.CLOCK_SPEED(85.909))`** and
   calls it "the real 12:1 clock ratio". That is not a comment. **That bench exercises
   7-cycle PSRAM waits where the shipped core uses 3 — it models a machine this core is
-  not.**
+  not.**~~ **CLOSED by PFSIM-113**: now `CLOCK_SPEED(35.795455)` at the true 5:1 ratio.
+  This entry was right that it was a live parameter and not a comment, and it
+  understated the damage: at 12:1 the rig handed the playfield ~2.4x the CRAM bandwidth
+  the hardware has, which is why channel B of the two-in-flight fetch was never once
+  armed in any run of that bench.
 
 And the refresh fix has forked across three branches: `tas-atomic` uses 160,
 `mister-port` uses 224 with the deferral intact, `sdram-sched` keeps 250 and deletes the
@@ -1026,9 +1030,11 @@ line. HUD rows must be excluded with margin — status 0–11, hex bar 96–128,
   rows, and so do `0` and `C`. **0.027 instead of 0.840 turns a healthy diagnostic into
   an alarming one, and then the diagnostic gets blamed.** Replaced by
   `read_hud_native.py`, which template-matches each font pixel's middle 2×2.
-- **A bench modelling the wrong machine, still live today.** `tb_pf_cram.v` instantiates
-  the PSRAM controller at `CLOCK_SPEED(85.909)` and calls it "the real 12:1 clock ratio"
-  (§5.2).
+- **A bench modelling the wrong machine.** `tb_pf_cram.v` instantiated the PSRAM
+  controller at `CLOCK_SPEED(85.909)` and called it "the real 12:1 clock ratio" (§5.2).
+  Closed by PFSIM-113 — and worth recording that this rig had never passed at any commit
+  since it was created, which is the reason the wrong parameter survived: a gate that is
+  always red teaches everyone to stop reading it.
 - **A per-line cycle statistic inflated ~9%.** `tb_mob_perf.v` divides frame totals by
   240 while accumulating over all 262 lines, so the published `cycles/line` splits sum to
   ~496, not the 456 the runner scripts label them with. The error is common-mode, so
@@ -1124,8 +1130,10 @@ These are now enforced mechanically in the checks themselves, not by remembering
 - **Stain coverage on silicon is 61.3% against a 66.8% ceiling**, and the residual — each
   row starting 1–2 pixels late and ending on time — reproduces in no bench. The
   compositor in `core_top.v` remains uncovered by any testbench.
-- **`tb_pf_cram.v` models the wrong clock** and should be corrected before any playfield
-  or CRAM timing conclusion is drawn from it.
+- ~~**`tb_pf_cram.v` models the wrong clock** and should be corrected before any playfield
+  or CRAM timing conclusion is drawn from it.~~ **CLOSED by PFSIM-113.** The rig now runs
+  at 5:1, arms both fetch channels, passes clean, and fails on an injected `SINGLE_CH=1`
+  defect with the accumulating-rightward per-column signature.
 - **The refresh constant has forked three ways** across `tas-atomic` (160),
   `mister-port` (224) and `sdram-sched` (250, deferral deleted). All three are in spec;
   they should be reconciled deliberately rather than merged by accident.

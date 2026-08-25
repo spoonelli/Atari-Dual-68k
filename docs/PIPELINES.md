@@ -105,7 +105,7 @@ There is **no separate video clock**; video runs on `clk_sys_7159`.
 > | `sdram_simple.v:151-156` | argues from "250-clk interval = 2.9us" | **stale** — the threshold is 160, and 250 was never 2.9 µs |
 > | `core_top.v:1280` | "one clk_sdram cycle (11.6ns)" | **stale** — 27.94 ns |
 > | `escape_core.vhd:100,105,655,657`; `escape_mob.v:69,275` | "85.9MHz domain" | **stale comments only** |
-> | `sim/tb/tb_pf_cram.v:6,25,101` | `psram #(.CLOCK_SPEED(85.909))`, "the real 12:1 clock ratio" | **a live wrong parameter.** That bench exercises 7-cycle PSRAM read waits where the shipped core uses 3. It models a machine this core is not. |
+> | `sim/tb/tb_pf_cram.v:6,25,101` | `psram #(.CLOCK_SPEED(85.909))`, "the real 12:1 clock ratio" | **FIXED (PFSIM-113).** Was a live wrong parameter, not a stale comment: the bench exercised 7-cycle PSRAM read waits where the shipped core uses 3. Now `CLOCK_SPEED(35.795455)` on a 5:1 `clk_sd`/`clk_px` pair. Correcting it is what exposed the two further rig faults that had kept this gate red since `3d03b63` — see §PF-CRAM RIG below. |
 > | `sim/tb/tb_mob_perf.v:30` | "10 clocks at 85.909MHz = 116ns" | **stale** — 279 ns |
 > | `src/mister/rtl/pll.v:7-8` | "57.272727 MHz SDRAM" | **stale** — residue of a reverted 8:1 draft |
 >
@@ -786,6 +786,50 @@ dx = 0,0,…,+8 against MAME's smooth ±1..3.
   (`PFRESET-107`), and `RETROSPECTIVE.md` §8. **A toggle-handshake channel with no
   reset is a latent wedge on every platform**; it only surfaced where the reset
   sequence differed.
+
+#### The PF-CRAM rig (`sim/tb/tb_pf_cram.v`) — PFSIM-113
+
+`./sim/run_pf_tb.sh` is the gate for everything above. It had **never passed at any
+commit since it was created** in `3d03b63`, reporting "cells checked 9600, mismatches
+9600 (100.000%)" for its entire life. Three independent faults, **all three in the rig,
+none in the shipped RTL**:
+
+| # | Fault | Effect |
+|---|---|---|
+| 1 | `check_pf_frame.py` modelled CRAM as `low16(a * 2654435761)`; the bench filled `cmem[k]=k[15:0]` | every word compared wrong |
+| 2 | `check_pf_frame.py` computed the map index **row-major**, `(ycell<<6)｜xcell` | transposed every lookup — the checker was written against the convention LANE3j deleted (`core_top.v:2262`) |
+| 3 | the bench ran the service clock at 85.909 MHz on a /12 divider | ~2.4× the CRAM bandwidth the hardware has |
+
+Fault 3 is the one with teeth. At 12:1 a playfield fetch always retired before the next
+cell's request arrived, so **channel B of the two-in-flight A/B ping-pong was never
+armed in any run of this bench, ever** — `issueB=0`, on the one rig whose entire purpose
+is to validate that ping-pong. Fixing the ratio alone did not fix it: the rig's
+competing-CRAM-client model then starved (PF held absolute priority in its arbiter),
+which both removed the last source of contention and livelocked the stimulus generator
+outright. The rig now runs at 5:1, arbitrates round-robin, and lets the competitor hold
+the controller for a burst the way the real `cq_n` drain does.
+
+Measured on the dumped frame, with the corrected rig:
+
+```
+clean       issueA=9773  issueB=4021   mismatches 0/9600 (0.000%)   PASS
+SINGLE_CH=1 issueA=10914 issueB=0      mismatches 8352/9600 (87.0%) FAIL
+```
+
+and the `SINGLE_CH=1` control fails with the **accumulating-rightward per-column
+signature** — cols 2–4 clean, col 5 = 60, col 6 = 120, col 7 = 180, col 8 onward
+saturated at 240 — which is the same shape the one-in-flight design produced on hardware
+at build 39. Run it with `PF_SINGLE_CH=1 ./sim/run_pf_tb.sh`; it is a supported mode
+precisely so the gate can be shown to still be capable of failing.
+
+Two hardenings, because the original checker could not have failed even with correct
+constants: the global column offset is now **pinned at 0** (derived — the map is read 4
+cells ahead via `pf_x2 = vis_x + 32` and the show registers delay 4 cells, so the two
+cancel) rather than searched over 0..5 and set to whatever scored best. A search like
+that absorbs exactly the bug it should report: injecting a one-cell horizontal shift
+(`+32` → `+40`) scores a *perfect* 296/296 at offset +1, so the old checker would have
+called that frame clean; the pinned version rejects it. And the checker now audits the
+run's own stimulus counters, failing any two-channel run with `issueB == 0`.
 
 ### 5.3 Alpha (text) layer
 
