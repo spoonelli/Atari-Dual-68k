@@ -413,24 +413,168 @@ failing pairs — the one gap remaining, since the original failure predates the
 restored reporter. **Never merge it.**
 
 
-## 12. Suggested sequencing
+### 11a. Why the wrong inference is in this file
 
-1. **Done in this commit:** the per-path reporter, its CI step and the margin
-   warning are restored. Their very first run corrected a wrong inference
-   (§11), which is the whole argument for having them.
-2. **Settle the failing build.** `hold-repro110` names what actually failed at
-   -0.054. Until that lands, "which family failed the gate" is still inference.
-3. **Ship alpha on BUILD 110** — but on the understanding that +0.103 is this
-   design's floor, not a comfortable margin, and that it got there via a
-   version constant.
-4. **Raise the margin floor** (§10bb) so the next build that lands on the floor
-   announces it. Cheapest useful change on this list; gates nothing.
-5. **Then decide the real fix on evidence**, not on §10 as written. The cluster
-   is ~20 paths inside 0.021 ns across three subsystems, all latching on
-   gpll[0] — so the candidates worth costing are the *global* ones (clock
-   regioning / `set_max_skew` on gpll[0]) alongside §10 for the CDC family.
-   §10 alone removes ~4,200 tickets from the lottery but does not move BUILD
-   110's binding path.
+It would be tidier to delete §9's guess and present §11's measurement as the
+finding. That would be the wrong lesson, and it is the lesson this project
+keeps having to relearn (Part 1 §4; `LESSONS.md`).
+
+The sequence was: a plausible mechanism was reasoned out from the SDC and the
+RTL, it was **labelled an inference rather than a result**, a tool was built to
+check it, and the tool said no. Every step there is cheap except the last, and
+the last is only cheap **because the tool exists**. Without the reporter this
+would have been "the playfield CDC is the root cause" — stated confidently,
+propagated into a fix proposal aimed at the wrong family, and discovered when a
+multicycle landed and BUILD 111 still sat at +0.103.
+
+The false turn is the useful artefact. Keep it.
+
+## 13. Costing the global levers — and why none of them raise the cluster
+
+*Requested: cost clock regioning, `set_max_skew` and anything else that
+genuinely applies. Nothing below is applied.*
+
+### 13.1 The evidence that decides most of it
+
+From BUILD 110's `ap_core.fit.rpt`, Global & Other Fast Signals:
+
+| Clock | Resource | **Fan-out** |
+|---|---|---|
+| **`outclk_wire[0]` = gpll[0] = `clk_sys_7159`** | **Global Clock, GCLK8** | **9,717** |
+| `outclk_wire[2]` = gpll[2] = `clk_sdram` | Global Clock, GCLK9 | 1,366 |
+| `clk_74a` | Global Clock, GCLK6 | 1,252 |
+| `outclk_wire[1]` = gpll[1] (7.159 @ 90°) | Global Clock, GCLK11 | **1** |
+| `outclk_wire[3]` = gpll[3] (sdram_chip) | Global Clock, GCLK10 | **1** |
+| `bridge_spiclk` | Global Clock, GCLK5 | 19 |
+
+Two facts fall straight out:
+
+- **gpll[0] is already on the lowest-skew resource the device has.** It is a
+  promoted global clock. There is no "promote it to a global network" lever
+  left to pull — that was already done.
+- **It carries 9,717 loads, roughly 7× the next busiest clock.** A GCLK spine
+  spans the die; with ~9,700 loads distributed across it, insertion-delay
+  variation between any two of them is where the measured ~0.53 ns of skew
+  comes from. That is the mechanism, and it is physical.
+
+### 13.2 Lever by lever
+
+| Lever | Would it help? | Cost | Verdict |
+|---|---|---|---|
+| **Promote gpll[0] to a global network** | — | — | **Already done** (GCLK8). No headroom. |
+| **`set_max_skew` on gpll[0]** | **No.** A GCLK spine is a fixed physical resource; the fitter cannot re-route it to meet a skew bound. The constraint would report, not improve. | ~0 | **Against.** It buys a number in a report, not margin. |
+| **Clock regioning / LogicLock to shrink gpll[0]'s spread** | In principle yes — it is the only lever that attacks skew directly. | **Very high.** 9,717 loads is most of the design (CPU + video + audio). Device-wide placement constraint on a build at 283/308 M10K (92%), whose block RAM placement is pinned by the memory columns, and it would churn the SDRAM read-return placement carrying the five freeze fixes. | **Against before alpha.** Highest churn, in exactly the forbidden region, and see §13.3. |
+| **PLL phase shift (gpll[0] or gpll[2])** | **Only for the cross-domain family.** A global phase shift moves launch and capture together, so it does **nothing** for same-domain gpll[0]→gpll[0] — which is BUILD 110's binding path. | Medium-high, and it re-times SDRAM read-return. | **Against.** Same limitation as the multicycle, more risk. |
+| **Reduce gpll[0] fan-out** | Yes — it is the actual root cause. | Enormous: clock gating or domain splitting across CPU, video and audio. | **Against.** Not a pre-alpha change, arguably not ever. |
+
+### 13.3 The finding: the cluster's position is a tool stopping criterion, not a design property
+
+Quartus fixes hold during routing by **padding short paths until they meet, then
+stopping.** It does not maximise hold margin — there is no reason for it to.
+
+That predicts exactly what BUILD 110 shows: a dense band just above zero, whose
+members are unrelated to each other. And the composition confirms it. The
+binding path at +0.103 is not architectural at all — it is **internal to
+vendored jt51 IP**:
+
+```
+From  ...|jt51_csr_op:u_csr_op|jt51_sh:u_reg1op|bits[6][0]
+To    ...|jt51_csr_op:u_csr_op|jt51_sh:u_reg1op|altshift_taps...
+Launch gpll[0]   Latch gpll[0]     (same module, same clock)
+Data Arrival 0.452   Data Required 0.349   Slack 0.103
+```
+
+A shift-register stage feeding its own `altshift_taps` memory. Nothing to do
+with this project's architecture, its CDCs, or its freeze history. It is in the
+worst-20 only because **everything is compressed against the tool's stopping
+threshold**, and on this fit that particular short path is the one it padded
+least.
+
+**The consequence for §13.2 is decisive: improve skew and the fitter simply pads
+less. The cluster re-forms just above zero.** No global lever raises it, because
+the number being measured is set by where Quartus stops, not by how healthy the
+design is.
+
+So the levers that actually change *risk* are the ones that reduce the
+population of paths needing hold-fixing at all, or that make a bad re-roll
+loud:
+
+- **§10's CDC multicycle** — removes ~4,200 paths from the pool entirely. Worth
+  doing on its own merits, but as *fewer tickets in the lottery*, **not** as a
+  margin play. It will not move the worst number.
+- **The margin floor and the reporter** — already restored, and the floor raised
+  to 0.150. These convert a silent re-roll into a loud one, which given §13.3 is
+  the most useful thing available.
+
+**Recommendation: do not pursue the global levers.** The evidence says they
+cannot deliver what they appear to promise.
+
+## 14. Is +0.103 ns safe to ship an alpha on? Yes.
+
+Asked plainly, so answered plainly: **it will work. It is not dangerous. It is
+fragile to future edits, and that is a different problem.**
+
+**Why it will work.** Hold is a minimum-delay check, and Quartus signs it off at
+the corners where data is *fastest* — which is precisely where hold is worst.
+BUILD 110 passes at all four:
+
+| Corner | Hold |
+|---|---|
+| Slow 1100mV 85C | +0.295 |
+| Slow 1100mV 0C | +0.284 |
+| **Fast 1100mV 85C** | **+0.124** |
+| **Fast 1100mV 0C** | **+0.103** |
+
+The fast corners already model the fastest silicon Intel ships for this speed
+grade, at the voltage and temperature extremes, with the on-chip-variation
+derating Quartus applies for Cyclone V. **There is no operating condition worse
+for hold than the corner already signed off.** This is the important asymmetry
+and it is where intuition misleads: setup margin is the one that erodes with
+voltage droop and aging, so "0.1 ns of margin" *sounds* alarming. Hold does not
+work that way. +0.103 ns at Fast 0C is not "0.103 ns away from failing in the
+field" — it is met, across the whole modelled PVT space, on every device.
+
+And the bitstream is deterministic (three independent controls in this file), so
+**this `.rbf` has exactly this timing**. It is not a sample from a distribution.
+
+**What is genuinely true and worth saying to the owner:** the number is thin by
+engineering-comfort standards, and §13.3 explains why it will stay thin no matter
+what is done to it. The real exposure is not the Pocket in someone's hands; it is
+the **next edit**, which re-rolls placement and may land negative — as
+`cpu-68010` did at −0.054. That failure was caught by the gate, before any
+bitstream shipped, which is the system working.
+
+**The honest summary:** ship it. Treat +0.10 as this design's structural floor
+rather than a problem to be solved; keep the gate and the (now 0.150) margin
+floor so a bad re-roll is loud and immediate; and do not spend pre-alpha effort
+chasing margin that the tool will not give you.
+
+The one caveat that is *not* covered by any of the above, stated for
+completeness: all of this concerns the **timed** clock groups. The
+`set_clock_groups -asynchronous` boundaries (`bridge_spiclk`, `clk_74a`,
+`clk_74b` against the PLL family) are false-pathed by construction and rely on
+their synchronisers being correct. That is a separate correctness argument,
+untouched by this work and unchanged by it.
+
+
+## 15. Suggested sequencing
+
+1. **Done:** the per-path reporter, its CI step and the margin warning are
+   restored, and the hold floor is raised to 0.150. Their first run corrected a
+   wrong inference (§11) — which is the argument for having them.
+2. **Ship alpha on BUILD 110.** §14: it passes every corner, hold is signed off
+   at the corners where hold is worst, and the bitstream is deterministic. Treat
+   +0.10 as this design's structural floor.
+3. **Do not pursue the global levers** (§13). gpll[0] is already on a global
+   network, `set_max_skew` cannot move a fixed GCLK spine, and §13.3 shows the
+   cluster's position is Quartus's stopping criterion rather than a design
+   property — so improving skew just means the fitter pads less.
+4. **Optionally apply §10's CDC multicycle later**, framed correctly: ~4,200
+   fewer paths needing hold-fixing, i.e. fewer tickets in the lottery. It will
+   **not** move the worst number, and should not be sold as if it would.
+5. **Revisit only if a future build fails the gate repeatedly**, rather than
+   once. A single re-roll to negative is the system working; a pattern would
+   mean the population has grown and §10 becomes worth its risk.
 
 ## What is measured, what is inferred
 
@@ -449,6 +593,22 @@ numbers in §8 and §9.
 **Corrected:** §9 inferred the failing endpoints were the `vg_data -> pfring`
 family. §11 measured otherwise for BUILD 110. The inference was flagged as such
 and the reporter caught it on its first run.
+
+**Also measured (§13, §14):** gpll[0] is a promoted Global Clock (GCLK8) with
+**9,717** loads against 1,366 for gpll[2] and 1,252 for clk_74a; BUILD 110's
+binding hold path is internal to vendored jt51 IP (`jt51_sh:u_reg1op` shift
+stage into its own `altshift_taps`), same module, same clock, arrival 0.452 /
+required 0.349 / slack 0.103; all four corners pass hold (+0.295 / +0.284 /
++0.124 / +0.103).
+
+**Reasoned, not measured (§13.3):** that the cluster sits just above zero
+because Quartus pads short paths until hold is met and then stops, rather than
+maximising margin. The circumstantial evidence is strong — 20 paths inside
+0.021 ns spanning three unrelated subsystems and including vendored IP
+internals is a tool stopping criterion, not a design property — but it is an
+inference about tool behaviour and is labelled as one. It could be tested by
+refitting with an artificially relaxed hold requirement and seeing whether the
+cluster moves up or simply thins.
 
 **Still inferred:** which registers actually failed in the `cpu-68010` build at
 -0.054. That build predates the restored reporter, so its per-path detail does
