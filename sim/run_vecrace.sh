@@ -64,7 +64,7 @@ fi
 RUNFLAGS="--ieee-asserts=disable --stop-time=$STOPTIME"
 if [ -n "$WAVE" ]; then RUNFLAGS="$RUNFLAGS --wave=$WAVE"; fi
 
-exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}" \
+exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work ${TPMOUNT[@]+"${TPMOUNT[@]}"} \
   -w /work "$IMAGE" bash -c "
   set -e
   STD='--std=08 -fsynopsys -frelaxed'; W=sim/build/vecrace-$TAG

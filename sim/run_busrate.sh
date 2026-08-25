@@ -22,7 +22,7 @@ if [ ! -d "$REPO_ROOT/third_party/Arcade-Atari-system1_MiSTer/rtl" ]; then
   TPMOUNT=(-v "$MAIN/third_party:/work/third_party:ro")
 fi
 
-exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}" \
+exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work ${TPMOUNT[@]+"${TPMOUNT[@]}"} \
   -w /work "$IMAGE" bash -c "
   set -e
   STD='--std=08 -fsynopsys -frelaxed'; W=sim/build/busrate-$TAG
