@@ -23,7 +23,18 @@ TABLES = ("Setup Summary", "Hold Summary", "Recovery Summary",
 # nobody reads until something has already gone wrong. These floors do NOT
 # fail a build; they make a thin margin visible in the log. Setup and hold
 # live on entirely different scales, hence per-kind floors.
-FLOORS = {"Setup Summary": 1.000, "Hold Summary": 0.050,
+#
+# HOLD-110: the hold floor was 0.050 ns and could not do its job. Measured
+# perturbation sensitivity on this design is 0.157 ns -- BUILD 110 and the
+# cpu-68010 branch are BYTE-IDENTICAL RTL differing only in the BUILD_ID
+# constant, and their worst hold slack differs by that much (-0.054 vs
+# +0.103). A 0.050 floor therefore stays silent on a build that is one
+# trivial edit away from failing: BUILD 110 passes at +0.103 and prints
+# nothing. The floor must exceed the swing it is meant to warn about, so
+# it is now 0.150. Expect this to fire often until the gpll[2]->gpll[0]
+# coincident-edge problem is fixed at the source (docs/TIMING.md); that is
+# the point -- it is describing a real and current fragility, not noise.
+FLOORS = {"Setup Summary": 1.000, "Hold Summary": 0.150,
           "Recovery Summary": 0.500, "Removal Summary": 0.100,
           "Minimum Pulse Width Summary": 0.100}
 
