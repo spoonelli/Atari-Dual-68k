@@ -152,6 +152,29 @@ theories poison later reasoning.
   stained nothing therefore reads `FF00`, and `0000` is unreachable unless the
   counter never ran -- so the page cannot report a zero it has not earned.
 
+- **A proof-it-can-fail control is itself calibrated, and its calibration goes
+  stale exactly like the constant it guards.** This is the deepest form of the
+  "check that cannot fail" problem, because the check LOOKS rigorous -- it has a
+  negative control, the control fires, someone verified it. Three instances,
+  found the same way: `run_sdram_refresh_tb.sh`'s negative controls (`250/48`
+  and `224/48`) correctly FAIL at 35.795455 MHz and correctly-looking **PASS** at
+  50.11 MHz, because the JEDEC limit in clocks moves 279.7 -> 391.5 -- so the
+  gate goes green while measuring nothing, at exactly the moment someone raises
+  the clock and needs it most; `run_psram_tb.sh`'s control referenced 85.909 MHz,
+  a clock this design has not used since v22; and `tb_mob_perf`'s `GFX_LAT`
+  truncates at >=128, so a latency of 134 behaves as 6 and reports a perfectly
+  clean frame. **When you change a constant, re-derive the controls that guard
+  it -- a control is a measurement, not a talisman.**
+- **A gate that dies silently is worse than one that dies loudly on a missing
+  ref.** `run_mob_order_check.sh` piped its docker build/sim to `/dev/null` with
+  no error handling, so under `set -e` any failure aborted the whole script with
+  docker's exit code and ZERO output -- a bare "exit 4" and nothing to diagnose.
+  Making the failure visible immediately revealed the real defect underneath it.
+  Its other defect is a maintenance lesson: it defaulted `BASE_REF` to a topic
+  branch that was later **pruned after merging**, so a routine branch cleanup
+  silently broke a gate. **Do not point a gate at a ref whose lifetime you do
+  not control.**
+
 ## Process rules that earned their keep
 
 - Every build bumps an on-screen build number; the screen must match the zip.
