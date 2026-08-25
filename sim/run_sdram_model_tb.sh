@@ -57,6 +57,8 @@ run_mode 2 "MUTATION READ with no open row - model MUST report it"
 run_mode 3 "MUTATION AUTO REFRESH with a bank ACTIVE - model MUST report it"
 run_mode 4 "MUTATION tRCD violation - model MUST report it" 10.0
 run_mode 5 "MUTATION tRAS(min) violation - model MUST report it" 10.0
+run_mode 6 "write/read interleave across all four banks - read-back MUST match"
+run_mode 7 "same-row read-after-write - MUST NOT serve stale data"
 
 if [ "$FAIL" -ne 0 ]; then
   echo "SDRAM MODEL GATE FAIL" >&2
