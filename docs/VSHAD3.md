@@ -323,7 +323,48 @@ Any configuration reading **>= 6 clk/cycle** is failed outright as the
 "served by neither" signature — that is what the 16-clock watchdog fallback
 looks like from here, and it is the specific bug the file warns about.
 
-**Mutation-tested.** The `v_sel_shad3` compare was reverted to the old 9-bit
-`"000001010"` while `v_shad_rng` kept the new 10-bit one — i.e. exactly the
-divergence section 8.3 describes — in a throwaway copy of the tree. The gate
-caught it. See the transcript in `docs/HISTORY.md` for the numbers.
+**Mutation-tested — the gate was proven able to fail, not assumed to be.** In a
+throwaway worktree off the shipped commit, `v_shad_rng`'s third term was
+reverted to the old 9-bit `"000001010"` (the full 32 KB) while `v_sel_shad3`
+kept the new 10-bit 16 KB compare. That one-line change — the entire diff
+against the shipped commit — is exactly the divergence 8.3 describes:
+0x50000-0x53FFF gets the fastpath suppressed *and* is never read from BRAM.
+
+| row | clean | mutant |
+|---|---|---|
+| 0x054000 VS3=1 VS3ON=1 | 5.015 ok | 5.015 ok |
+| 0x054000 VS3=1 VS3ON=0 | 4.015 ok | 4.015 ok |
+| **0x050000 VS3=1 VS3ON=1** | **4.015 ok** | **25.015 FAIL** |
+| 0x054000 VS3=0 VS3ON=1 | 4.015 ok | — |
+
+**25.015 clocks per bus cycle against 4.015** — a 6.2x slowdown on the video
+CPU, from a single wrong bit in an address compare, with nothing asserting and
+nothing mismatching. That is what "served by neither" costs, and it is why the
+gate trips on `>= 6.000` by name. Rows 1 and 2 still passed under the mutation,
+which matters: the gate is not simply failing everything it is shown.
+
+## 8.5 Fit and timing (CI run 32807811821, branch `vshad3-partial-112`)
+
+| | M10K | ALMs | worst setup | worst hold |
+|---|---|---|---|---|
+| BUILD 108, full 32 KB shadow | **308 / 308** (full) | — | — | — |
+| BUILD 110, no shadow (`tas-atomic`) | **283 / 308** | — | +5.698 | +0.103 |
+| **this build, 16 KB partial** | **299 / 308** (97%) | 13,562 / 18,480 (73%) | **+5.604** | **+0.087** |
+
+The partial shadow costs **16 M10K** where the full one cost 25, and leaves
+**9 blocks free** where the full one left zero. The `vshad3` instance itself
+reads `depth 8192, M10K=16` in the fit report's RAM summary — half the old
+`depth 16384, M10K=32` — so the halved decode and the halved instance did move
+together, which was the thing worth checking. **This is the number that decides
+whether the change was worth making, and at 299/308 it was: had it come back
+at 308/308 the change would have failed its purpose.**
+
+Timing: all **64** analysed clock/corner rows non-negative; the bitstream is
+publishable. Hold moved from +0.103 to +0.087, i.e. **-0.016 ns**, against this
+design's documented **±0.157 ns** perturbation sensitivity — a `BUILD_ID`
+constant alone has moved it 0.088 ns — so that movement is noise and **must not
+be read as caused by this change**. The sub-0.150 ns margin warning is not new
+and is not a failure: the baseline's +0.103 was already under the floor, and
+the tightest hold path is inside the PLL output counter
+(`altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk`), not in the shadow
+or decode path this change touches.
