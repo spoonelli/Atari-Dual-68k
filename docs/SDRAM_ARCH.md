@@ -154,6 +154,42 @@ gameplay. So CPU locality was swept rather than assumed:
 A 0.6-point spread across the entire plausible range. **The answer is
 insensitive to the one thing that was assumed rather than measured.**
 
+### 2.4 How hard is the extra CPU actually pushing? — a real qualification
+
+The one input with genuine uncertainty is `EFILL_PCT`, how often the extra CPU
+needs an SDRAM fill. 70% comes from `docs/VSHAD3.md`'s no-shadow figure, but
+`docs/DEVIATIONS.md` D2 notes the world CPU *"uses only 48% of its cycle
+budget"*, so an idler extra CPU is plausible. Swept, against the baseline
+controller:
+
+| `EFILL_PCT` | row-hit | client-switch share | MO served | service mean |
+|---|---|---|---|---|
+| 70% | 6.74% | 87.40% | **68.5%** | 14.12 |
+| 50% | 7.62% | 86.26% | **92.5%** | 14.12 |
+| 35% | 11.40% | 81.41% | 100% | 14.07 |
+| 20% | 20.70% | 70.49% | 100% | 14.00 |
+| 0% | 42.52% | 45.49% | 100% | 13.92 |
+
+Two conclusions, and they are different from each other:
+
+- **The architectural conclusion is robust.** Client-switch stays the dominant
+  miss cause across the whole plausible range — 70% to 87% for any extra-CPU
+  load from 20% upward. Open-row alone remains poor and banking remains the
+  change that matters. Only if the extra CPU stopped using SDRAM almost
+  entirely (0%) would the picture change, and it does not.
+- **The severity is load-dependent, and this is a real caveat.** Motion objects
+  are starved only when the extra CPU is genuinely busy: 68.5% served at 70%
+  fill, but fully served at 35% and below. So the *size* of the sprite-dropout
+  problem in the no-shadow configuration depends on how much the extra CPU
+  actually fetches — a quantity taken from a document rather than measured
+  here, because `tb_escape_core.vhd` never releases the extra CPU in the window
+  captured. **If the true figure is nearer 35% than 70%, the baseline is much
+  less broken than §2.1 suggests, and the case rests on latency rather than on
+  starvation.**
+
+Measuring the extra CPU's real fill rate is the single highest-value follow-up
+to this work.
+
 ### 2.4 Bench validity controls
 
 - **C1** MO only: bench reports SEQ-ROW **84.13%**; an offline analysis of the
