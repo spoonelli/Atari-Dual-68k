@@ -49,6 +49,7 @@ module tb_mob;
     parameter CACHE_EN = 0;
     parameter CACHE_N  = 32;
     parameter CACHE_IB = 5;
+    parameter CACHE_PF = 0;   // MOBURST-119 sibling-row prefetch
     parameter GFX_SEED = 16'hACE1;
 
     reg clk = 0;
@@ -149,7 +150,8 @@ module tb_mob;
 
     generate
         if(CACHE_EN) begin : g_cache
-            escape_mo_cache #(.ENTRIES(CACHE_N), .IDXBITS(CACHE_IB)) moc (
+            escape_mo_cache #(.ENTRIES(CACHE_N), .IDXBITS(CACHE_IB),
+                              .PREFETCH(CACHE_PF)) moc (
                 .clk(clk), .reset_n(rstn),
                 .mo_req(mo_req_w),   .mo_addr(mo_addr_w),
                 .mo_done(mo_done_w), .mo_data(mo_data_w),

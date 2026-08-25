@@ -39,7 +39,44 @@
 module escape_mo_cache #(
     parameter integer ENTRIES  = 32,     // must be a power of two
     parameter integer IDXBITS  = 5,      // log2(ENTRIES)
-    parameter integer ADDRBITS = 24
+    parameter integer ADDRBITS = 24,
+    // MOBURST-119: sibling-row prefetch. A tile row is 4 bytes and the rows of
+    // one tile are consecutive, so the row a sprite needs on the NEXT scanline
+    // is at addr^4. On a miss, pull that sibling too, in the background, so
+    // next line hits instead of paying another ~1.1us round trip - of which
+    // ~400ns is pure CDC done-return overhead paid PER TRANSACTION
+    // (core_top.v, SDSCHED-74). That per-transaction cost is what this
+    // amortises; it is the contained form of a burst, because a true 4-word
+    // burst would mean widening sd_rd_data and the SDRAM controller.
+    //
+    // THE RISK, stated up front: this issues an EXTRA transaction on a bus
+    // that is already the starved resource, and if the MO engine asks for that
+    // channel while the prefetch is in flight, its request waits. That is
+    // precisely the wrong thing to do under starvation, which is why it is a
+    // parameter and why the tile-hole gate has to judge it across seeds rather
+    // than one run. Default OFF.
+    //
+    // MEASURED, AND IT LOSES. Four jitter seeds at GFX_JIT=48 with the cache
+    // on, missing pixels without / with the prefetch:
+    //
+    //     seed 44257:  3 ->  0
+    //     seed  4660: 10 ->  0
+    //     seed 48879:  6 ->  6
+    //     seed  3870:  0 -> 59      <-- the risk above, realised
+    //     total:      19 -> 65
+    //
+    // Two seeds go to zero and one is unchanged, but the aggregate is 3.4x
+    // WORSE because a single seed blows up. That is the predicted failure and
+    // not an outlier to explain away: an extra transaction on the starved
+    // resource, plus a real request parked behind it, is exactly wrong under
+    // the conditions this whole exercise is about. It stays OFF and the code
+    // stays here so nobody re-derives the idea and re-measures it.
+    //
+    // A REAL burst - one transaction returning two rows - would not have this
+    // failure mode, because it adds no transactions. It needs sd_rd_data and
+    // the SDRAM controller widened from 2 words to 4, which is a controller
+    // change, not a cache change.
+    parameter integer PREFETCH = 0
 ) (
     input  wire         clk,
     input  wire         reset_n,
@@ -72,6 +109,11 @@ module escape_mo_cache #(
     // Per-channel in-flight bookkeeping for misses.
     reg [ADDRBITS-1:0] pend_addr [0:3];
     reg [3:0]          pend_busy;
+    // MOBURST-119 prefetch state, per channel.
+    reg [3:0]          pf_busy;              // a sibling fetch is in flight
+    reg [ADDRBITS-1:0] pf_addr   [0:3];
+    reg [3:0]          mo_wait;              // an MO request arrived during it
+    reg [ADDRBITS-1:0] mo_wait_a [0:3];
 
     integer i;
     genvar gc;
@@ -99,6 +141,8 @@ module escape_mo_cache #(
             mo_data    <= 128'd0;
             mem_addr   <= 96'd0;
             pend_busy  <= 4'd0;
+            pf_busy    <= 4'd0;
+            mo_wait    <= 4'd0;
             c_val      <= {ENTRIES{1'b0}};
             hit_cnt    <= 16'd0;
             miss_cnt   <= 16'd0;
@@ -111,7 +155,13 @@ module escape_mo_cache #(
 
             // ---- new requests from the MO engine
             for(i = 0; i < 4; i = i + 1) begin
-                if(req_edge[i] && !pend_busy[i]) begin
+                if(req_edge[i] && pf_busy[i]) begin
+                    // Channel is busy with a background sibling fetch. Park
+                    // this request; it is replayed when the prefetch lands,
+                    // and it may well HIT by then.
+                    mo_wait[i]   <= 1'b1;
+                    mo_wait_a[i] <= mo_addr[i*24 +: ADDRBITS];
+                end else if(req_edge[i] && !pend_busy[i]) begin
                     if(c_val[mo_addr[i*24 +: IDXBITS]] &&
                        c_tag[mo_addr[i*24 +: IDXBITS]] ==
                            mo_addr[i*24 + IDXBITS +: TAGBITS]) begin
@@ -134,10 +184,39 @@ module escape_mo_cache #(
 
             // ---- completions from memory
             for(i = 0; i < 4; i = i + 1) begin
+                // A background sibling fetch landing: install it, tell the
+                // MO engine nothing, then replay any parked request.
+                if(don_edge[i] && pf_busy[i]) begin
+                    pf_busy[i] <= 1'b0;
+                    if(!fill_en) begin
+                        fill_en  <= 1'b1;
+                        fill_idx <= pf_addr[i][IDXBITS-1:0];
+                        fill_tag <= pf_addr[i][ADDRBITS-1:IDXBITS];
+                        fill_dat <= mem_data[i*32 +: 32];
+                    end
+                    if(mo_wait[i]) begin
+                        mo_wait[i] <= 1'b0;
+                        pend_addr[i] <= mo_wait_a[i];
+                        pend_busy[i] <= 1'b1;
+                        mem_addr[i*24 +: ADDRBITS] <= mo_wait_a[i];
+                        mem_req[i] <= ~mem_req[i];
+                        if(miss_cnt != 16'hFFFF) miss_cnt <= miss_cnt + 16'd1;
+                    end
+                end
                 if(don_edge[i] && pend_busy[i]) begin
                     mo_data[i*32 +: 32] <= mem_data[i*32 +: 32];
                     mo_done[i]   <= ~mo_done[i];
                     pend_busy[i] <= 1'b0;
+                    // Launch the sibling row, only if nothing else wants this
+                    // channel and the sibling is not already cached.
+                    if(PREFETCH && !mo_wait[i] &&
+                       !(c_val[(pend_addr[i] ^ 3'd4) % ENTRIES])) begin
+                        pf_busy[i] <= 1'b1;
+                        pf_addr[i] <= pend_addr[i] ^ {{(ADDRBITS-3){1'b0}}, 3'd4};
+                        mem_addr[i*24 +: ADDRBITS] <=
+                            pend_addr[i] ^ {{(ADDRBITS-3){1'b0}}, 3'd4};
+                        mem_req[i] <= ~mem_req[i];
+                    end
                     // Populate, if the single fill port is free this clock.
                     if(!fill_en) begin
                         fill_en  <= 1'b1;
