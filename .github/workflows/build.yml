@@ -26,6 +26,71 @@ jobs:
             theypsilon/quartus-lite-c5:18.1 \
             quartus_sh --flow compile ap_core
 
+      # CLKFIX-106: until now this workflow had NO timing gate -- "never ship
+      # negative slack" was enforced only by a human remembering to grep the
+      # log. This gate parses the STA summary tables by COLUMN (the slack is
+      # the second field; a regex anchored at line start silently passed a
+      # -5.538 ns build on the MiSTer side) and refuses to certify if any
+      # expected table is missing, so it cannot report a clean bill of health
+      # without having actually looked. Verified against synthetic good, bad
+      # and truncated reports before being trusted.
+      # Diagnostic, never fails: shows which STA files exist and what their
+      # summary tables are actually called. The first version of the gate
+      # assumed bare names like "Setup Summary"; the Pocket report uses
+      # something else and the gate refused to certify, failing the build.
+      # Print the format so a naming change is self-diagnosing from the log
+      # instead of costing a compile cycle to discover.
+      - name: STA report format (diagnostic)
+        if: always()
+        run: |
+          ls -la src/fpga/output_files/ | grep -iE 'sta|rpt' || true
+          for f in src/fpga/output_files/*.sta.rpt; do
+            [ -f "$f" ] || continue
+            echo "--- $f ---"
+            grep -oE '^; [^;]*(Setup|Hold|Recovery|Removal|Pulse Width) Summary' "$f" | sort -u || true
+          done
+
+      # M10K is this design's other hard constraint: 308 blocks, all used, and
+      # a single newly inferred block fails the fit outright with Error 170048
+      # (docs/LESSONS.md). The fit failing IS the gate - but "the fit passed"
+      # tells you nothing about how close you came, and docs/mo_priority.md
+      # records M10K deltas being ARGUED rather than measured more than once.
+      # Print the number so the next change starts from a figure.
+      # Diagnostic, never fails: a naming change must not fail a good build.
+      - name: Block-RAM usage (diagnostic)
+        if: always()
+        run: |
+          f=src/fpga/output_files/ap_core.fit.rpt
+          [ -f "$f" ] || { echo "no fit report"; exit 0; }
+          grep -iE 'Total block memory bits|Total RAM Blocks|M10K blocks|Total block memory implementation bits' "$f" | head -20 || true
+
+      # HOLD-108: name the worst HOLD paths with full node names. The compile
+      # writes summary tables only - a clock, a slack, a TNS - so when a hold
+      # row came in at +0.005 ns nobody could say which register pair it was,
+      # and the only available move was to guess which recent change looked
+      # likeliest. Diagnostic, never fails.
+      # RESTORED 2026-08-24: this step was written for BUILD 108, used, and
+      # never merged to tas-atomic. BUILD 110 hit the same problem with no
+      # per-path report available. See docs/TIMING.md Part 2.
+      - name: Worst hold paths (diagnostic)
+        if: always()
+        run: |
+          docker run --rm -v "$PWD":/work -w /work/src/fpga \
+            theypsilon/quartus-lite-c5:18.1 \
+            quartus_sta -t ../../support/report_hold_paths.tcl || true
+          f=src/fpga/output_files/ap_core.hold_paths.rpt
+          if [ -f "$f" ]; then
+            echo "--- worst hold path endpoints ---"
+            grep -E 'Slack|From Node|To Node|Launch Clock|Latch Clock' "$f" | head -60
+          else
+            echo "no hold path report produced"
+          fi
+
+      - name: Timing gate (fail on negative slack)
+        run: |
+          test -f src/fpga/output_files/ap_core.sta.rpt
+          python3 support/check_slack.py src/fpga/output_files/ap_core.sta.rpt
+
       - name: Bit-reverse .rbf -> .rbf_r
         run: |
           test -f src/fpga/output_files/ap_core.rbf
@@ -34,9 +99,14 @@ jobs:
             src/fpga/output_files/ap_core.rbf output/bitstream.rbf_r
 
       - name: Upload bitstream
+        if: always()          # upload even if the timing gate failed, so the
+                              # STA report is inspectable without a rebuild
         uses: actions/upload-artifact@v4
         with:
           name: bitstream
           path: |
             output/bitstream.rbf_r
             src/fpga/output_files/ap_core.rbf
+            src/fpga/output_files/ap_core.sta.rpt
+            src/fpga/output_files/ap_core.fit.rpt
+            src/fpga/output_files/ap_core.hold_paths.rpt

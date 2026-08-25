@@ -302,6 +302,22 @@ def main():
                         same += 1
             print('exact-RGB match vs MAME (%s rule): %d/%d = %.2f%%'
                   % (tag, same, W * H, 100.0 * same / (W * H)))
+        # MOSTAIN-2: say what this number is evidence ABOUT, every time.
+        # BUILD 105 was shipped on "FACTORY MAP 100.00% exact-RGB" from this
+        # line. It did not survive contact with hardware, because the merge,
+        # the alpha layer and apply_stain above are all PYTHON. The stain
+        # automaton that actually ships lives in core_top.v and is in no
+        # testbench at all - iverilog only ever compiles escape_mob.v and
+        # escape_prio.v. A percentage here can only ever exonerate the model.
+        print('  NOTE: composite + apply_stain above are this script\'s own '
+              'Python. The shipped compositor (core_top.v: stain automaton, '
+              'colour_vaddr bit 10, colour-RAM upper bank) is NOT exercised '
+              'by this number, at any percentage.')
+        if a.mo_source == 'rtl' and not mo:
+            print('  NOTE: --mo-source rtl contributed ZERO MO pixels to this '
+                  'frame, so the RTL MO engine is not exercised by this '
+                  'number either. %d special pixels were used by the stain '
+                  'pass only.' % len(spc))
         sbs = Image.new('RGB', (W * 3, H))
         sbs.paste(ref, (0, 0))
         sbs.paste(im_old, (W, 0))

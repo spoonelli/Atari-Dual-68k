@@ -1,5 +1,6 @@
 -- Escape Video (main) 68000 bring-up in simulation.
--- TG68K (configured as a 68000) -> escape_decode -> program ROM + work/shared RAM.
+-- TG68K (configured as a 68010, matching the board) -> escape_decode -> program
+-- ROM + work/shared RAM.
 -- Releases reset and traces the boot bus cycles: we expect the 68000 to read the
 -- reset SP (longword @ 0x000000) and PC (longword @ 0x000004), then fetch its first
 -- instruction at the reset PC (0x000694). Seeing that sequence = the CPU is executing
@@ -42,7 +43,11 @@ begin
 
     ----------------------------------------------------------------------------
     cpu : entity work.TG68K
-        generic map ( CPU => "01" )            -- 68000 (Escape); System 1 used 68010
+        generic map ( CPU => "01" )            -- "01" = 68010, per TG68K.vhd:47.
+                                               -- (The old comment here read
+                                               -- '68000 (Escape)' and was exactly
+                                               -- inverted: the board IS a 68010,
+                                               -- MC68010P8, photographed.)
         port map (
             CLK => clk, RESET => resn, HALT => resn, BERR => '0',
             IPL => "111", ADDR => cpu_addr, FC => fc,

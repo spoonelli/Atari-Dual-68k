@@ -777,6 +777,22 @@ end
                                       // noise = the game writes garbage (extra CPU)
     reg        tone_74      = 1'b0;   // 0xA0000040: 'Audio Test Tone' - splits
                                       // i2s-path faults from JSA-side silence
+    // VSHAD3-112: 0xA0000150 'ROM Shadow 0x54000' (interact.json id 37).
+    // Address/id chosen after a collision sweep of interact.json and of every
+    // bridge_addr decode in this file: 0x140 is the EEPROM autosave bit,
+    // 0x120-0x13C are claimed by the MIX-100 RANGE decode below
+    // (bridge_addr[31:8]==A00001 && [7:0] in 0x20..0x3C && [1:0]==0), and
+    // 0x150 is matched by nothing else. A range decode is exactly how a
+    // "free-looking" address silently double-decodes, so the sweep checked
+    // ranges, not just equalities.
+    // ON  = the 16 KB partial shadow serves 0x54000-0x57FFF from BRAM
+    //       (5 CPU clocks/fetch, no SDRAM fill) - fewer motion-object
+    //       starvations, which is the sprite-dropout axis
+    // OFF = those fetches take the 4-clock fastpath instead - faster CPU,
+    //       more fill pressure on the lowest-priority SDRAM client
+    // Default ON. The BRAM is instantiated and filled either way, so this
+    // costs no M10K and can be flipped on device without a reflash.
+    reg        vshad3_on_74 = 1'b1;   // 0xA0000150: 'ROM Shadow 0x54000'
     reg        ee_autoen_74 = 1'b1;   // 0xA0000140: 'EEPROM Autosave' (default ON)
                                       // (0x120-0x13C belong to the MIX-100
                                       //  per-FM-channel mixer)
@@ -789,6 +805,7 @@ end
     reg [22:0] soft_rst_ctr = 23'd0;
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000140) ee_autoen_74 <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000150) vshad3_on_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
@@ -833,6 +850,11 @@ synch_3 s_pfmap(pfmap_74, pfmap_s, clk_sys_7159);
     wire [2:0] prefd_s;
 synch_3 s_armor(armor_74, armor_s, clk_sdram);
 synch_3 s_irqst(irqstrict_74, irqstrict_s, clk_sys_7159);
+    // VSHAD3-112 partial-shadow runtime toggle, into the CPU domain. Inside
+    // escape_core it is resampled only while the video CPU's AS is high, so
+    // it cannot change which memory answers a bus cycle already in flight.
+    wire vshad3_on_s;
+synch_3 s_vshad3(vshad3_on_74, vshad3_on_s, clk_sys_7159);
 synch_3 s_inpb(inprobe_74, inprobe_s, clk_sys_7159);
 synch_3 #(.WIDTH(3)) s_prefd(prefd_74, prefd_s, clk_sys_7159);
 synch_3 s_pfprobe(pfprobe_74, pfprobe_s, clk_sys_7159);
@@ -1193,6 +1215,35 @@ psram #(.CLOCK_SPEED(35.795455)) cram0 (
     // one-line revert if the device ever disagrees. 2 = DTACK-only, a bench
     // diagnostic that is deliberately broken; never ship it.
     localparam TASLOCK_EN  = 1;
+    // CPU-110 CABINET VARIANT SELECT for BOTH 68k cores.
+    //   0 = 68000, the JAMMA board
+    //   1 = 68010, the dedicated cabinet
+    // *** THIS LINE IS THE ONE PLACE TO CHANGE IT. ***
+    //
+    // Both values are authentic. Escape shipped in two cabinet variants with
+    // different CPUs, both confirmed from photographs: the dedicated board is
+    // an MC68010P8 (Motorola, date code A71R8813, matching SP-332's U68010 at
+    // 45J/20P -- SP-332 is the dedicated-cabinet package), and the JAMMA board
+    // is a 68000, which is what MAME models. This is a hardware-variant
+    // selector, not a hedge; neither setting is a "fallback".
+    //
+    // BUILD 109 and everything before it ran 0 and was a faithful JAMMA
+    // machine. That was never a bug. 110 switches to the dedicated board.
+    //
+    // BUILD 110 IS AN A/B AGAINST 109 AND THE PASS CONDITION IS "NO VISIBLE
+    // DIFFERENCE". Behaviour is identical -- measured over 400 frames, every
+    // correctness and liveness metric matches 109 exactly. Timing is NOT
+    // quite identical: interrupt entry costs ~5 clocks more, because the
+    // 68010 stacks an 8-byte exception frame instead of 6 (one extra word
+    // write on entry, one extra word read on RTE). That is authentic 68010
+    // cost -- a real MC68010P8 pays it -- and it is ~0.004% of a frame, so it
+    // is measurable in a bench and not perceptible on screen.
+    //
+    // Do NOT expect a SPEED-UP: TG68K implements no 68010 loop mode, and loop
+    // mode measures 0.0000% of the video CPU's frame work here regardless. If
+    // anything 110 is a hair slower on interrupt entry. Anything you can
+    // actually SEE on 110 is a finding to chase, not a win.
+    localparam CPU_TYPE    = 1;
     wire [23:0] fpv_addr_w, fpe_addr_w;      // escape_core exports (7.159 dom)
     wire        fpv_spec_w, fpe_spec_w;
     reg  [23:0] fpv_addr_s, fpe_addr_s;      // 35.8-domain samples
@@ -1282,7 +1333,8 @@ psram #(.CLOCK_SPEED(35.795455)) cram0 (
     // path where it used to be a 2:1 mux. Combinational depth on the
     // CPU-shared grant therefore goes DOWN, not up, at four channels.
     //
-    // Cost: one clk_sdram cycle (11.6ns) of extra arbitration latency per MO
+    // Cost: one clk_sdram cycle (27.94ns; CLKFIX-106 - the old "11.6ns" here
+    // was the 85.909MHz period) of extra arbitration latency per MO
     // fetch, against a round trip of ~1.1us. Fixed priority 0>1>2>3 keeps the
     // old "A before B" order.
     //
@@ -1863,8 +1915,61 @@ end
     // the walk path - it faked a broken floor on the 2026-08-19 video):
     //   0 JSA (resp/coin+credits) | 1 extra-CPU (PC/mbox)
     //   2 main-CPU (PC/wr-region) | 3 engine (actor head/mode bytes)
+    //   4 apply_stain diagnostic (MOSTAIN-2)
     // vidkill stays on R2 HOLD only; CRAM sums retired (sim benches cover).
-    reg [1:0] dbgmode = 2'd0;
+    //
+    // MOSTAIN-2 page 4 answers ONE question: how much of the marker does the
+    // stain actually cover? BUILD 105 does fire on hardware - the START marker
+    // does go grey - but only ~34 native pixels of it, where MAME's own frame
+    // changes 200. These three fields quantify the shortfall and name its shape.
+    //
+    //   field1 = stained pixels this frame      (16-bit, saturating)
+    //   field2 = special (MPR2) pixels carrying a START or END marker bit
+    //            (16-bit, saturating) - the same quantity tb_mob reports as
+    //            "special pixels", which is 296 on this screen
+    //   field3 = {first, last} scanline carrying a stained pixel
+    //
+    // Photograph page 4 ON THE FACTORY MAP. MAME's truth for that screen:
+    //   field1 = 0140 (320 stained)   field2 = 0128 (296 specials)
+    //   field3 = 96AD (rows 150..173)
+    //
+    // CAREFUL: field3 counts where the stain is APPLIED, not where it is
+    // VISIBLE, and here those differ sharply. The specials span rows 150..173,
+    // but rows 150..157 lie over black background where staining changes
+    // nothing: MAME's own VISIBLE change is rows 158..173 (200 px), and
+    // hardware's is rows 168..173 (34 px). So a full 96AD span with a full
+    // 0140 count would mean coverage is CORRECT and the shortfall is in the
+    // palette - do not read field3 against the 6 rows the capture shows.
+    // Read the three together:
+    //
+    //   field3 = 0000       -> the counter block never ran. STOP: the other
+    //                          two fields mean nothing. (A live counter that
+    //                          saw no stain reads FF00, never 0000, because
+    //                          ln_first resets to FF and ln_last to 00.)
+    //   field3 = FF00       -> counter alive, nothing stained this frame.
+    //   field2 << 0128      -> the specials are not reaching the MO line
+    //                          buffer. The stain cannot cover what it is never
+    //                          told about; the fault is in escape_mob / the
+    //                          tile fetch under real SDRAM contention, which
+    //                          no current bench models (tb_mob's gfx model is
+    //                          dedicated and shows 296 at every latency).
+    //   field2 ~= 0128,
+    //     field1 << 0140    -> specials arrive but runs die early: the
+    //                          scanline automaton or its S/E derivation.
+    //   field2 ~= 0128,
+    //     field1 ~= 0140,
+    //     field3 =  96AD    -> the compositor applies the stain exactly where
+    //                          MAME does, so the shortfall is downstream of
+    //                          color_vaddr: the upper colour bank holds
+    //                          different values here than in MAME for the pens
+    //                          that did NOT turn grey. Grey appearing at all
+    //                          does not refute this - it proves the bank is
+    //                          written for SOME pens, not for all of them.
+    // field3 names the SHAPE either way: a span much shorter than 96AD with
+    // field2 near 0128 means whole scanlines are being dropped rather than
+    // runs truncated. See docs/mo_priority.md.
+    // MOSTAIN-2: widened to 3 bits for the apply_stain page (mode 4).
+    reg [2:0] dbgmode = 3'd0;
     // SDSCHED-85 trace view: L2 toggles (demotes the alpha-hide bringup
     // tool); R steps backward through entries while active.
     reg       m_trace = 1'b0;
@@ -1880,7 +1985,7 @@ end
         end
         if(cont1_key[9] & ~rbtn_d) begin
             if(m_trace) tr_back <= tr_back + 7'd1;
-            else        dbgmode <= dbgmode + 2'd1;
+            else        dbgmode <= (dbgmode == 3'd5) ? 3'd0 : dbgmode + 3'd1;
         end
     end
     // LANE3h3: modes 1-5 RETIRED (answered questions - PF map, input probe,
@@ -1894,26 +1999,81 @@ end
     // draws the in-game world; when gameplay fails to populate, this names
     // where it is: field1 = extra-CPU PC (frame-latched; frozen = wedged/
     // quiesced, churning = alive), field3 = last mailbox response word.
-    wire m_eprobe  = (dbgmode == 2'd1);
+    wire m_eprobe  = (dbgmode == 3'd1);
     // LANE3m: mode 3 = MAIN-CPU window (field1 = video-CPU PC frame-latched,
     // field3 = last main data-write addr [23:8]) - names where the game
     // state machine sits when the world is drawn but objects never move.
-    wire m_vprobe  = (dbgmode == 2'd2);
+    wire m_vprobe  = (dbgmode == 3'd2);
     // LANE3r: mode 4 = ENGINE window. field1 = actor-table head word 3F5000
     // (MAME truth: 0000 on attract art pages, 0x12xx when the demo/game has
     // spawned actors); field3 = {mode byte 3F7F16, mode byte 3F7F23} (MAME:
     // 60/18 on art pages, 54/2a during demo play).
-    wire m_gprobe  = (dbgmode == 2'd3);
+    wire m_gprobe  = (dbgmode == 3'd3);
     wire m_pfprobe = 1'b0;
     wire m_mopri_px     = 1'b0;
     wire m_mokill       = 1'b0;
     wire m_mopri_sd;
 synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire m_vidkill_px   = 1'b0;   // LANE3y: cycle slot removed; R2 hold remains
-    wire m_moprobe      = 1'b0;   // LANE3y: CRAM sums retired (muxes prune)
+    // LANE3y retired the CRAM sums; MOSTAIN-2 reuses that already-present
+    // mux level for the apply_stain page, so fields 1 and 3 cost no extra
+    // mux depth in the hex row (only field 2 adds a level).
+    wire m_stain      = (dbgmode == 3'd4);
+    // CADENCE-107: page 5 = THE CADENCE PAGE, and the only page here that is
+    // not a proxy. field1 = video-CPU logic frames per 256 video frames,
+    // field2 = world-CPU ditto, field3 = the video CPU's bus cycles/frame so
+    // the proxy and the thing it was proxying for can be photographed
+    // together. 0100 hex = 1.0000 updates/frame; MAME's reference for the
+    // same measurement is 0.9977 video / 0.9999 world (docs/PERF_CADENCE.md),
+    // i.e. 00FF/0100. Anything appreciably under 0100 is a missed deadline
+    // rate, in the units the arcade board is quoted in.
+    wire m_cadence    = (dbgmode == 3'd5);
+    // Frame-latched in escape_core; re-latched here at the HUD's own vblank
+    // edge so a digit can never be sampled mid-update. Registers only.
+    reg [15:0] cadv_fr = 16'd0, cadw_fr = 16'd0;
+    always @(posedge clk_sys_7159)
+        if(vblank_w && !vb_hud_d) begin
+            cadv_fr <= dbg_cadv;
+            cadw_fr <= dbg_cadw;
+        end
     reg [7:0] mgreq_cnt, mopen_cnt;
     reg [15:0] moprobe_fr;
     reg [15:0] cst0_px, cst1_px, cst0_m, cst1_m;
+    // ---- MOSTAIN-2: apply_stain hardware diagnostic (dbgmode 4) ----
+    // BUILD 105 shipped the stain pass and NOTHING on screen changed. Two
+    // completely different faults produce that exact symptom - an unstained
+    // pen and a stain into an empty palette bank can both leave the marker
+    // its original colour - so these counters are built to separate them,
+    // and to make a zero reading falsifiable rather than merely quiet.
+    //
+    // Everything saturates (never wraps) so FF/FFFF means "at least this
+    // many", never "none". Latched at vblank into the *_fr registers so the
+    // HUD shows one whole frame, not a partial one.
+    //
+    //   stain_px_fr  pixels whose colour-RAM address had bit 10 set
+    //   spc_px_fr    special (MPR2) pixels present in the MO line buffer
+    //   wit_fr       the liveness witness, as two saturating nibbles:
+    //                  [7:4] active-video pixels seen  -> F if this counter
+    //                        block ran AT ALL this frame
+    //                  [3:0] motion-object pixels drawn -> F on any screen
+    //                        that has sprites, 0 on one that has none
+    //
+    // Two nibbles rather than one count because the screen this diagnostic
+    // exists for - the FACTORY MAP - has NO drawable sprites (MAME's own MO
+    // model draws 296 pixels there and every one of them is special). An
+    // MO-pixel witness is therefore legitimately 0 on exactly the screen
+    // being photographed, which would make it useless. [7:4] does not
+    // depend on the MO path at all, so it separates "nothing to count" from
+    // "this counter never ran":
+    //   wit = F0  counter alive, no sprites on screen  (FACTORY MAP: normal)
+    //   wit = FF  counter alive, sprites present       (gameplay: normal)
+    //   wit = 00  the counter never ran - every other number on this page
+    //             is meaningless and must not be reported as a zero result
+    reg [15:0] stain_px = 16'd0, stain_px_fr = 16'd0;
+    reg [15:0] spc_px   = 16'd0, spc_px_fr   = 16'd0;
+    reg [7:0]  ln_first = 8'hFF, ln_last     = 8'h00;
+    reg [15:0] lnspan_fr = 16'hFF00;
+    // MOSTAIN-2 page field 3: {first, last} scanline carrying a stained pixel
     reg mgreq_d2;
     always @(posedge clk_sys_7159) begin
         mgreq_d2 <= mo_gfx_req[0];
@@ -2021,10 +2181,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // attract NEVER resets after boot (extra released once at T=11s,
         // runs forever) - our ~35s reboot loop = a main-CPU death, and this
         // page names it.
-        4'd0:  hex_digit = m_trace ? tr_step[7:4] : m_moprobe ? cst0_px[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
-        4'd1:  hex_digit = m_trace ? tr_step[3:0] : m_moprobe ? cst0_px[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
-        4'd2:  hex_digit = m_trace ? (trace_frozen ? 4'hF : 4'h0) : m_moprobe ? cst0_px[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
-        4'd3:  hex_digit = m_trace ? tr_addr[23:20] : m_moprobe ? cst0_px[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
+        4'd0:  hex_digit = m_trace ? tr_step[7:4] : m_cadence ? cadv_fr[15:12] : m_stain ? stain_px_fr[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
+        4'd1:  hex_digit = m_trace ? tr_step[3:0] : m_cadence ? cadv_fr[11:8]  : m_stain ? stain_px_fr[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
+        4'd2:  hex_digit = m_trace ? (trace_frozen ? 4'hF : 4'h0) : m_cadence ? cadv_fr[7:4]   : m_stain ? stain_px_fr[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
+        4'd3:  hex_digit = m_trace ? tr_addr[23:20] : m_cadence ? cadv_fr[3:0]   : m_stain ? stain_px_fr[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
         // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
@@ -2037,22 +2197,22 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // page 0 field2 = LANE4l max extra bus-cycle length: normal cycles
         // are tiny (< 0x0040); a stuck write shows FFFF = the invisible
         // freeze mode (bus active, rescue can't see it)
-        4'd5:  hex_digit = m_trace ? tr_addr[19:16] : m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
-        4'd6:  hex_digit = m_trace ? tr_addr[15:12] : m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
-        4'd7:  hex_digit = m_trace ? tr_addr[11:8] : m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
-        4'd8:  hex_digit = m_trace ? tr_addr[7:4] : m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
+        4'd5:  hex_digit = m_trace ? tr_addr[19:16] : m_cadence ? cadw_fr[15:12] : m_stain ? spc_px_fr[15:12] : m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
+        4'd6:  hex_digit = m_trace ? tr_addr[15:12] : m_cadence ? cadw_fr[11:8]  : m_stain ? spc_px_fr[11:8] : m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
+        4'd7:  hex_digit = m_trace ? tr_addr[11:8] : m_cadence ? cadw_fr[7:4]   : m_stain ? spc_px_fr[7:4] : m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
+        4'd8:  hex_digit = m_trace ? tr_addr[7:4] : m_cadence ? cadw_fr[3:0]   : m_stain ? spc_px_fr[3:0] : m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
-        4'd10: hex_digit = m_trace ? tr_data[15:12] : m_moprobe ? cst1_px[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? pg2_f3[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
-        4'd11: hex_digit = m_trace ? tr_data[11:8] : m_moprobe ? cst1_px[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? pg2_f3[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
-        4'd12: hex_digit = m_trace ? tr_data[7:4] : m_moprobe ? cst1_px[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? pg2_f3[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
-        4'd13: hex_digit = m_trace ? tr_data[3:0] : m_moprobe ? cst1_px[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? pg2_f3[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
+        4'd10: hex_digit = m_trace ? tr_data[15:12] : m_cadence ? vcyc_fr[15:12] : m_stain ? lnspan_fr[15:12] : m_eprobe ? mbox_fr[15:12] : m_vprobe ? pg2_f3[15:12] : m_gprobe ? gmode_fr[15:12] : coincred_fr[15:12];
+        4'd11: hex_digit = m_trace ? tr_data[11:8] : m_cadence ? vcyc_fr[11:8]  : m_stain ? lnspan_fr[11:8]  : m_eprobe ? mbox_fr[11:8]  : m_vprobe ? pg2_f3[11:8]  : m_gprobe ? gmode_fr[11:8]  : coincred_fr[11:8];
+        4'd12: hex_digit = m_trace ? tr_data[7:4] : m_cadence ? vcyc_fr[7:4]   : m_stain ? lnspan_fr[7:4]   : m_eprobe ? mbox_fr[7:4]   : m_vprobe ? pg2_f3[7:4]   : m_gprobe ? gmode_fr[7:4]   : coincred_fr[7:4];
+        4'd13: hex_digit = m_trace ? tr_data[3:0] : m_cadence ? vcyc_fr[3:0]   : m_stain ? lnspan_fr[3:0]   : m_eprobe ? mbox_fr[3:0]   : m_vprobe ? pg2_f3[3:0]   : m_gprobe ? gmode_fr[3:0]   : coincred_fr[3:0];
         // LANE4c: slot 14 (the gap) shows the crash SOURCE digit on page 2
         // (0=BRAM 1=prefetch 2=cache 3=fresh-SDRAM) - names which serve
         // path delivered the wrong opcode word
         4'd14: hex_digit = m_trace ? tr_addr[3:0] : {2'b00, crash_src};
-        4'd15: hex_digit = m_trace ? tr_flag : {2'b00, dbgmode};
+        4'd15: hex_digit = m_trace ? tr_flag : {1'b0, dbgmode};
         default: hex_digit = 4'h0;
         endcase
     end
@@ -2067,14 +2227,14 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3105;   // STAIN: apply_stain second pass + special-sprite masking - screen shows '05'
+    localparam [15:0] BUILD_ID = 16'h3112;   // VSHAD3-16K: partial shadow at 0x54000 + runtime toggle (id 37) - screen shows '12'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
     wire [1:0] ver_slot = vx0[5:4];
     reg  [3:0] ver_digit;
     always @(*) case(ver_slot)
-        2'd0: ver_digit = {2'b00, dbgmode}; 2'd1: ver_digit = BUILD_ID[15:12];
+        2'd0: ver_digit = {1'b0, dbgmode}; 2'd1: ver_digit = BUILD_ID[15:12];
         2'd2: ver_digit = BUILD_ID[7:4];   default: ver_digit = BUILD_ID[3:0];
     endcase
     wire [2:0] ver_gy  = visible_y[2:0] - 3'd4;      // y228..233 -> rows 0..5
@@ -2235,6 +2395,81 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         if(x_count == 10'd0) begin
             pf_rp <= pf_wp;
             pfq_count <= 3'd0; pfq_rd <= pfq_wr;
+        end
+
+        // ---- PFRESET-111: the playfield fetch channel MUST reset with the
+        // core. Backport of PFRESET-107 (dcd1196) from the MiSTer port, where
+        // this exact omission rendered the playfield as a flat fill on real
+        // DE10-Nano hardware while sprites and alphanumerics stayed perfect.
+        //
+        // The mechanism, which is platform-independent:
+        //
+        //   * x_count/y_count and therefore this whole block free-run from
+        //     power-on - they are held only by the Pocket-level reset_n
+        //     (:538), never by core_reset_n. So this block keeps enqueueing
+        //     cells and issuing fetches while the core is held in reset.
+        //   * a fetch issued here sets inflA (or inflB) and toggles
+        //     vg_reqA_px. inflA is cleared in exactly ONE place - the
+        //     completion edge at :2325 - and nowhere else.
+        //   * meanwhile the SDSCHED-75 reset resync at :1708-1716 runs on
+        //     EVERY clk_sdram edge that core_rstn_sd is low and does
+        //     "vg_reqA_last <= vg_reqA_s", which RETIRES that pending request
+        //     edge without ever completing it. It is the last writer of
+        //     vg_reqA_last in that always block, so it also overrides the CRAM
+        //     read-start chain at :1508 in a same-cycle collision - but only
+        //     the resync's value is written, and the chain's cram_read_en /
+        //     cvg_ph side effects still happen, so a fetch the chain DID pick
+        //     up still completes. The lost ones are the fetches the chain
+        //     could not start that cycle (cq_n != 0, cram_busy, cvg_ph != 0,
+        //     or chk_state != 4'd10) - the chain gets exactly one cycle to
+        //     catch each edge before the resync eats it.
+        //   * reset releases with inflA (and/or inflB) stuck at 1 and
+        //     vg_reqA_last == vg_reqA_s. The issue side above requires
+        //     !inflA / !inflB, so that channel never toggles a request again
+        //     and the arbiter never sees a pending edge again. The channel is
+        //     wedged for the rest of the session: one channel wedged silently
+        //     degrades the A/B ping-pong to the one-in-flight design that
+        //     PF_SINGLE_CH exists to reject; both wedged leaves pfring0..3 at
+        //     their power-on zeros and every tile decodes to pixel index 0.
+        //
+        // The resync is CORRECT for the motion objects: escape_mob zeroes its
+        // own request toggles and in-flight state under reset (:646-658), so
+        // the tracker there is following a real reset, not eating a real
+        // request. The playfield was the one client with no reset at all.
+        //
+        // Why this has not visibly failed on Pocket, MEASURED rather than
+        // assumed (sim/run_pf_reset_tb.sh, three scenarios):
+        //
+        //   * reset with the CRAM controller IDLE: no loss. 456 fetches
+        //     issued across an 8-line reset, all 456 completed. The
+        //     read-start chain is not gated by core_rstn_sd the way the
+        //     MiSTer port's pf_pend_q is, so it catches every edge in the one
+        //     cycle it has. This is the case a bare menu soft reset hits, and
+        //     it is why the playfield has survived 35+ builds.
+        //   * reset with chk_state != 4'd10: wedges both channels every time.
+        //   * reset with chk_state == 4'd10 AND the download-mirror drain
+        //     running (cq_n != 0 blocks a PF read start): wedges both channels
+        //     - i.e. any dataslot re-download, which drops
+        //     dataslot_allcomplete and therefore core_reset_n while chk_state
+        //     is already 4'd10 and the mirror queue is busy.
+        //
+        // So the exposure is narrow, not absent, and its narrow edge is sharp:
+        // TWO lost requests kill the layer, and losing only one silently
+        // reverts the design to the one-in-flight arrangement that
+        // PF_SINGLE_CH exists to reject. docs/PIPELINES.md already flags a
+        // toggle-handshake channel with no reset as "a latent wedge on every
+        // platform"; this removes the dependence on that margin.
+        //
+        // The fix is to give this channel the same reset escape_mob gives its
+        // own: while reset is held the request toggles sit at 0, the resync
+        // tracks 0, and release starts both sides in agreement with nothing in
+        // flight. Registers only - no new storage, no change to the SDRAM
+        // grant path. Demonstrated failing-then-fixed in sim/tb/tb_pf_reset.v.
+        if(!core_reset_n) begin
+            vg_reqA_px <= 1'b0;  vg_reqB_px <= 1'b0;
+            inflA      <= 1'b0;  inflB      <= 1'b0;
+            pfq_count  <= 3'd0;  pfq_wr     <= 2'd0;  pfq_rd <= 2'd0;
+            pf_wp      <= 2'd0;  pf_rp      <= 2'd0;
         end
     end
 
@@ -2424,17 +2659,41 @@ escape_prio uprio (
     // A solid marker (pen 6 = both bits) therefore stains its own silhouette
     // plus the one pixel past its right edge, exactly like the C loop; a pen-2
     // marker stains to the end of the line, also exactly like the C loop.
-    reg        stain_alive = 1'b0;
-    reg        stain_e_q   = 1'b0;
-    wire       stain_now   = mo_stain_s | stain_alive;
-    wire       stain_brk   = stain_e_q & ~mo_stain_s;
+    //
+    // GFXDASH-3: the automaton itself now lives in src/fpga/core/rtl/escape_stain.v
+    // so that a testbench can drive THE SHIPPED INSTANCE. It was inline here,
+    // in a file no sim script compiles, which is why the only "stain" check in
+    // the tree (sim/tools/check_stain_automaton.py) tests a transcription. The
+    // extraction is behaviour-preserving: same two flip-flops, same reset
+    // value, same clear condition, same two equations. See sim/tb/tb_stain.v.
+    wire       stain_now;
+escape_stain ustain (
+    .clk        ( clk_sys_7159 ),
+    .line_start ( visible_x == 10'd0 ),
+    .s_in       ( mo_stain_s ),
+    .e_in       ( mo_stain_e ),
+    .stain      ( stain_now )
+);
+
+    // MOSTAIN-2: count what the stain pass actually did this frame. Gated to
+    // active video so blanking cannot inflate any of the three. Declared up
+    // with the other HUD registers; see the comment there for how to read them.
+    wire stain_dbg_active = (visible_x < VID_H_ACTIVE) && (visible_y < VID_V_ACTIVE);
     always @(posedge clk_sys_7159) begin
-        if(visible_x == 10'd0) begin        // first cycle of a new line
-            stain_alive <= 1'b0;
-            stain_e_q   <= 1'b0;
-        end else begin
-            stain_alive <= stain_now & ~stain_brk;
-            stain_e_q   <= mo_stain_e;
+        if(vblank_w && !vb_hud_d) begin
+            stain_px_fr <= stain_px;  stain_px <= 16'd0;
+            spc_px_fr   <= spc_px;    spc_px   <= 16'd0;
+            lnspan_fr   <= {ln_first, ln_last};
+            ln_first    <= 8'hFF;     ln_last  <= 8'h00;
+        end else if(stain_dbg_active) begin
+            if(stain_now && stain_px != 16'hFFFF)
+                stain_px <= stain_px + 16'd1;
+            if((mo_stain_s | mo_stain_e) && spc_px != 16'hFFFF)
+                spc_px <= spc_px + 16'd1;
+            if(stain_now) begin
+                if(visible_y[7:0] < ln_first) ln_first <= visible_y[7:0];
+                if(visible_y[7:0] > ln_last)  ln_last  <= visible_y[7:0];
+            end
         end
     end
 
@@ -2480,6 +2739,9 @@ escape_prio uprio (
     wire        e_dead;                           // LANE4i freeze rescue
     wire [15:0] dbg_estall;                       // LANE4l stall probe (unused in HUD now)
     wire [15:0] dbg_vcyc, dbg_ecyc;               // LANE4s speed meters
+    // CADENCE-107: logic-frame STARTS per 256 video frames, per CPU, counted
+    // off the game's own re-entrancy flags. 0100 = 1.0000 updates/frame.
+    wire [15:0] dbg_cadv, dbg_cadw;
     wire [15:0] dbg_ewild;                        // LANE4s wild-jump source PC
     wire        dbg_eintab;                       // extra executing data table now
     wire [15:0] dbg_awr;                          // SDSCHED-75 alpha writes/frame
@@ -2575,7 +2837,24 @@ hall_stick hall_p2 (
 // the hardware does not have - they are kept only for A/B. The entity's own
 // default is still 2 and is overridden here; read THIS line, not the default.
 // (The previous comment here claimed mode 2 while the line passed 0.)
+// VSHAD3-112 PARTIAL SHADOW. History: BUILD 108 shipped the full 32 KB
+// shadow at 0x50000-0x57FFF (308/308 M10K, dropouts 3.22e-4); BUILD 109
+// turned it off for the CPU clock (283/308, never below 0.652 cadence);
+// BUILD 110's capture then measured dropouts at 1.25e-3, 3.6-3.9x worse and
+// sitting ON the real board's 95% upper bound. Mechanism in docs/VSHAD3.md:
+// un-shadowing moves the video CPU from issuing SDRAM fills on ~39% of its
+// bus cycles to ~70%, and motion objects are the lowest-priority client.
+// This build takes the middle: VSHAD3_EN=1 instantiates HALF the shadow -
+// 16 KB at 0x54000-0x57FFF, the busier half by the re-derived MAME execution
+// profile - for roughly half the BRAM, and vshad3_on makes it a runtime
+// toggle so the two behaviours can be A/B'd on the device without a reflash.
+// The BRAM is filled either way, so the toggle costs no M10K.
+// CPU-110: CPU_TYPE is overridden here as well. The entity's own default is
+// also 1 (68010 / dedicated cabinet), but read THIS line, not the default --
+// and the localparam above is where the JAMMA/68000 setting lives.
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
+              .VSHAD3_EN(1),
+              .CPU_TYPE(CPU_TYPE),
               .TASLOCK_EN(TASLOCK_EN)) ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
@@ -2626,6 +2905,7 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .step_btn   ( step_s ),
     .skip_test  ( skip_test_s ),
     .irq_strict ( irqstrict_s ),
+    .vshad3_on  ( vshad3_on_s ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
     .p2_buttons ( {cont2_key[4]|cont2_key[8], 1'b0, cont2_key[5]|cont2_key[8], cont2_key[7]|cont2_key[8]} ),
@@ -2658,6 +2938,8 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .dbg_estall     ( dbg_estall ),
     .dbg_vcyc       ( dbg_vcyc ),
     .dbg_ecyc       ( dbg_ecyc ),
+    .dbg_cadv       ( dbg_cadv ),
+    .dbg_cadw       ( dbg_cadw ),
     .dbg_ewild      ( dbg_ewild ),
     .dbg_eintab     ( dbg_eintab ),
     .dbg_awr        ( dbg_awr ),

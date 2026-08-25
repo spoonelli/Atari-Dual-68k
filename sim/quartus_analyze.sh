@@ -18,5 +18,5 @@ if [ ! -d "$REPO_ROOT/third_party/Arcade-Atari-system1_MiSTer/rtl" ]; then
 fi
 
 docker run --rm --platform linux/amd64 \
-  -v "$REPO_ROOT":/work "${TPMOUNT[@]}" -w /work/src/fpga \
+  -v "$REPO_ROOT":/work ${TPMOUNT[@]+"${TPMOUNT[@]}"} -w /work/src/fpga \
   "$IMAGE" quartus_map --analysis_and_elaboration ap_core

@@ -27,8 +27,16 @@ module tb_mob_perf;
     // servers - core_top serializes every MO fetch through one SDRAM read port
     // (mo_owner), so only the round trip overlaps, not the port occupancy.
     // That is a fair model as long as occupancy << GFX_LAT/NCH: an MO burst
-    // holds mo_owner for ~10 clocks at 85.909MHz = 116ns, against a 139.68ns
-    // pixel clock, so real occupancy is well under ONE pixel clock.
+    // holds mo_owner for ~10 clocks at 35.795455MHz = 279ns, against a
+    // 139.68ns pixel clock.
+    // CLKFIX-106/PERFDIV-111: this used to read "10 clocks at 85.909MHz =
+    // 116ns ... so real occupancy is well under ONE pixel clock". clk_sdram is
+    // 35.795455 MHz (mf_pllbase outclk_2), so the period is 27.94ns and the
+    // burst is 279ns - TWO pixel clocks, not "well under one". The stated
+    // justification for the independent-latency model was therefore backwards:
+    // occupancy is NOT << GFX_LAT/NCH. Use GFX_OCC (below) to re-measure any
+    // concurrency claim against a serialized port rather than trusting the
+    // independent model's absolute numbers.
     // GFX_OCC forces a minimum spacing between fetch STARTS across all four
     // channels so the concurrency win can be re-measured against a serialized
     // port. 0 = the independent model (matches the pre-MOCHAN-4 bench exactly).
@@ -168,11 +176,47 @@ module tb_mob_perf;
     );
 
     // ---------------- MOFETCH instrumentation
-    // Everything below is measured over ONE frame (the measured window), so the
-    // numbers are directly comparable to the 456 cycles x 240 lines a frame has.
+    // Everything below is measured over ONE frame (the measured window).
+    //
+    // PERFDIV-111: that window is `repeat (VID_V_TOTAL * VID_H_TOTAL)` - all
+    // 262 scanlines, blanking included - and the phase counters below are
+    // gated on `measuring` alone, so they accumulate over 262 lines, not 240.
+    // The per-line divisors used to be a literal 240 (and chan_occupancy a
+    // literal 240*456), which inflated every per-line figure this bench ever
+    // printed by 262/240 = 1.0917, i.e. ~9.2% high. The tell was visible in
+    // the output the whole time: "per line: 186/63/55/192" sums to 496 cycles
+    // on a scanline that only has 456. The comment that seeded the mistake
+    // read "directly comparable to the 456 cycles x 240 lines a frame has" -
+    // it confused the ACTIVE-area budget with the ACCUMULATION window.
+    //
+    // The error is common-mode: it scaled every phase and every configuration
+    // identically, so all relative comparisons and all conclusions drawn from
+    // them are unaffected. Only the absolute per-line numbers were wrong.
+    //
+    // Divisors now reference the localparams so they cannot drift again, and
+    // PERF cycles_check below asserts the identity that would have caught it.
+    //
+    // "Per line" is now stated TWICE, because there are two defensible
+    // denominators and the old output silently mixed them:
+    //
+    //   frame-mean  = total / VID_V_TOTAL (262). Every scanline in the frame,
+    //                 blanking included. Sums to exactly VID_H_TOTAL.
+    //   during-build= in-build total / VID_V_ACTIVE (240). escape_mob only
+    //                 STARTS a build for y in [vbporch-1, vbporch+vactive-1),
+    //                 which is 240 lines, so this answers "when a build is
+    //                 running, where do the 456 cycles of that line go".
+    //
+    // MEASURED, not assumed: a build started on the last build line runs on
+    // into vblank, so the phase counters are NOT confined to the 240 build
+    // lines (a representative run leaves trav=66 prime=125 blit=669 cycles in
+    // the 22 vblank lines). Dividing the whole-frame total by 240 - which is
+    // what this bench used to do - is therefore wrong under BOTH definitions.
+    // The two splits are printed side by side so nobody has to guess again.
     localparam S_IDLE = 4'd0, S_BLIT = 4'd11, S_PRIME = 4'd13;
 
     integer c_idle, c_trav, c_prime, c_blit;     // cycles by phase, this frame
+    // PERFDIV-111: same four phases, restricted to the build window.
+    integer b_idle, b_trav, b_prime, b_blit, b_win, v_win;
     integer n_lines, n_complete, n_aborted;      // build outcome per line
     integer n_ymatch, n_wren, n_wren_off, n_reqs;
     integer n_budget_out;                        // lines that hit fetch_budget==0
@@ -217,6 +261,85 @@ module tb_mob_perf;
     integer n_chclash, qk;
     // lead time per slot, shadowing the queue's own shift
     integer pf_t [0:8];
+    // MODIAG-1: WHERE THE FETCH STALL ACTUALLY IS.
+    // startup/steady splits the S_PRIME stall by tiles-per-sprite, which says
+    // WHICH sprite the engine is waiting on but not WHY. These say why, and
+    // they are what decide whether the next lever is channels or issue time.
+    //   c_pr_unissued - waiting for a tile whose fetch has NOT gone out yet.
+    //                   That is issue bandwidth: a free channel, or the pump's
+    //                   one-issue-per-cycle rate. More channels, deeper queues
+    //                   and row buffers all attack this term.
+    //   c_pr_inflight - the fetch is out and we are waiting for memory. Pure
+    //                   GFX_LAT. Nothing downstream of the issue touches it;
+    //                   only asking EARLIER does.
+    //   c_pr_t1/c_pr_tn - and which tile. The pump cannot ask for a sprite's
+    //                   tile 1 until pump_live, i.e. until the blitter has
+    //                   LOADED that sprite; tile 0 then blits for 8 cycles
+    //                   while tile 1 is still GFX_LAT-8 away. Tiles 2,3,...
+    //                   went out on the following cycles and have nearly
+    //                   caught up by the time they are wanted.
+    //   c_pumpblk     - the pump wanting a channel and not getting one, counted
+    //                   ONLY while the blitter is simultaneously stalled.
+    //                   Unqualified it over-counts wildly: a sprite with all
+    //                   four tiles in flight has no free channel and is not
+    //                   stalled at all.
+    //   c_chbusy      - summed channels held (infl|pend); over the window this
+    //                   is mean channel occupancy out of NCH.
+    // Uses only signals every revision since MOCHAN-4 has, so it scores the
+    // shipping engine without any RTL change.
+    //
+    // ---- WHAT THEY SAID, THE FIRST TIME THEY WERE READ -------------------
+    // Recorded here so the next person does not have to re-derive it, and so a
+    // later change can be diffed against a real baseline rather than a memory.
+    // Shipping engine (BUILD 106 escape_mob.v, byte-identical to 105's) at
+    // scene 50/157, GFX_LAT=31, one frame:
+    //
+    //   prime 33,682  =  startup 9,395  +  steady 24,287
+    //   unissued 50      inflight 33,632
+    //   tx1 17,153       txN 7,134
+    //   pump_blocked 16,937            chan_occupancy 2.00 / 4
+    //
+    // Two readings, and they point the same way:
+    //
+    //  1. 99.85% of the fetch stall (33,632 of 33,682) is waiting for MEMORY on
+    //     a fetch that has already gone out. Only 50 cycles a frame are spent
+    //     waiting for a tile nobody has asked for yet. The pump is therefore
+    //     NOT channel-starved, and anything that merely frees channels sooner
+    //     has almost nothing to free. That is not a prediction: MOHARV-1 built
+    //     exactly such a change - harvesting the pump's completed rows out of
+    //     their channels into an in-order row buffer, so a channel is released
+    //     at completion instead of at blit - and measured it. It worked as
+    //     designed (4,383 harvests a frame, chan_occupancy 2.00 -> 1.80, scout
+    //     channel starvation 13,604 -> 7,931 cycles, prime 33,682 -> 33,181)
+    //     and moved COVERAGE NOT AT ALL, in all nine sweep cells and at lat 40,
+    //     48 and 62 as well. It was dropped. See branch mo-harvest if the
+    //     channel theory ever looks attractive again; it is already refuted.
+    //
+    //  2. 71% of the whole steady-state term (17,153 of 24,287) is ONE sprite's
+    //     SECOND tile. The cause is structural, not statistical: pump_ready
+    //     requires pump_live, which is S_PRIME|S_BLIT, so a sprite's tile 1
+    //     cannot be requested until the blitter has already LOADED that sprite.
+    //     Tile 0 then blits for 8 cycles while tile 1 is still GFX_LAT-8 cycles
+    //     away - 23 of them at lat31 - and that is one unavoidable stall per
+    //     sprite. Tiles 2,3,... are issued on the cycles immediately after tile
+    //     1 and have nearly caught up by the time they are wanted, which is why
+    //     txN is a third of tx1 despite covering every later tile of every
+    //     sprite in the frame. (At lat62 the two converge - tx1 18,079 vs txN
+    //     18,237 - because there even the trailing tiles can no longer catch
+    //     up. The lever below widens to tiles 1..n at that point.)
+    //
+    // So the next sprite-throughput lever is ISSUE TIME: the SCOUT prefetching
+    // tile 1 (and, at high latency, tiles 1..n) of a sprite that is still
+    // PARKED, so the fetch is in flight before the blitter ever loads it. The
+    // scout already decodes and holds code_row and row for every queue slot, so
+    // tile k's address is code_row + k with no new decode; and chan_occupancy
+    // of 1.80-2.00 out of 4 says the channels to do it with are sitting idle.
+    // Note that such a prefetch WOULD need MOHARV-1's harvest to come back with
+    // it - a prefetched later tile parked behind the blitter would otherwise
+    // pin its channel from issue all the way to its blit - so the two changes
+    // belong together, in that order, and neither is worth landing alone.
+    integer c_pr_unissued, c_pr_inflight, c_pr_t1, c_pr_tn, c_pumpblk, c_chbusy;
+    integer chb;
 `endif
     // DRAW-ORDER PROOF. The sequence of sprites the blitter loads, per built
     // line, dumped so the depth engine can be diffed against the depth-1 one:
@@ -241,6 +364,7 @@ module tb_mob_perf;
 
     initial begin
         c_idle=0; c_trav=0; c_prime=0; c_blit=0;
+        b_idle=0; b_trav=0; b_prime=0; b_blit=0; b_win=0; v_win=0;
         n_lines=0; n_complete=0; n_aborted=0;
         n_ymatch=0; n_wren=0; n_wren_off=0; n_reqs=0; n_budget_out=0;
         px_seen=0; line_entries=0; max_entries=0; n_entries=0;
@@ -253,6 +377,8 @@ module tb_mob_perf;
             c_qd[qk]=0; n_pf_slot[qk]=0; pf_t[qk]=0;
         end
         c_sc_room=0; c_sc_walk=0; c_yield=0; n_chclash=0;
+        c_pr_unissued=0; c_pr_inflight=0; c_pr_t1=0; c_pr_tn=0;
+        c_pumpblk=0; c_chbusy=0; chb=0;
 `endif
         n_orderslip=0; ord_h=0; ord_t=0;
     end
@@ -317,6 +443,20 @@ module tb_mob_perf;
             n_pf_slot[dut.sc_sel] = n_pf_slot[dut.sc_sel] + 1;
             pf_t[dut.sc_sel] = now_t;
         end
+        // ---- MODIAG-1 census ----------------------------------------------
+        if(dut.state == S_PRIME && !dut.tile_rdy
+           && dut.pump_ready && !dut.pump_pref && !dut.ch_any)
+            c_pumpblk = c_pumpblk + 1;
+        chb = 0;
+        for(qk = 0; qk < NCH; qk = qk + 1)
+            if(dut.infl[qk] || dut.pend[qk]) chb = chb + 1;
+        c_chbusy = c_chbusy + chb;
+        if(dut.state == S_PRIME && dut.blit_n == 4'd14) begin
+            if(!dut.tile_live)      c_pr_unissued = c_pr_unissued + 1;
+            else                    c_pr_inflight = c_pr_inflight + 1;
+            if(dut.tx == 3'd1)      c_pr_t1 = c_pr_t1 + 1;
+            else if(dut.tx > 3'd1)  c_pr_tn = c_pr_tn + 1;
+        end
 `endif
 `ifndef MOB_BASE
         // ---- DRAW-ORDER INVARIANT, checked in the bench's own FIFO ----------
@@ -344,6 +484,18 @@ module tb_mob_perf;
         if(dut.state == S_BLIT && state_d != S_BLIT && dut.blit_n == 4'd0)
             n_tilerows = n_tilerows + 1;
         state_d <= dut.state;
+        // PERFDIV-111: build-window split. Same gate escape_mob.v uses to
+        // start a build, so b_win is exactly VID_V_ACTIVE lines.
+        if(y_count >= VID_V_BPORCH-1 && y_count < VID_V_BPORCH+VID_V_ACTIVE-1) begin
+            b_win = b_win + 1;
+            case(dut.state)
+                S_IDLE:  b_idle  = b_idle  + 1;
+                S_BLIT:  b_blit  = b_blit  + 1;
+                S_PRIME: b_prime = b_prime + 1;
+                default: b_trav  = b_trav  + 1;
+            endcase
+        end else
+            v_win = v_win + 1;
         case(dut.state)
             S_IDLE:  c_idle  = c_idle  + 1;
             S_BLIT:  c_blit  = c_blit  + 1;
@@ -539,13 +691,48 @@ module tb_mob_perf;
                  n_pf_slot[0], n_pf_slot[1], n_pf_slot[2], n_pf_slot[3], n_pf_slot[4]);
         $display("PERF scout walk=%0d queue_full=%0d port_yield=%0d chan_clash=%0d order_slips=%0d",
                  c_sc_walk, c_sc_room, c_yield, n_chclash, n_orderslip);
+        $display("PERF primewhy unissued=%0d inflight=%0d tx1=%0d txN=%0d pump_blocked=%0d chan_occupancy=%0d.%02d (of prime %0d)",
+                 c_pr_unissued, c_pr_inflight, c_pr_t1, c_pr_tn, c_pumpblk,
+                 c_chbusy/(VID_V_TOTAL*VID_H_TOTAL),                 // PERFDIV-111: was 240*456
+                 (100*c_chbusy/(VID_V_TOTAL*VID_H_TOTAL))%100, c_prime);
 `endif
         $display("PERF prime_split issue=%0d startup=%0d steady=%0d (startup is %0d%% of prime)",
                  c_pr_issue, c_pr_start, c_pr_steady,
                  c_prime ? (100*c_pr_start)/c_prime : 0);
-        $display("PERF cycles idle=%0d traverse=%0d prime=%0d blit=%0d (per line: %0d/%0d/%0d/%0d)",
-                 c_idle, c_trav, c_prime, c_blit,
-                 c_idle/240, c_trav/240, c_prime/240, c_blit/240);
+        // PERFDIV-111: divide by the ACCUMULATION window (VID_V_TOTAL lines),
+        // not by VID_V_ACTIVE. See the instrumentation header above.
+        $display("PERF cycles idle=%0d traverse=%0d prime=%0d blit=%0d (per line of %0d: %0d.%02d/%0d.%02d/%0d.%02d/%0d.%02d)",
+                 c_idle, c_trav, c_prime, c_blit, VID_V_TOTAL,
+                 c_idle /VID_V_TOTAL, (100*c_idle /VID_V_TOTAL)%100,
+                 c_trav /VID_V_TOTAL, (100*c_trav /VID_V_TOTAL)%100,
+                 c_prime/VID_V_TOTAL, (100*c_prime/VID_V_TOTAL)%100,
+                 c_blit /VID_V_TOTAL, (100*c_blit /VID_V_TOTAL)%100);
+        // PERFDIV-111 self-check: the four phases partition every measured
+        // clock, so they MUST sum to exactly the measurement window. If this
+        // ever prints MISMATCH, either a divisor drifted again or a counter
+        // stopped being gated on `measuring` alone - do not trust any per-line
+        // figure from that run.
+        $display("PERF cycles_build idle=%0d traverse=%0d prime=%0d blit=%0d (per build line of %0d: %0d.%02d/%0d.%02d/%0d.%02d/%0d.%02d)",
+                 b_idle, b_trav, b_prime, b_blit, VID_V_ACTIVE,
+                 b_idle /VID_V_ACTIVE, (100*b_idle /VID_V_ACTIVE)%100,
+                 b_trav /VID_V_ACTIVE, (100*b_trav /VID_V_ACTIVE)%100,
+                 b_prime/VID_V_ACTIVE, (100*b_prime/VID_V_ACTIVE)%100,
+                 b_blit /VID_V_ACTIVE, (100*b_blit /VID_V_ACTIVE)%100);
+        // How much engine work lands outside the build window. If these are
+        // nonzero (they are), the "phases only happen on build lines" model
+        // is false and total/VID_V_ACTIVE is not a valid per-line figure.
+        $display("PERF cycles_vblank idle=%0d traverse=%0d prime=%0d blit=%0d (over %0d vblank lines)",
+                 c_idle-b_idle, c_trav-b_trav, c_prime-b_prime, c_blit-b_blit,
+                 v_win/VID_H_TOTAL);
+        if(c_idle + c_trav + c_prime + c_blit === VID_V_TOTAL*VID_H_TOTAL
+           && b_win === VID_V_ACTIVE*VID_H_TOTAL)
+            $display("PERF cycles_check OK frame_sum=%0d == %0d, build_win=%0d == %0d (both per-line divisors are sound)",
+                     c_idle+c_trav+c_prime+c_blit, VID_V_TOTAL*VID_H_TOTAL,
+                     b_win, VID_V_ACTIVE*VID_H_TOTAL);
+        else
+            $display("PERF cycles_check MISMATCH frame_sum=%0d (want %0d) build_win=%0d (want %0d) -- per-line figures from this run are NOT trustworthy",
+                     c_idle+c_trav+c_prime+c_blit, VID_V_TOTAL*VID_H_TOTAL,
+                     b_win, VID_V_ACTIVE*VID_H_TOTAL);
         $finish;
     end
     always @(posedge clk) begin

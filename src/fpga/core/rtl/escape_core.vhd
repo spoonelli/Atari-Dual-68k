@@ -19,6 +19,34 @@ entity escape_core is
         -- 1 = serve low-64KB code from the download-filled shadows (hardware);
         -- 0 = disable (GHDL tbs: shadows unfilled, all fetches via arbiter)
         SHAD_EN   : integer := 1;
+        -- VSHAD3: the main CPU's THIRD shadow. Added (aca5510, 2026-08-20) as
+        -- 32 KB at 0x50000-0x57FFF / 32 M10K, when the only alternative to
+        -- BRAM was the legacy 15-25 clock SDRAM arbiter. The zero-wait
+        -- fastpath landed two days later (2b18183) and inverted the premise:
+        -- a fastpath hit closes in 4 CPU clocks, the shadow BRAM path in 5,
+        -- so a shadow COSTS this CPU a clock on its hottest code and
+        -- v_shad_rng suppresses the fastpath on exactly those addresses.
+        -- BUILD 109 therefore turned it off; BUILD 110's capture then showed
+        -- shadow-off is 3.6-3.9x worse for sprite dropouts, because
+        -- un-shadowing takes the video CPU from issuing fills on ~39% of its
+        -- bus cycles to ~70% and the motion-object engine is the LOWEST
+        -- priority SDRAM client. docs/VSHAD3.md predicted exactly that.
+        --
+        -- VSHAD3-112: the shadow is now HALF SIZE - 16 KB at 0x54000-0x57FFF,
+        -- awidth 13 - which halves the BRAM cost while keeping the busier
+        -- half of the old range shadowed. WHICH half is busier was measured,
+        -- not assumed, and the answer is the HIGH one: 94.5% of the main
+        -- CPU's traffic inside 0x50000-0x57FFF lands in 0x54000-0x57FFF, and
+        -- almost all of that in page 0x56000 - which is exactly where the
+        -- video CPU's per-frame body goes (0x4052E: jsr $5673E / jsr $56120).
+        -- Pages 0x50000/0x51000/0x52000 are read ZERO times during gameplay.
+        -- Method and numbers: docs/VSHAD3.md section 8. The generic is the
+        -- COMPILE-TIME control: 1 =
+        -- instantiate the 16 KB BRAM and its decode, 0 = remove it entirely.
+        -- The RUNTIME control is the vshad3_on port below, which gates the
+        -- decode only - it does not remove the BRAM.
+        -- sim/run_busrate.sh measures the per-fetch clock cost of both paths.
+        VSHAD3_EN : integer := 1;
         -- SDSCHED-81: 1 = per-byte parity on the ROM CDC (rom_par4 valid).
         -- The legacy single bit passes any 2-bit error - and a passed error
         -- is EXECUTED. Per-byte detection feeds the existing retry path.
@@ -70,7 +98,50 @@ entity escape_core is
         --       leaves the write strobe live. Exists only to demonstrate in
         --       the bench that a DTACK-only interlock does NOT work, because
         --       we_shr_a/we_shr_b assert on every clock of a stalled cycle.
-        TASLOCK_EN : integer := 1
+        TASLOCK_EN : integer := 1;
+        -- CPU-110 CABINET VARIANT SELECT for both TG68K instances.
+        --   0 = 68000, the JAMMA board       (TG68K CPU=>"00")
+        --   1 = 68010, the dedicated cabinet (TG68K CPU=>"01")
+        --
+        -- THIS IS NOT A HEDGE AND NEITHER VALUE IS A FALLBACK. Escape shipped
+        -- in two cabinet variants with different CPUs and both are confirmed
+        -- from photographs: the dedicated board carries MC68010P8 (Motorola,
+        -- date code A71R8813, matching SP-332's "U68010" at 45J/20P - SP-332
+        -- IS the dedicated-cabinet package), and the JAMMA board carries a
+        -- 68000, which is what MAME's eprom driver models. Set this to
+        -- whichever machine you are emulating; both are authentic.
+        --
+        -- DEFAULT IS 1 (dedicated / 68010). BUILD 109 and everything before it
+        -- ran 0, and was a faithful JAMMA machine - that was never a bug.
+        -- Declared integer, like every other generic here, so core_top.v can
+        -- override it across the Verilog/VHDL boundary exactly the way it
+        -- overrides FASTPATH_EN / VSHAD3_EN / TASLOCK_EN. The override in
+        -- core_top.v is the single place to change it.
+        --
+        -- BEHAVIOUR IS IDENTICAL; TIMING IS NOT, BY ~5 CLOCKS PER INTERRUPT.
+        -- Measured A/B over 400 frames of dual-CPU traffic (worldwake bench,
+        -- CPU_TYPE 0 vs 1): every correctness and liveness metric is
+        -- identical - wakes 388/388, iacks 388/388, premature 0, restarts 0,
+        -- failpark 0, both ALIVE - but the vblank->360000 ack delay averages
+        -- 73 clocks at 0 and 78 clocks at 1. That +5 is the extended
+        -- exception frame doing exactly what it should: 8 bytes stacked
+        -- instead of 6 is one extra word write on entry and one extra word
+        -- read on RTE, i.e. ~2 bus cycles. It is authentic 68010 cost, not a
+        -- regression - a real MC68010P8 pays it too - and it is ~0.004% of a
+        -- 119,318-clock frame, so it is measurable but not perceptible.
+        --
+        -- Only CPU(0) does anything, and it gates exactly two kernel features
+        -- (TG68KdotC_Kernel.vhd:138-145): SR_Read (MOVE from SR becomes
+        -- privileged - inert, all 7 sites in this ROM run supervisor, and
+        -- :2082 permits it whenever SVmode='1') and VBR_Stackframe (VBR plus
+        -- the 8-byte exception frame - inert, VBR provably stays 0 because no
+        -- MOVEC exists at any even offset in either 512 KB image, and no
+        -- handler does pointer arithmetic around the frame). Everything else
+        -- keys on CPU(1), which is 0 for both values.
+        -- 68010 LOOP MODE IS NOT A REASON TO PREFER EITHER: TG68K does not
+        -- implement it at all, and it measures 0.0000% of the video CPU's
+        -- per-frame work on this game regardless. No speed change, either way.
+        CPU_TYPE : integer := 1
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -155,6 +226,17 @@ entity escape_core is
         -- so the boot takes its already-passed branch (Interact "Skip Self-Test")
         skip_test  : in  std_logic := '0';
         irq_strict : in  std_logic := '0';   -- v71: JSA timed-IRQ ack strictness
+        -- VSHAD3-112 runtime toggle (Interact "ROM Shadow 0x50000", id 37 /
+        -- 0xA0000150), default ON. '1' = the 16 KB partial shadow serves
+        -- 0x50000-0x53FFF from BRAM and suppresses the fastpath there;
+        -- '0' = those addresses take the fastpath instead, exactly as
+        -- VSHAD3_EN=0 does, but without rebuilding. The BRAM stays
+        -- instantiated and filled either way (that is the point: the owner
+        -- A/Bs sprite dropouts against CPU cadence on the device without a
+        -- reflash), so the M10K cost is paid by VSHAD3_EN alone.
+        -- Only meaningful when VSHAD3_EN=1; tied '1' by default so every
+        -- existing testbench keeps its current behaviour.
+        vshad3_on  : in  std_logic := '1';
         -- LANE4k user audio mixer (Interact): 0=mute .. 7=unity
         uvol_ym    : in  std_logic_vector(2 downto 0) := "111";
         uvol_tms   : in  std_logic_vector(2 downto 0) := "111";
@@ -234,6 +316,25 @@ entity escape_core is
         -- reference - answers "are the processors actually at speed?"
         dbg_vcyc        : out std_logic_vector(15 downto 0);
         dbg_ecyc        : out std_logic_vector(15 downto 0);
+        -- CADENCE-107: the game's OWN logic cadence, not a proxy for it.
+        -- Every bus-cycle figure this core reports is a proxy: it says how
+        -- fast the processors run, not whether the game met its deadline.
+        -- docs/PERF_CADENCE.md measures the original in the units that
+        -- matter - LOGIC UPDATES PER VIDEO FRAME, 0.9977 video / 0.9999
+        -- world in MAME - by tapping the two re-entrancy flags each ISR
+        -- writes: $50 to $16CCD4 (main/video) and $16CCD6 (extra/world)
+        -- starts a logic frame, $00 ends it. These count the $50 writes
+        -- over 256 video frames, so 0100 hex IS 1.0000 updates/frame and
+        -- the number is directly comparable to MAME's without assuming
+        -- anything about clocks, bus cycles or wait states.
+        -- (The docs also name $16C990/$16C992 as "logic-frame counters".
+        -- They are incremented BEFORE the already-running gate - see the
+        -- listing in PERF_CADENCE section 1 - so they count ISR entries,
+        -- i.e. video frames, and would read 1.0000 even on a core that was
+        -- missing every other deadline. The flags are the tap that produced
+        -- the reference numbers, so the flags are what is counted here.)
+        dbg_cadv        : out std_logic_vector(15 downto 0);
+        dbg_cadw        : out std_logic_vector(15 downto 0);
         -- LANE4s: source PC of the extra's last jump into the 0xA62-0xB7F
         -- data table, and a live flag that it is currently executing there
         dbg_ewild       : out std_logic_vector(15 downto 0);
@@ -317,6 +418,12 @@ end escape_core;
 
 architecture rtl of escape_core is
     signal v_addr : std_logic_vector(31 downto 0);
+    -- CADENCE-107 logic-frame cadence meter
+    signal cad_v_ctr, cad_w_ctr : unsigned(15 downto 0) := (others=>'0');
+    signal cad_v_fr,  cad_w_fr  : unsigned(15 downto 0) := (others=>'0');
+    signal cad_fcnt : unsigned(7 downto 0) := (others=>'0');
+    signal cad_vb_d, cad_v_d, cad_w_d : std_logic := '0';
+
     signal v_do, v_di : std_logic_vector(15 downto 0);
     signal v_as_n, v_uds_n, v_lds_n, v_rw_n : std_logic;
     signal v_dtack_n : std_logic;
@@ -385,6 +492,14 @@ architecture rtl of escape_core is
     signal v_fast_to, e_fast_to   : std_logic := '0';
     signal v_to_ctr, e_to_ctr     : unsigned(3 downto 0) := (others=>'0');
     signal v_shad_rng, e_shad_rng : std_logic;
+    -- VSHAD3-112: the single gate term for the partial shadow. v_s3_en is
+    -- what BOTH v_shad_rng's third term and v_sel_shad3 key on, so they
+    -- cannot diverge - see the comment above v_shad_rng. v_s3_arm is the
+    -- runtime toggle resampled only while the video CPU's bus is idle
+    -- (v_as_n='1'), so a mid-cycle flip cannot change which memory is
+    -- answering a cycle that has already started.
+    signal v_s3_arm : std_logic := '1';
+    signal v_s3_en  : std_logic;
     signal v_rom_hold, e_rom_hold : std_logic_vector(15 downto 0);
     signal v_pref_data, e_pref_data : std_logic_vector(15 downto 0);
     signal v_pref_addr, e_pref_addr : std_logic_vector(19 downto 0);
@@ -541,6 +656,12 @@ architecture rtl of escape_core is
     signal retry_cnt  : unsigned(15 downto 0) := (others=>'0');
     signal rom_par_ok : std_logic;
     signal alpha_wr_stretch : unsigned(19 downto 0);
+    -- CPU-110: integer CPU_TYPE -> TG68K's 2-bit CPU generic. 0 => "00"
+    -- (68000 / JAMMA), 1 => "01" (68010 / dedicated). Only those two values
+    -- are supported; TG68K also defines "11" for 68020, which neither board
+    -- ever was.
+    constant CPU_SEL : std_logic_vector(1 downto 0)
+        := std_logic_vector(to_unsigned(CPU_TYPE, 2));
     -- ADC0809 behavioral model (260020-2E)
     signal adc_data : std_logic_vector(7 downto 0) := x"80";
     signal adc_chan : std_logic_vector(1 downto 0) := "00";
@@ -548,8 +669,27 @@ architecture rtl of escape_core is
     signal adc_rd, adc_rd_d, adc_eoc : std_logic;
 begin
     ---------------------------------------------------------------- CPUs
-    -- 68000 (schematic says U68010 but real boards carry 68000s); autovectored IRQs via VPA
-    vcpu : entity work.TG68K generic map ( CPU => "00" )
+    -- ESCAPE SHIPPED IN TWO CABINET VARIANTS WITH DIFFERENT CPUs, and both
+    -- are authentic:
+    --   dedicated cabinet = 68010. Photographed on the owner's board:
+    --       Motorola "MC68010P8", date code A71R8813. SP-332 - which IS the
+    --       dedicated-cabinet package - draws both CPUs "U68010" (sheet 4
+    --       designator 45J "VCPU"; sheet 5 designator 20P "ECPU").
+    --   JAMMA version     = 68000. Also photographed. This is what MAME's
+    --       eprom driver models with M68000.
+    -- So the schematic and MAME never actually contradicted each other; they
+    -- describe different machines. (The old comment here claimed "real boards
+    -- carry 68000s" as against the schematic. That came from one
+    -- unphotographed inspection in 24d900e which generalised a single board to
+    -- all production, and it is retracted - see docs/CPU_AND_ARBITER.md 1.6.)
+    --
+    -- CPU_TYPE (see the generic above) picks which variant we are, via
+    -- CPU_SEL. Both CPUs always take the same value, so the pair can never be
+    -- accidentally mismatched. Measured, this ROM cannot tell the two parts
+    -- apart at all (docs/CPU_AND_ARBITER.md 1.3/1.3.1/1.4), so neither setting
+    -- can be wrong for a given player's board.
+    -- autovectored IRQs via VPA.
+    vcpu : entity work.TG68K generic map ( CPU => CPU_SEL )
         port map ( CLK=>clk, RESET=>reset_n, HALT=>reset_n, BERR=>'0', IPL=>v_ipl,
                    ADDR=>v_addr, FC=>v_fc, DATAI=>v_di_r, DATAO=>v_do,
                    AS=>v_as_n, UDS=>v_uds_n, LDS=>v_lds_n, RW=>v_rw_n,
@@ -557,8 +697,9 @@ begin
                    LOCK=>v_lock );
 
     e_resn <= reset_n and (extra_release or dbg_force_extra);
-    -- also a 68000 (same schematic-vs-board story as the video CPU)
-    ecpu : entity work.TG68K generic map ( CPU => "00" )
+    -- Same part as the video CPU on both variants (schematic 20P "ECPU"),
+    -- and run in the same mode - see the video CPU comment above.
+    ecpu : entity work.TG68K generic map ( CPU => CPU_SEL )
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>e_ipl,
                    ADDR=>e_addr, FC=>e_fc, DATAI=>e_di_r, DATAO=>e_do,
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,
@@ -618,9 +759,37 @@ begin
     -- 35.8 side can fill speculatively) plus the same image-address mapping
     -- the arbiter uses. Combinational on purpose; sampled by single FFs in
     -- the 35.8 domain (timed paths per the SDSCHED-73 SDC grouping).
+    -- VSHAD3-107/112: the third term is the vshad3 range, now 16 KB at
+    -- 0x54000-0x57FFF (v_addr(23 downto 14) = "0000010101"). With the shadow
+    -- disabled - by VSHAD3_EN=0 at compile time OR by the vshad3_on port at
+    -- runtime - it drops out of BOTH this decode and v_sel_shad3 below, so
+    -- those addresses stop suppressing the fastpath as well as stopping being
+    -- read from BRAM. THE TWO MUST MOVE TOGETHER OR THE RANGE WOULD BE SERVED
+    -- BY NEITHER: v_shad_rng='1' with v_sel_shad3='0' kills the fastpath and
+    -- never reads the BRAM, leaving every fetch to the 16-clock never-wedge
+    -- watchdog. That is why both key on the single signal v_s3_en.
+    v_s3_en <= '1' when VSHAD3_EN = 1 and v_s3_arm = '1' else '0';
+
+    -- Resample the runtime toggle only between bus cycles. The toggle crosses
+    -- from clk_74a through core_top's synch_3, so it is already metastability
+    -- safe here; this gate is about ATOMICITY, not CDC - v_sel_shad3 steers
+    -- v_di and v_rom_pend, and flipping it under a live AS would change which
+    -- memory answers a cycle already in flight.
+    s3_arm_p : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n = '0' then
+                v_s3_arm <= vshad3_on;
+            elsif v_as_n = '1' then
+                v_s3_arm <= vshad3_on;
+            end if;
+        end if;
+    end process;
+
     v_shad_rng <= '1' when SHAD_EN = 1 and (v_addr(23 downto 14) = "0000000000"
                        or v_addr(23 downto 15) = "000001001"
-                       or v_addr(23 downto 15) = "000001010") else '0';
+                       or (v_s3_en = '1'
+                           and v_addr(23 downto 14) = "0000010101")) else '0';
     e_shad_rng <= '1' when SHAD_EN = 1 and (e_addr(23 downto 14) = "0000000000"
                        or e_addr(23 downto 12) = x"00F") else '0';
     fast_v_spec <= '1' when FASTPATH_EN = 1 and v_shad_rng = '0'
@@ -1134,6 +1303,65 @@ begin
     end process;
     dbg_awr <= std_logic_vector(awr_fr);
 
+    -- CADENCE-107: logic-frame starts per 256 video frames, per CPU.
+    -- Register-only (two counters, two latches, an 8-bit frame divider and
+    -- two address comparators), so the M10K delta is structurally zero - the
+    -- same shape as mbox_snoop above, which is why that was the template.
+    -- The write strobes are level-per-clock by design (see the SDSCHED-80
+    -- note on v_wr), so each write is edge-detected on the fully-qualified
+    -- condition exactly as mbox_ledger does it.
+    cadence_meter : process(clk)
+        variable vstart, wstart : std_logic;
+    begin
+        if rising_edge(clk) then
+            if reset_n='0' then
+                cad_v_ctr <= (others=>'0'); cad_w_ctr <= (others=>'0');
+                cad_v_fr  <= (others=>'0'); cad_w_fr  <= (others=>'0');
+                cad_fcnt  <= (others=>'0');
+                cad_vb_d  <= '0'; cad_v_d <= '0'; cad_w_d <= '0';
+            else
+                -- $16CCD4 and $16CCD6 are EVEN byte addresses, so the byte
+                -- travels on D15..D8 under UDS. Word index is (addr & FFFF)/2
+                -- in the shared RAM's own 15-bit space, matching mbox_snoop.
+                vstart := '0'; wstart := '0';
+                if we_shr_a='1' and shr_a_addr = "110011001101010"
+                   and shr_a_uds = '0' and shr_a_din(15 downto 8) = x"50"
+                then vstart := '1'; end if;
+                if we_shr_b='1' and e_addr(15 downto 1) = "110011001101011"
+                   and e_uds_n = '0' and e_do(15 downto 8) = x"50"
+                then wstart := '1'; end if;
+
+                cad_vb_d <= vblank_in;
+                if vblank_in='1' and cad_vb_d='0' and cad_fcnt = x"FF" then
+                    -- end of a 256-frame window: publish and restart. A start
+                    -- landing on this very clock is carried into the new
+                    -- window rather than dropped, so no count is ever lost.
+                    cad_v_fr <= cad_v_ctr; cad_w_fr <= cad_w_ctr;
+                    cad_fcnt <= (others=>'0');
+                    if vstart='1' and cad_v_d='0' then
+                        cad_v_ctr <= to_unsigned(1, 16);
+                    else cad_v_ctr <= (others=>'0'); end if;
+                    if wstart='1' and cad_w_d='0' then
+                        cad_w_ctr <= to_unsigned(1, 16);
+                    else cad_w_ctr <= (others=>'0'); end if;
+                else
+                    if vblank_in='1' and cad_vb_d='0' then
+                        cad_fcnt <= cad_fcnt + 1;
+                    end if;
+                    if vstart='1' and cad_v_d='0' then
+                        cad_v_ctr <= cad_v_ctr + 1;
+                    end if;
+                    if wstart='1' and cad_w_d='0' then
+                        cad_w_ctr <= cad_w_ctr + 1;
+                    end if;
+                end if;
+                cad_v_d <= vstart; cad_w_d <= wstart;
+            end if;
+        end if;
+    end process;
+    dbg_cadv <= std_logic_vector(cad_v_fr);
+    dbg_cadw <= std_logic_vector(cad_w_fr);
+
     cyc_meter : process(clk)
     begin
         if rising_edge(clk) then
@@ -1267,8 +1495,13 @@ begin
                             and v_addr(23 downto 14) = "0000000000" else '0';
     v_sel_shad2 <= '1' when SHAD_EN=1 and v_sel_rom='1'
                             and v_addr(23 downto 15) = "000001001" else '0';
-    v_sel_shad3 <= '1' when SHAD_EN=1 and v_sel_rom='1'
-                            and v_addr(23 downto 15) = "000001010" else '0';
+    -- VSHAD3-112: 16 KB at 0x54000-0x57FFF (the measured-busier half; the
+    -- 0x50000-0x53FFF half now takes the fastpath), gated by the SAME
+    -- v_s3_en that gates v_shad_rng's third term above. Do not open-code the
+    -- enable here and do not open-code the range - if these two decodes ever
+    -- disagree, the range is served by neither.
+    v_sel_shad3 <= '1' when SHAD_EN=1 and v_s3_en='1' and v_sel_rom='1'
+                            and v_addr(23 downto 14) = "0000010101" else '0';
     -- MOSDRAM-72: MAME miss-profiles (attract incl. demo gameplay) put 77%
     -- of the extra's SDRAM reads in 0xA000-0xBFFF - eshad3 shadows it.
     -- (A matching main-CPU 0x46xxx shadow overflowed the 308-M10K ceiling;
@@ -1283,7 +1516,11 @@ begin
     e_sel_shad <= e_sel_shad1 or e_sel_shad2;
     vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000000000" else '0';
     vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001001" else '0';
-    vshad3_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001010" else '0';
+    -- VSHAD3-112: DELIBERATELY not gated by v_s3_en. The fill happens once,
+    -- during the ROM download; if the runtime toggle also gated the fill then
+    -- toggling the shadow ON after boot would switch the CPU onto an unfilled
+    -- BRAM and execute zeros. The toggle gates the DECODE only.
+    vshad3_we <= '1' when VSHAD3_EN=1 and shad_we='1' and shad_waddr(23 downto 14) = "0000010101" else '0';
     eshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000100000" else '0';
     eshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 12) = x"08F" else '0';
     jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
@@ -1300,10 +1537,26 @@ begin
         port map ( wrclk=>shad_wclk, we=>vshad2_we,
                    waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad2_q );
-    vshad3 : entity work.dpram_dc generic map ( awidth => 14 )
-        port map ( wrclk=>shad_wclk, we=>vshad3_we,
-                   waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
-                   rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad3_q );
+    -- VSHAD3-107: generate-guarded so VSHAD3_EN=0 removes the M10K rather
+    -- than leaving an unread RAM for the fitter to keep. vshad3_q is driven
+    -- to zero in that case; v_sel_shad3 is hard 0 above, so nothing reads it.
+    -- VSHAD3-112: awidth 14 -> 13, i.e. 8K words = 16 KB, matching the
+    -- 0x54000-0x57FFF decode. Halving the decode without halving this would
+    -- spend the M10K and not use it, and letting the un-shadowed
+    -- 0x50000-0x53FFF fills alias over the top of the 0x54000-0x57FFF image
+    -- would corrupt what the CPU reads.
+    -- The runtime toggle does NOT appear here on purpose: it gates the
+    -- decode, so the BRAM (and its fill) exist regardless and the owner can
+    -- flip the shadow either way on device without a reflash.
+    g_vshad3 : if VSHAD3_EN = 1 generate
+        vshad3 : entity work.dpram_dc generic map ( awidth => 13 )
+            port map ( wrclk=>shad_wclk, we=>vshad3_we,
+                       waddr=>shad_waddr(13 downto 1), wdata=>shad_wdata,
+                       rdclk=>clk, raddr=>v_addr(13 downto 1), q=>vshad3_q );
+    end generate;
+    g_no_vshad3 : if VSHAD3_EN /= 1 generate
+        vshad3_q <= (others => '0');
+    end generate;
     eshad2 : entity work.dpram_dc generic map ( awidth => 11 )
         port map ( wrclk=>shad_wclk, we=>eshad2_we,
                    waddr=>shad_waddr(11 downto 1), wdata=>shad_wdata,

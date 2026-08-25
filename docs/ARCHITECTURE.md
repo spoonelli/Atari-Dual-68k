@@ -84,8 +84,25 @@ version; note the differences (EEPROM range, per-layer color RAM, SLIP pointers)
 | `360030`   | W   | D0–D7 | Write Sound Processor (SCOM) |
 
 **Findings from the full schematic re-scan (sheets 2–5), 2026-08-07:**
-- **Both CPUs are 68000s on real boards** — the schematic labels them `U68010` (sheet 4: 45J; sheet 5: 20P) but production hardware (verified from an actual ESC board) carries MC68000s, matching MAME. MAME models
-  them as 68000. TG68K `CPU=>"01"` throughout. Exception frames differ; this matters.
+- **There are two boards: the dedicated cabinet is a 68010, the JAMMA version is a
+  68000. Both photographed; both authentic.**
+  The schematic labels both CPUs **`U68010`** — sheet 4 (package page 5), designator
+  **45J**, `VCPU`; and sheet 5 (page 6), designator **20P**, `ECPU`. Re-read at 1200 dpi:
+  the label is unambiguous. The owner has now photographed the part on his
+  dedicated-cabinet board: **`MC68010P8`**, Motorola, date code **`A71R8813`**. The
+  former counter-claim that production boards carry MC68000s traced to a single commit
+  message (`24d900e`) reporting one unphotographed inspection, and generalising one
+  board to all production — it is retracted. MAME's `eprom.cpp` instantiates `M68000`,
+  which turns out to model the **JAMMA** board faithfully. SP-332 is the
+  **dedicated-cabinet** package, so the schematic and MAME were describing two
+  different real machines rather than contradicting each other. Every build up to and
+  including BUILD 109 ran `CPU=>"00"` and was a faithful JAMMA machine.
+  It still does not matter for this core: the ROM uses no 68010-only instruction, no
+  handler inspects an exception-frame format word or does pointer arithmetic around the
+  frame, and 68010 loop mode is never entered (and TG68K does not implement loop mode
+  in any case) — which is what makes supporting both variants free. Full evidence in
+  [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md) §1.6. Note the variant is **not**
+  inferable from the ROM set, so it is a configuration choice — see `DEVIATIONS.md` C5.
 - **Interrupts are autovectored** via VPA asserted on FC=111 (sheet 4, 60L/55L). VBLANK
   /VINT hits both CPUs (IRQ4); /SINT is the sound IRQ (IRQ6, main CPU only).
 - **SLAPSTIC is physically present** (sheet 4: 60E `SLAPSTK5`, driving ROM bank selects
@@ -98,8 +115,15 @@ version; note the differences (EEPROM range, per-layer color RAM, SLIP pointers)
   bits at 260010: D4 ADEOC, D3 /SCBSY, D2 /SINT, D1 S-TEST (1=normal play), D0 /VBLANK;
   ADC is an ADC0809 (IN0–3 = P1-U/D, P1-L/R, P2-U/D, P2-L/R). 360010 latch: CD5 VIDOFF,
   CD4–1 intensity IM3–0, CD0 /ERESET.
-- **Common ROM lives on the ECPU side** (sheet 5: `CROM` U27512 pair at 40K/50K) with a
-  wait-state arbiter (EWAI / PAL16L8 50P) — both CPUs access it with waits; our SDRAM
+- **Common ROM lives on the ECPU side** (sheet 5: `CROM` U27512 pair at 40K/50K), sharing
+  the common bus with the shared RAM (`COMRAM`, 32Kx8 pair at 40M/50M = `$160000-$16FFFF`).
+  Ownership is a **cross-coupled NOR latch** — `ENOWAI = NOR(/ECOM, EWAI)` at 60N,
+  `EWAI = NOR(/COM, ENOWAI)` at 20J — whose `EWAI` output selects the 30M LS158A control
+  mux and the address/data buffers. **Wait states come from the 163 counters at 30D (VCPU)
+  and 30L (ECPU), not from 50P**; 50P is the ECPU *address decoder* (`/ECOM`, `/COMRAM`,
+  `/CROM`, `/CIO`, `/EROM0-2`), the counterpart of 50F PAL20L10 on the VCPU side. The loser
+  of the arbitration is stalled by having its `/DTACK` withheld. Both CPUs access it with
+  waits; our SDRAM
   request/ack arbitration reproduces the same contract.
 
 **Design notes vs Atari System 1 (our RTL base):**

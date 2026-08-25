@@ -94,6 +94,64 @@ theories poison later reasoning.
   block itself, not in the staging buffer. Had the gate been "does the buffer
   read as all-FF", MLAB would have silently corrupted first-boot settings.
 
+- **A gate must be proven able to FAIL before it is trusted, and must show
+  its work.** Three separate instances in one day: the MiSTer slack gate
+  anchored a regex at line start, matched nothing, and passed a bitstream
+  carrying -5.538 ns setup / -10.922 ns hold; its replacement matched only
+  the FIRST summary table, so multi-corner Quartus (one table per corner)
+  would have passed a design failing at any other corner; and `mob_golden.py`
+  is derived from the engine and structurally cannot catch a reorder, which
+  is why `mob_vs_mame.py` and `mob_order_check.py` had to exist. The rule
+  that falls out: (a) run the check against a known-bad input and confirm it
+  fails, naming the right row; (b) make it refuse to certify when its input
+  is missing or parses to zero rows, rather than reporting a clean bill of
+  health; (c) have it PRINT what it measured -- "All 64 analysed clock/corner
+  rows" is verifiable, "PASS" is not distinguishable from matching nothing.
+- **The Pocket build had no timing gate at all until BUILD 106+.** "Never
+  ship negative slack" was enforced by a human remembering to grep the
+  compile log -- and that human was checking 8 numbers where the report
+  carries 64. Policy enforced by attention is policy that fails silently the
+  first time attention lapses.
+- **`str.replace` in a patch script replaces EVERY occurrence.** Adding
+  `ap_core.sta.rpt` to the artifact list also rewrote the identically
+  indented path inside the `reverse_bits.py` argument line, splitting one
+  command's two arguments across lines and breaking bitstream publication.
+  Anchor edits with enough surrounding context to be unique, or assert the
+  occurrence count first.
+
+- **A rig that re-implements the thing under test cannot validate it.**
+  BUILD 105 shipped `apply_stain` on "FACTORY MAP 99.75% -> 100.00%
+  exact-RGB". On hardware the pass fires but covers ~34 native pixels where
+  MAME changes ~200. `render_scene.py` composites in **Python**: the merge, the
+  alpha layer and `apply_stain` are all its own code, while the automaton that
+  ships is in `core_top.v` -- which no testbench compiles, then or now
+  (`run_mob_tb.sh` builds `escape_mob.v` + `escape_prio.v` only). The 100%
+  could only ever have exonerated the model, and coverage on silicon was never
+  in it.
+- **A legitimate zero is the most dangerous zero.** On that same scene the two
+  RTL gates measured nothing: `MOB PRIO` saw 0 MO-covered pixels, printed *no
+  verdict at all* and returned 0; `mob_vs_mame.py` refused to score. Both were
+  right to -- the FACTORY MAP has no drawable motion objects, MAME's own model
+  draws 296 pixels there and every one is a non-drawing "special". A correct
+  engine and a correct scene produced a vacuous gate, and vacuous read as
+  green. Guards now judge the **reference output** rather than a heuristic over
+  the fixture bytes, and `total == 0` is an explicit failure. This is the ninth
+  recorded measurement bug here; the previous one added a fixture guard to this
+  very file, which then mis-fired on this very scene.
+- **"No visible change" and "under-applied" look identical in a scaled video
+  frame.** The first read of the BUILD 105 capture was "nothing happened", and
+  three hypotheses were built on it (unwritten palette bank, specials never
+  reaching the line buffer, a pen that is not 11 bits). All three were refuted
+  the moment the frame was diffed against the previous build at native
+  resolution instead of eyeballed: 34 pixels *had* changed, orange to genuine
+  grey. Diff against the previous build before theorising about a symptom;
+  "I looked at it" is not a measurement.
+- **Design every counter so that its zero is falsifiable.** The MOSTAIN-2 HUD
+  page reports the first and last stained scanline as one field, with
+  `ln_first` resetting to `FF` and `ln_last` to `00`. A live counter that
+  stained nothing therefore reads `FF00`, and `0000` is unreachable unless the
+  counter never ran -- so the page cannot report a zero it has not earned.
+
 ## Process rules that earned their keep
 
 - Every build bumps an on-screen build number; the screen must match the zip.
