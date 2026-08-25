@@ -671,6 +671,43 @@ same treatment, so PFRESET-111 is protected only by someone running the bench
 by hand. That is a Pocket-side gap and is deliberately not fixed from this
 branch.
 
+### What the gate caught, and two benches that need a hand
+
+**The pre-Quartus step earned its place immediately.** CI run `32814954861`
+failed in **56 seconds** with four elaboration errors, both defects introduced
+by the commit before it: `escape_stain.v` had been added to `files.qip` (the
+synthesis list) but not to `run_mister_pf_tb.sh` (the bench's compile line),
+and `support/mk_core_stub.py` derived the stub's *ports* from the entity while
+carrying its *generics* as a hardcoded literal, so `VSHAD3_EN` and `CPU_TYPE`
+did not exist to be overridden. Both are fixed; generics are now derived like
+ports, and the generator hard-errors on a non-integer generic rather than
+mistranslating one. Note the structural point: `files.qip` and the bench
+compile line are independent transcriptions of the same dependency set and
+nothing reconciles them. Adding a shared module means touching both.
+
+**Two benches will not run from a clean checkout.** Neither is an RTL fault
+and neither fails open:
+
+* `run_mob_tb.sh` needs MAME-derived fixtures in `sim/work/` (`game_mo.hex`,
+  `game_cfg.hex`, `game_pf.hex`, `game_pfx.hex`, `image_bytes.hex`) plus
+  `atari_escape.rom`. That directory is gitignored — correctly, it holds ROM
+  data — so a fresh worktree has none of it. **The bench detects this and
+  refuses**: it printed *"MOB PRIO CHECK VACUOUS — the comparator saw ZERO
+  MO-covered pixels, so 0/0 measured nothing at all… Do not quote a percentage
+  from it"* and exited 1. That is a gate behaving exactly as this project's
+  rules demand. With the fixtures in place it scores **10 047 / 10 047 =
+  100.0000 %** MOB PRIO and **VS-MAME 100.0000 %, wrong_pen=0, not_in_mame=0,
+  missing=0** — unchanged by the merge, which is the evidence that the
+  self-clearing readout is behaviour-preserving on a real scene.
+* `run_mob_order_check.sh` exits 128 with `fatal: invalid object name
+  'origin/mo-chan4'`. It compares against a branch that exists only as a local
+  ref in the owner's main clone and was never pushed. It cannot run in CI or in
+  any fresh worktree as written.
+
+Neither is fixed here — they are shared benches, not MiSTer ones, and the
+second needs a decision about whether that branch should be pushed or the
+comparison re-anchored.
+
 ---
 
 ## Tracking the Pocket branch (BUILD 103-105)
@@ -885,6 +922,17 @@ the OSD is a convenience.
 
 * This core is **GPL-3.0**. It requires the user's own MAME `eprom` romset.
   **No ROM data is included** in this repository or in any artifact it builds.
+
+  **Re-verified byte by byte at BUILD 112**, not assumed. The shipped
+  `src/mister/releases/Escape from the Planet of the Robot Monsters (set 1).mra`
+  is **5 395 bytes**, **0 non-ASCII bytes**, **0 control bytes** outside
+  tab/CR/LF, **30 `crc=` references**, **123 lines**, longest line 81 chars,
+  and **zero `<part>` elements carrying inline data** of any length — every
+  part is a `name=`/`crc=` reference to a chip in the user's own zip, which is
+  the entire point of the format. SHA-256
+  `9cd7670bbf69ebe57935ae3b764d7953092951a6b92be4303b05c605ecdb3f58`.
+  The merge did not touch the file (`git diff origin/mister-port -- ` on it is
+  empty); it was re-measured anyway.
 * **d18c7db (Alex)** and **MiSTer-devel** for
   [`Arcade-Atari-system1_MiSTer`](https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer)
   (GPL-3.0), the schematic-based Atari System 1 core this project's RTL base was
@@ -952,10 +1000,37 @@ the OSD is a convenience.
   invert + planar→chunky transform was replayed over the output in Python; the
   result matched `support/build_rom.py`'s CRC-verified image across all
   2,228,224 bytes. Re-verified after the BUILD 105 rebase.
-* **The Verilog→VHDL boundary**, mechanically: `check_ports.py` confirms all 57
-  connected ports exist on the `escape_core` entity and that no mandatory input
-  is unconnected. Also proven able to fail (renaming `.vblank_in` makes it
-  name both halves of the mistake).
+* **The Verilog→VHDL boundary**, mechanically: `check_ports.py` confirms every
+  connected port exists on the `escape_core` entity and that no mandatory input
+  is unconnected — 116 entity ports, 58 connected, 49 outputs left open as of
+  BUILD 112. Proven able to fail twice over: renaming `.vshad3_on` →
+  `"connected but not on the entity: vshad3_onn"`; deleting `.rom_data` →
+  `"mandatory inputs (no VHDL default) not connected: rom_data"`.
+* **The two-frame line-buffer ghost fix, in simulation** — `run_stain_tb.sh`.
+  11 320 / 11 320 stained pixels and 0 / 0 stray MO pixels against the
+  reference, per-case mismatches zero across all five cases. **Proven able to
+  fail:** reverting `escape_mob.v`'s self-clearing readout to the pre-GFXDASH-3
+  tag-only write produces 226 mismatching pixels — 210 px of over-stain in six
+  spans plus 16 px of stale line-buffer content — concentrated entirely in
+  cases D and E, which are the two-frame-ghost cases. This is the shipped
+  `escape_mob.v` and `escape_stain.v`, not a transcription.
+  *On hardware this fix is confirmed on the **Pocket** only.*
+* **The partial ROM shadow's decode and its runtime toggle, in simulation** —
+  `run_vshad3_tb.sh`, 4/4 rows. It measures CPU clocks per fetch, so each row
+  is a behavioural discriminator, not an assertion:
+  `0x54000` shadowed = 5.015; the same addresses with `vshad3_on=0` = 4.015
+  (the toggle does something); `0x50000` = 4.015 (the low half really is
+  unshadowed, i.e. the range really is 16 KB and not still 32 KB);
+  `VSHAD3_EN=0` = 4.015 whatever the toggle says (the compile-time generic
+  removes it, so the range can never be served by neither path).
+* **The refresh interval against JEDEC, in simulation** —
+  `run_sdram_refresh_tb.sh` against the real FSM. Shipping 160/48 measures a
+  worst-case row interval of 224 clk = 6.2578 µs, 80.10 % of the 7.8125 µs
+  budget. The bench carries its own out-of-spec **negative controls and
+  reported them as FAIL in the same run**: 250/48 at 8.7721 µs and the
+  previously-shipped 224/48 at 8.0457 µs. It also prints that the paper model
+  understates by 16 clocks, which is the `+16` this branch keeps in
+  `sdram_simple.v`.
 * **The MRA conventions** (`map="01"` byte lane, index numbering, SD-card paths,
   file naming) against MiSTer's firmware source and the reference core's shipped
   MRAs — see *Sources*.
@@ -963,6 +1038,34 @@ the OSD is a convenience.
   Several comments in `core_top.v`, `sdram_simple.v` and the original porting
   brief say "85.909 MHz, 12:1". That is **stale**; the PLL IP has said 5× since
   commit *"v22: SDRAM 42.95 → 35.8 MHz"*. Read the PLL, not the comments.
+
+### The three-way split, for BUILD 112 specifically
+
+The MiSTer core has had **far less hardware exercise than the Pocket**. One
+flash, at BUILD 105, which found a dead playfield. The fix for that has never
+been flashed, and neither has anything added since. Read this table before
+deciding what ships.
+
+| | Simulated | CI-verified | Run on a DE10-Nano |
+|---|---|---|---|
+| Two-frame line-buffer ghost fix | **yes**, gate proven able to fail | **yes** | **never** (confirmed on **Pocket** hardware only) |
+| `escape_stain` module substitution | **yes**, same gate | **yes** | **never** |
+| 16 KB partial ROM shadow at `0x54000` | **yes**, 4/4 discriminating rows | **yes** | **never** |
+| `vshad3_on` runtime toggle (`CONF_STR` `O[8]`) | RTL path yes; the **OSD wiring** no | fit/timing only | **never** — nobody has opened this menu |
+| `CPU_TYPE` = 68010 | Pocket A/B over 400 frames | fit/timing only | **never on MiSTer** |
+| Refresh interval 160/48 vs JEDEC | **yes**, with failing controls | **yes** | **never** — and the *bandwidth* cost is simulated, not measured on a board |
+| PFRESET (playfield channel reset) | **yes**, 13 794/13 794 both phases | **yes** | **never** — this is the BUILD 105 fix, still unflashed |
+| Timing / fit / M10K | n/a | **yes**, `support/check_slack.py`, all corners | n/a |
+| `.mra` is ROM-free | n/a | byte-checked | n/a |
+
+**Things simulation here specifically cannot tell you.** `tb_mister_pf` uses a
+*stub* machine and a *behavioural* SDRAM: it proves fetches are issued, granted
+and completed, not that the returned pixels are right. `tb_stain` drives the
+shipped `escape_mob`/`escape_stain` but against a synthetic scene, not the
+game. No bench on this branch puts the MO client and the PF client on the real
+arbiter together under load, which is exactly the interaction the shadow is
+supposed to improve and the interaction this platform's bandwidth budget is
+tightest on.
 
 ### Not verified — the PFRESET-107 / REFRESH-112 build has NOT been on hardware
 
