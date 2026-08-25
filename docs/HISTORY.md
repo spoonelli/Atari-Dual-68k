@@ -9,7 +9,15 @@ small RAMs, SDRAM for the 2.2MB combined ROM image, APF download path.
 Reached "Waiting for Second Processor" early (v13), then lost it for a dozen
 builds — the first taste of a lesson that would take 60 more builds to fully
 learn: **identical logic did not produce identical hardware behavior.**
-- Schematic says 68010; real boards carry 68000s (photo-verified). TG68K CPU="00".
+- Schematic says 68010; we followed MAME and built TG68K CPU="00" (68000).
+  *(Corrected 2026-08-24: there are TWO boards. The dedicated cabinet is a 68010
+  (`MC68010P8`, date code `A71R8813`, photographed) and the JAMMA version is a
+  68000 — both photographed, both authentic. SP-332 is the dedicated-cabinet
+  package, so the schematic and MAME were describing different machines, not
+  contradicting each other. Every build through 109 therefore shipped a faithful
+  JAMMA machine. The claim that stood here — "real boards carry 68000s
+  (photo-verified)" — was still wrong as written: it generalised one board to all
+  production, and there was never a photo. See CPU_AND_ARBITER.md §1.6.)*
 - v14–v19 per-boot corruption traced to a same-edge arbiter collision: two
   grant gates firing together served sprite pixels as CPU instructions.
 
@@ -173,9 +181,14 @@ spin-lock acquire at `$9B4`, retrying `tas.b $16CCCC` forever.
 - Instrument, then fix: every guessed fix cost a build; every probe paid for
   itself in one photo. HUD checksums, edge counters, and the game's own
   self-test became the lab bench.
-- MAME + schematics + disassembly agree or someone is wrong — twice the
-  "docs" were wrong (68010 label, "+5V" pins that were coin inputs) and the
-  measurement was right.
+- MAME + schematics + disassembly agree or someone is wrong — the "+5V" pins
+  that were really coin inputs were a genuine case of the docs being wrong and
+  the measurement being right. The 68010 label was **not**, and it taught a
+  better lesson: the schematic said 68010, MAME said 68000, and *both were
+  right about different cabinet variants*. Two sources contradicting each other
+  can mean you have not identified what each is describing. The actual error
+  was writing one board up as "production" — and recording it as
+  "photo-verified" when there was no photo.
 - Ship one variable per build; bundle only instruments.
 - Keep ROMs out of the repo with mechanical guards, not vigilance.
 - The emulator's shortcuts (zero-time fetches, instant links) hide the exact
