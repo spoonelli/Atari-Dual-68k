@@ -14,8 +14,12 @@ a bug in `src/fpga/core/rtl/`, both platforms get it.
 >
 > **The branch is now `mister-112`, merged with `tas-atomic` at BUILD 112** —
 > see [BUILD 112](#build-112--catching-up-to-the-pocket-line) for what came
-> across, what did not, and why. **Nothing in BUILD 112 has been on hardware
-> either.** Read
+> across, what did not, and why. It builds green (CI `32816669942`): 370/553
+> M10K, 44 % ALM, TNS 0.000 on all eight clocks. **One thing to look at before
+> shipping it:** `pll_hdmi` setup has fallen from +0.880 ns to **+0.115 ns** —
+> still positive, still entirely inside the framework's `ascal` scaler and not
+> in this core, but thinner than this design's own placement sensitivity.
+> **Nothing in BUILD 112 has been on hardware either.** Read
 > [What is verified / what is not](#what-is-verified--what-is-not) before you
 > assume anything works, and
 > [Three things predicted to break on first flash](#three-things-predicted-to-break-on-first-flash-all-wrong--kept-for-the-record)
@@ -698,7 +702,7 @@ because BUILD 108 was pinned at 308/308 — completely full — and the fitter h
 been packing around that ceiling. The DE10-Nano is at 70 % occupancy with no
 such pressure, so the total here should track the instance more closely. **That
 is a prediction from geometry, not a measurement**; the measured figure is in
-[CI results](#build-112-ci-results) and if it disagrees, the geometry argument
+[CI results](#build-112-ci-results-run-32816669942-commit-aef04a7) and if it disagrees, the geometry argument
 is what is wrong.
 
 `VSHAD3_EN(1)` and `CPU_TYPE(1)` are now **stated explicitly** at the
@@ -1170,7 +1174,7 @@ deciding what ships.
 | `CPU_TYPE` = 68010 | Pocket A/B over 400 frames | fit/timing only | **never on MiSTer** |
 | Refresh interval 160/48 vs JEDEC | **yes**, with failing controls | **yes** | **never** — and the *bandwidth* cost is simulated, not measured on a board |
 | PFRESET (playfield channel reset) | **yes**, 13 794/13 794 both phases | **yes** | **never** — this is the BUILD 105 fix, still unflashed |
-| Timing / fit / M10K | n/a | **yes**, `support/check_slack.py`, all corners | n/a |
+| Timing / fit / M10K | n/a | **yes** — 370/553 M10K, TNS 0.000 all 8 clocks; but `pll_hdmi` setup is **+0.115 ns**, see below | n/a |
 | `.mra` is ROM-free | n/a | **yes** — gated, 5 provocations refused | n/a |
 
 **Things simulation here specifically cannot tell you.** `tb_mister_pf` uses a
@@ -1355,6 +1359,94 @@ Known weakness, not yet fixed: neither platform embeds its git SHA in the bitstr
 durable fix is to extend `sys/build_id.tcl` (MiSTer) and the Pocket packaging to bake in
 a short SHA, so the binary is self-identifying instead of relying on this table. That
 touches shared MiSTer framework code and has not been done.
+
+### BUILD 112 CI results (run 32816669942, commit `aef04a7`)
+
+**Green, every step, both jobs.** All four sim gates, Quartus, the slack gate
+and the new ROM-free release check.
+
+| | BUILD 108 | **BUILD 112** | delta |
+|---|---|---|---|
+| ALMs | 18,846 / 41,910 (45 %) | **18,455 / 41,910 (44 %)** | −391 |
+| **M10K** | 386 / 553 (70 %) | **370 / 553 (67 %)** | **−16** |
+| Registers | 21,197 | **21,342** | +145 |
+| DSP | 76 / 112 | 76 / 112 | 0 |
+| Block memory bits | — | 2,822,224 / 5,662,720 (50 %) | — |
+
+**The M10K prediction was right, to the block.** Predicted ≈ 370 from the
+`dpram_dc` geometry (`awidth` 14 → 13 halves a 32-block instance to 16);
+measured 370. Unlike the Pocket — where the total moved 9 against a 308/308
+ceiling — the DE10-Nano's total tracked the instance exactly, which is what the
+70 %-occupancy argument predicted. The +145 registers are the CADENCE-107
+counters, `escape_stain` and `v_s3_arm`.
+
+**Setup and hold, per clock domain.** TNS **0.000** on all eight clocks, both
+checks — unchanged from baseline.
+
+| clock | setup B108 | **setup B112** | hold B108 | **hold B112** |
+|---|---|---|---|---|
+| `emu\|pll` general[0] — 7.159091 MHz CPU + pixel | +15.831 | **+17.126** | +0.263 | **+0.269** |
+| `emu\|pll` general[1] — 35.795455 MHz SDRAM | +14.587 | **+14.152** | +0.254 | **+0.252** |
+| `SDRAM_CLK` | +3.442 | **+3.435** | +17.450 | **+17.450** |
+| `pll_hdmi` divclk — 148.5 MHz (framework) | +0.880 | **+0.115** | +0.229 | **+0.257** |
+| `FPGA_CLK1_50` | +8.636 | **+7.016** | +0.415 | **+0.415** |
+| `FPGA_CLK2_50` | +12.556 | **+12.205** | +0.372 | **+0.362** |
+| `spi_sck` | +6.061 | **+5.949** | +0.352 | **+0.385** |
+| `pll_audio` | +15.976 | **+15.675** | +0.251 | **+0.270** |
+
+**The core's own CPU clock gained 1.295 ns of setup.** That is the largest
+movement in the table and it is in the right direction.
+
+#### The one number to look at before shipping: `pll_hdmi` setup +0.115 ns
+
+It was +0.880 at BUILD 108. It is **+0.115** now — the tightest path in the
+design, and 1.7 % of its 6.732 ns period.
+
+**It is not noise, and that is measured, not assumed.** Two independent CI runs
+(`4933b4e`, run 32815564898, and `aef04a7`, run 32816669942) whose *compiled*
+file sets are byte-identical — the commits between them touch only docs —
+produced **identical numbers to three decimals on all sixteen rows above**. So
+the fitter is deterministic here and the 0.765 ns drop is a real consequence of
+the netlist change, not run-to-run variation.
+
+**It is not in this core.** The path is
+`ascal:ascal|o_hcpt[1] → ascal:ascal|o_vcpt[7]`, entirely inside the MiSTer
+framework's vendored `ascal` HDMI scaler (clock skew −0.492, data delay 5.925,
+relationship 6.732). The mechanism is indirect: freeing 16 M10K and 391 ALMs
+changed the fitter's global placement, and `ascal` came out tighter.
+
+**This path has always been the design's tightest and has always moved:**
++0.527 (BUILD 105) → +0.744 → +0.880 (BUILD 108) → **+0.115** (BUILD 112).
+
+**What that means for the decision.** The bitstream **meets timing** — positive
+slack, TNS 0.000, and the gate passed a check that scans every table in the
+report. It is publishable. But +0.115 ns is thinner than this design's
+documented **±0.157 ns placement-perturbation sensitivity**, so *a future
+change as trivial as a `BUILD_ID` constant could push it negative.* Treat it as
+a live fragility in the HDMI output path, not as headroom. If HDMI misbehaves
+on the next flash, this is the first thing to look at — and analogue/VGA output
+does not use this clock.
+
+#### The hold reporter's first MiSTer run found something the summaries hide
+
+`support/report_hold_paths.tcl` had never run for this project (it hardcoded
+`project_open ap_core`). Its first run here reports the **Fast 1100mV 0C**
+corner, which the compile flow's summary tables do not cover, and the true
+worst hold there is **+0.109 ns** — below the +0.252 the Hold Summary reports
+as worst:
+
+| slack | path |
+|---|---|
+| **0.109** | `ascal\|o_vpixq_pre[1].g[6]` → `ascal\|o_vpixq[1].g[6]` |
+| 0.116 | `ascal\|o_poly_lum1[3]` → `ascal\|o_poly_lerp_tb[3]` |
+| 0.120 | `ascal\|i_vdivr[16]` → `ascal\|i_vdivr[17]` |
+| 0.121 | `emu\|arcade_video\|sync_fix:sync_h\|cnt[14]` (self) |
+| 0.123 | `emu\|hps_io\|video_calc\|vcnt[4]` (self) |
+
+Still positive, still overwhelmingly in the framework rather than the machine —
+but **the summary tables were never showing the worst corner**, and nobody
+looking at this port had any way to know that until now.
+`Arcade-Escape.hold_paths.rpt` is uploaded with every build from here on.
 
 ### BUILD 108 gate results (CI run 32804328092, netlist commit `972bbf4`)
 
