@@ -19,17 +19,33 @@ entity escape_core is
         -- 1 = serve low-64KB code from the download-filled shadows (hardware);
         -- 0 = disable (GHDL tbs: shadows unfilled, all fetches via arbiter)
         SHAD_EN   : integer := 1;
-        -- VSHAD3-107: the main CPU's THIRD shadow, 32 KB at 0x50000-0x57FFF,
-        -- 32 M10K blocks. It was added (aca5510, 2026-08-20) when the only
-        -- alternative to BRAM was the legacy 15-25 clock SDRAM arbiter, on a
-        -- MAME page profile of 0x53000 + 0x56000. The zero-wait fastpath
-        -- landed two days later (2b18183) and inverted the premise: a
-        -- fastpath hit closes in 4 CPU clocks, the shadow BRAM path in 5, so
-        -- a shadow now COSTS this CPU a clock on its hottest code and
+        -- VSHAD3: the main CPU's THIRD shadow. Added (aca5510, 2026-08-20) as
+        -- 32 KB at 0x50000-0x57FFF / 32 M10K, when the only alternative to
+        -- BRAM was the legacy 15-25 clock SDRAM arbiter. The zero-wait
+        -- fastpath landed two days later (2b18183) and inverted the premise:
+        -- a fastpath hit closes in 4 CPU clocks, the shadow BRAM path in 5,
+        -- so a shadow COSTS this CPU a clock on its hottest code and
         -- v_shad_rng suppresses the fastpath on exactly those addresses.
-        -- 1 = keep vshad3, 0 = un-shadow 0x50000-0x57FFF and let the fastpath
-        -- have it (which also hands 32 M10K back to the 308-block ceiling).
-        -- sim/run_busrate.sh measures both.
+        -- BUILD 109 therefore turned it off; BUILD 110's capture then showed
+        -- shadow-off is 3.6-3.9x worse for sprite dropouts, because
+        -- un-shadowing takes the video CPU from issuing fills on ~39% of its
+        -- bus cycles to ~70% and the motion-object engine is the LOWEST
+        -- priority SDRAM client. docs/VSHAD3.md predicted exactly that.
+        --
+        -- VSHAD3-112: the shadow is now HALF SIZE - 16 KB at 0x54000-0x57FFF,
+        -- awidth 13 - which halves the BRAM cost while keeping the busier
+        -- half of the old range shadowed. WHICH half is busier was measured,
+        -- not assumed, and the answer is the HIGH one: 94.5% of the main
+        -- CPU's traffic inside 0x50000-0x57FFF lands in 0x54000-0x57FFF, and
+        -- almost all of that in page 0x56000 - which is exactly where the
+        -- video CPU's per-frame body goes (0x4052E: jsr $5673E / jsr $56120).
+        -- Pages 0x50000/0x51000/0x52000 are read ZERO times during gameplay.
+        -- Method and numbers: docs/VSHAD3.md section 8. The generic is the
+        -- COMPILE-TIME control: 1 =
+        -- instantiate the 16 KB BRAM and its decode, 0 = remove it entirely.
+        -- The RUNTIME control is the vshad3_on port below, which gates the
+        -- decode only - it does not remove the BRAM.
+        -- sim/run_busrate.sh measures the per-fetch clock cost of both paths.
         VSHAD3_EN : integer := 1;
         -- SDSCHED-81: 1 = per-byte parity on the ROM CDC (rom_par4 valid).
         -- The legacy single bit passes any 2-bit error - and a passed error
@@ -210,6 +226,17 @@ entity escape_core is
         -- so the boot takes its already-passed branch (Interact "Skip Self-Test")
         skip_test  : in  std_logic := '0';
         irq_strict : in  std_logic := '0';   -- v71: JSA timed-IRQ ack strictness
+        -- VSHAD3-112 runtime toggle (Interact "ROM Shadow 0x50000", id 37 /
+        -- 0xA0000150), default ON. '1' = the 16 KB partial shadow serves
+        -- 0x50000-0x53FFF from BRAM and suppresses the fastpath there;
+        -- '0' = those addresses take the fastpath instead, exactly as
+        -- VSHAD3_EN=0 does, but without rebuilding. The BRAM stays
+        -- instantiated and filled either way (that is the point: the owner
+        -- A/Bs sprite dropouts against CPU cadence on the device without a
+        -- reflash), so the M10K cost is paid by VSHAD3_EN alone.
+        -- Only meaningful when VSHAD3_EN=1; tied '1' by default so every
+        -- existing testbench keeps its current behaviour.
+        vshad3_on  : in  std_logic := '1';
         -- LANE4k user audio mixer (Interact): 0=mute .. 7=unity
         uvol_ym    : in  std_logic_vector(2 downto 0) := "111";
         uvol_tms   : in  std_logic_vector(2 downto 0) := "111";
@@ -465,6 +492,14 @@ architecture rtl of escape_core is
     signal v_fast_to, e_fast_to   : std_logic := '0';
     signal v_to_ctr, e_to_ctr     : unsigned(3 downto 0) := (others=>'0');
     signal v_shad_rng, e_shad_rng : std_logic;
+    -- VSHAD3-112: the single gate term for the partial shadow. v_s3_en is
+    -- what BOTH v_shad_rng's third term and v_sel_shad3 key on, so they
+    -- cannot diverge - see the comment above v_shad_rng. v_s3_arm is the
+    -- runtime toggle resampled only while the video CPU's bus is idle
+    -- (v_as_n='1'), so a mid-cycle flip cannot change which memory is
+    -- answering a cycle that has already started.
+    signal v_s3_arm : std_logic := '1';
+    signal v_s3_en  : std_logic;
     signal v_rom_hold, e_rom_hold : std_logic_vector(15 downto 0);
     signal v_pref_data, e_pref_data : std_logic_vector(15 downto 0);
     signal v_pref_addr, e_pref_addr : std_logic_vector(19 downto 0);
@@ -724,14 +759,37 @@ begin
     -- 35.8 side can fill speculatively) plus the same image-address mapping
     -- the arbiter uses. Combinational on purpose; sampled by single FFs in
     -- the 35.8 domain (timed paths per the SDSCHED-73 SDC grouping).
-    -- VSHAD3-107: the third term is the vshad3 range. With VSHAD3_EN=0 it
-    -- drops out of BOTH this decode and v_sel_shad3 below, so those addresses
-    -- stop suppressing the fastpath as well as stopping being read from BRAM -
-    -- the two must move together or the range would be served by neither.
+    -- VSHAD3-107/112: the third term is the vshad3 range, now 16 KB at
+    -- 0x54000-0x57FFF (v_addr(23 downto 14) = "0000010101"). With the shadow
+    -- disabled - by VSHAD3_EN=0 at compile time OR by the vshad3_on port at
+    -- runtime - it drops out of BOTH this decode and v_sel_shad3 below, so
+    -- those addresses stop suppressing the fastpath as well as stopping being
+    -- read from BRAM. THE TWO MUST MOVE TOGETHER OR THE RANGE WOULD BE SERVED
+    -- BY NEITHER: v_shad_rng='1' with v_sel_shad3='0' kills the fastpath and
+    -- never reads the BRAM, leaving every fetch to the 16-clock never-wedge
+    -- watchdog. That is why both key on the single signal v_s3_en.
+    v_s3_en <= '1' when VSHAD3_EN = 1 and v_s3_arm = '1' else '0';
+
+    -- Resample the runtime toggle only between bus cycles. The toggle crosses
+    -- from clk_74a through core_top's synch_3, so it is already metastability
+    -- safe here; this gate is about ATOMICITY, not CDC - v_sel_shad3 steers
+    -- v_di and v_rom_pend, and flipping it under a live AS would change which
+    -- memory answers a cycle already in flight.
+    s3_arm_p : process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset_n = '0' then
+                v_s3_arm <= vshad3_on;
+            elsif v_as_n = '1' then
+                v_s3_arm <= vshad3_on;
+            end if;
+        end if;
+    end process;
+
     v_shad_rng <= '1' when SHAD_EN = 1 and (v_addr(23 downto 14) = "0000000000"
                        or v_addr(23 downto 15) = "000001001"
-                       or (VSHAD3_EN = 1
-                           and v_addr(23 downto 15) = "000001010")) else '0';
+                       or (v_s3_en = '1'
+                           and v_addr(23 downto 14) = "0000010101")) else '0';
     e_shad_rng <= '1' when SHAD_EN = 1 and (e_addr(23 downto 14) = "0000000000"
                        or e_addr(23 downto 12) = x"00F") else '0';
     fast_v_spec <= '1' when FASTPATH_EN = 1 and v_shad_rng = '0'
@@ -1437,8 +1495,13 @@ begin
                             and v_addr(23 downto 14) = "0000000000" else '0';
     v_sel_shad2 <= '1' when SHAD_EN=1 and v_sel_rom='1'
                             and v_addr(23 downto 15) = "000001001" else '0';
-    v_sel_shad3 <= '1' when SHAD_EN=1 and VSHAD3_EN=1 and v_sel_rom='1'
-                            and v_addr(23 downto 15) = "000001010" else '0';
+    -- VSHAD3-112: 16 KB at 0x54000-0x57FFF (the measured-busier half; the
+    -- 0x50000-0x53FFF half now takes the fastpath), gated by the SAME
+    -- v_s3_en that gates v_shad_rng's third term above. Do not open-code the
+    -- enable here and do not open-code the range - if these two decodes ever
+    -- disagree, the range is served by neither.
+    v_sel_shad3 <= '1' when SHAD_EN=1 and v_s3_en='1' and v_sel_rom='1'
+                            and v_addr(23 downto 14) = "0000010101" else '0';
     -- MOSDRAM-72: MAME miss-profiles (attract incl. demo gameplay) put 77%
     -- of the extra's SDRAM reads in 0xA000-0xBFFF - eshad3 shadows it.
     -- (A matching main-CPU 0x46xxx shadow overflowed the 308-M10K ceiling;
@@ -1453,7 +1516,11 @@ begin
     e_sel_shad <= e_sel_shad1 or e_sel_shad2;
     vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000000000" else '0';
     vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001001" else '0';
-    vshad3_we <= '1' when VSHAD3_EN=1 and shad_we='1' and shad_waddr(23 downto 15) = "000001010" else '0';
+    -- VSHAD3-112: DELIBERATELY not gated by v_s3_en. The fill happens once,
+    -- during the ROM download; if the runtime toggle also gated the fill then
+    -- toggling the shadow ON after boot would switch the CPU onto an unfilled
+    -- BRAM and execute zeros. The toggle gates the DECODE only.
+    vshad3_we <= '1' when VSHAD3_EN=1 and shad_we='1' and shad_waddr(23 downto 14) = "0000010101" else '0';
     eshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000100000" else '0';
     eshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 12) = x"08F" else '0';
     jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
@@ -1470,14 +1537,22 @@ begin
         port map ( wrclk=>shad_wclk, we=>vshad2_we,
                    waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad2_q );
-    -- VSHAD3-107: generate-guarded so VSHAD3_EN=0 removes the 32 M10K rather
+    -- VSHAD3-107: generate-guarded so VSHAD3_EN=0 removes the M10K rather
     -- than leaving an unread RAM for the fitter to keep. vshad3_q is driven
     -- to zero in that case; v_sel_shad3 is hard 0 above, so nothing reads it.
+    -- VSHAD3-112: awidth 14 -> 13, i.e. 8K words = 16 KB, matching the
+    -- 0x54000-0x57FFF decode. Halving the decode without halving this would
+    -- spend the M10K and not use it, and letting the un-shadowed
+    -- 0x50000-0x53FFF fills alias over the top of the 0x54000-0x57FFF image
+    -- would corrupt what the CPU reads.
+    -- The runtime toggle does NOT appear here on purpose: it gates the
+    -- decode, so the BRAM (and its fill) exist regardless and the owner can
+    -- flip the shadow either way on device without a reflash.
     g_vshad3 : if VSHAD3_EN = 1 generate
-        vshad3 : entity work.dpram_dc generic map ( awidth => 14 )
+        vshad3 : entity work.dpram_dc generic map ( awidth => 13 )
             port map ( wrclk=>shad_wclk, we=>vshad3_we,
-                       waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
-                       rdclk=>clk, raddr=>v_addr(14 downto 1), q=>vshad3_q );
+                       waddr=>shad_waddr(13 downto 1), wdata=>shad_wdata,
+                       rdclk=>clk, raddr=>v_addr(13 downto 1), q=>vshad3_q );
     end generate;
     g_no_vshad3 : if VSHAD3_EN /= 1 generate
         vshad3_q <= (others => '0');
