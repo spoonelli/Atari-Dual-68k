@@ -681,6 +681,23 @@ for the freed slots are different. What can honestly be said:
   for a permanent divergence in the one file both platforms most need to keep
   identical. If the owner wants it, the honest way is a generic, not an edit.
 
+**The M10K prediction, written down before the build reported.** MiSTer has
+been carrying the *full* 32 KB shadow since the branch point, so unlike the
+Pocket — where the partial shadow was an addition — here it is a **reduction**.
+On the Pocket the `vshad3` instance itself measured `depth 16384, M10K=32`
+before and `depth 8192, M10K=16` after (`docs/VSHAD3.md` §11), which is exactly
+the geometry: 16 384 × 16 bits ÷ 8 192 bits per block in ×16 mode = 32 blocks,
+halved to 16. The same instance is compiled here, so **this build should come
+in about 16 blocks below BUILD 108's 386/553, i.e. ≈ 370/553.**
+
+Note the Pocket's *total* only moved 308 → 299, a saving of 9 rather than 16,
+because BUILD 108 was pinned at 308/308 — completely full — and the fitter had
+been packing around that ceiling. The DE10-Nano is at 70 % occupancy with no
+such pressure, so the total here should track the instance more closely. **That
+is a prediction from geometry, not a measurement**; the measured figure is in
+[CI results](#build-112-ci-results) and if it disagrees, the geometry argument
+is what is wrong.
+
 `VSHAD3_EN(1)` and `CPU_TYPE(1)` are now **stated explicitly** at the
 `escape_core` instantiation in `escape_mister.v`. Both already defaulted to 1,
 so the bitstream is unchanged; the point is that the decisions are visible
