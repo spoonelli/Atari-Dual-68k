@@ -17,10 +17,21 @@ import sys
 TABLES = ("Setup Summary", "Hold Summary", "Recovery Summary",
           "Removal Summary", "Minimum Pulse Width Summary")
 
+# HOLD-108: "non-negative" is the gate, and it stays the gate. But it is not
+# the whole story: BUILD 108 passed this check with +0.005 ns of hold on the
+# CPU clock and nothing in the output said so - the number sat in a table
+# nobody reads until something has already gone wrong. These floors do NOT
+# fail a build; they make a thin margin visible in the log. Setup and hold
+# live on entirely different scales, hence per-kind floors.
+FLOORS = {"Setup Summary": 1.000, "Hold Summary": 0.050,
+          "Recovery Summary": 0.500, "Removal Summary": 0.100,
+          "Minimum Pulse Width Summary": 0.100}
+
 
 def main(path: str) -> int:
     txt = open(path, errors="replace").read()
     bad, missing, found = [], [], 0
+    tightest = {}          # kind -> (slack, label, clock)
     for kind in TABLES:
         # Multi-corner Quartus prefixes the table with the timing model, e.g.
         # "; Slow 1100mV 85C Model Setup Summary ;", so the name cannot be
@@ -45,6 +56,9 @@ def main(path: str) -> int:
                 except ValueError:
                     continue          # header or separator row
                 found += 1
+                cur = tightest.get(kind)
+                if cur is None or slack < cur[0]:
+                    tightest[kind] = (slack, label, cols[1])
                 if slack < 0:
                     bad.append("%-46s %-46s %8.3f ns"
                                % (label, cols[1], slack))
@@ -71,6 +85,28 @@ def main(path: str) -> int:
     # Print the evidence. A gate that says "pass" without showing what it
     # measured is indistinguishable from a gate that matched nothing.
     print("All %d analysed clock/corner rows have non-negative slack." % found)
+    print("tightest row per check (informational, does not gate):")
+    thin = []
+    for kind in TABLES:
+        if kind not in tightest:
+            continue
+        slack, label, clock = tightest[kind]
+        floor = FLOORS.get(kind)
+        mark = ""
+        if floor is not None and slack < floor:
+            mark = "   <-- under the %.3f ns margin floor" % floor
+            thin.append(kind)
+        print("  %-28s %8.3f ns  %-44s %s%s"
+              % (kind, slack, label, clock[-64:], mark))
+    if thin:
+        print("")
+        print("MARGIN WARNING: %d check(s) are positive but thin. This is NOT a "
+              "failure; the bitstream is publishable." % len(thin))
+        print("  Do not assume the last change caused it. On this design a "
+              "BUILD_ID constant alone has moved worst-case hold by 0.088 ns "
+              "(docs/TIMING.md).")
+        print("  Name the path first: ap_core.hold_paths.rpt is uploaded with "
+              "the bitstream (support/report_hold_paths.tcl).")
     return 0
 
 
