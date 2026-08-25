@@ -567,7 +567,7 @@ change at all.
 | Item | Where | Lands on MiSTer how |
 |---|---|---|
 | **Two-frame line-buffer ghost fix** (self-clearing readout) | `escape_mob.v` | Automatically — same file, same module |
-| **`escape_stain`** (apply_stain automaton extracted to a module) | `escape_stain.v` | Glue change: `escape_mister.v` had its own inline transcription, now replaced by the module |
+| **`escape_stain`** (apply_stain automaton extracted to a module) | `escape_stain.v` | Glue change: `escape_mister.v` had its own inline transcription, now replaced by the module — **equivalence-checked**, see below |
 | **VSHAD3-112** 16 KB partial ROM shadow at `0x54000` | `escape_core.vhd` | Automatically. Was a **full 32 KB** shadow here before the merge |
 | **`vshad3_on`** runtime toggle | `escape_core.vhd` | Glue change: new `escape_mister.v` port, `CONF_STR` `O[8]`, `~status[8]` |
 | **`CPU_TYPE`** generic, default 68010 | `escape_core.vhd` | Automatically; now stated explicitly at the instantiation |
@@ -575,6 +575,25 @@ change at all.
 | **`support/check_slack.py`** multi-corner slack gate | `support/` | CI change; replaces `src/mister/check_slack.py`, which is deleted |
 | **`support/report_hold_paths.tcl`** | `support/` | CI change, plus a fix: it hardcoded `project_open ap_core` and so had never run for MiSTer |
 | Benches `run_stain_tb.sh`, `run_sdram_refresh_tb.sh`, `run_vshad3_tb.sh`, `run_cadence_tb.sh`, `run_busrate.sh`, `run_pf_reset_tb.sh` | `sim/` | Three of them are now CI steps; see below |
+
+### The stain substitution is equivalence-checked, not eyeballed
+
+Replacing `escape_mister.v`'s inline apply_stain automaton with the shared
+`escape_stain` module is the one BUILD 112 change that rewrites logic the
+MiSTer build actually synthesises, so "it looks the same" is not good enough.
+Both were driven from one stimulus stream — 456-column line wrap, markers at
+~1 % density like real MPR2 pixels — and compared every cycle:
+
+```
+EQ  cycles=2000000  module_high=899235  inline_high=899235
+    marker_events=39376  DIFFS=0
+EQ PASS: module and pre-BUILD-112 inline automaton agree on every cycle.
+```
+
+`module_high` and `inline_high` are printed so a run where the output never
+asserts is visibly vacuous rather than a silent pass. **Proven able to fail:**
+dropping the `& ~s_in` term from the module's `stain_brk` — a one-token change
+— gives `DIFFS=8520`.
 
 **The ghost fix is the highest-value item and it is the one that needed no
 work.** It is confirmed on real **Pocket** hardware ("scroll artifacts
