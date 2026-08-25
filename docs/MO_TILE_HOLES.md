@@ -90,3 +90,93 @@ Next step is the slot index (`pf_wp` vs `pf_wp - 1`) and whether the line-start
 queue flush (`pfq_count <= 0` at `x_count == 0`) discards the leading cells'
 fetches. **Verify in simulation before building again** — the first attempt was
 reasoned from code and shipped without a bench that covers line-start pixels.
+
+---
+
+# The left-edge strip: ROOT CAUSE FOUND (PFLINE, build 120)
+
+**It is a fetch-latency race, not a logic bug.** Both earlier "fixes" (116, 117)
+targeted the ring-slot arithmetic. That arithmetic is correct. Nothing was
+wrong with it, which is why neither fix worked and why the second could not
+have worked.
+
+## How it was established
+
+`PFEXTRACT-120` lifted the pipeline into `escape_pf.v` so a bench could reach
+it, and `sim/run_pfline_tb.sh` drives the shipped instance.
+
+The bench had to be rebuilt twice before it was worth anything, and both dead
+ends are worth recording because they are the same mistake in different clothes:
+
+1. **Uniform fixture** - one tile code, one tile word everywhere. Passed
+   720/720 lines. It could not fail: if every cell holds the same data, a stale
+   ring slot is indistinguishable from a fresh one.
+2. **Row-encoded fixture** - the word encoded the tile row. Also passed. Same
+   flaw: on a given line every cell fetches the *same address*, so reading the
+   wrong slot still returns identical data.
+
+Both were caught by MUTATING the DUT - injecting a deliberate wrong-slot read
+at the last phase-7 before pixel 0 - and observing that the bench still passed.
+**A check that cannot fail is worth nothing, and only the mutation test says
+which kind you have.**
+
+The fixture that works makes every CELL distinct (map returns the column as the
+tile code) and tests a **spatial ramp**: `pix(x) == pix(x-8) + 1 (mod 16)`.
+That needs no knowledge of the scroll or fine-phase arithmetic, so a wrong
+model in my head cannot be baked into both sides of the test.
+
+Proven in both directions:
+
+| | result |
+|---|---|
+| shipping RTL | **PASS** - 720/720 lines, ramp unbroken |
+| mutant (wrong ring slot at the critical load) | **FAIL** - 720/720, first violation at x=8 |
+
+## The measurement
+
+With the logic exonerated, the fetch model's latency was swept:
+
+| `GFX_LAT` (pixel clocks) | verdict |
+|---|---|
+| 6 | PASS |
+| 12 | PASS |
+| **13** | **PASS** |
+| **14** | **FAIL - 720/720 lines** |
+| 20, 32 | FAIL |
+
+**The knee is exactly 13/14.** And from the raster arithmetic, cell 0's fetch
+is enqueued at `vis_x = -13`: `pf_x2 = vis_x + 16`, so the cell-0 lookup lands
+at `vis_x = -16` and its enqueue at phase 3, `vis_x = -13`. **Thirteen clocks
+of lead, and the pipeline fails one clock past it.** That exact match is the
+root cause.
+
+## Why every observation follows from this
+
+* **Stale SCENE content, not previous-line residue.** When the fetch has not
+  landed, the ring slot still holds whatever it last held, which can be many
+  frames old. That is what the map-screen capture showed: the previous level's
+  wall and floor over a flat navy screen.
+* **Width = `8 - (fine scroll & 7)`, i.e. 1..8 px.** Only the part of cell 0
+  served from `pf_show` is affected; the rest of the cell comes from `pf_next`,
+  whose slot was fetched a cell earlier and has had time to land. Measured 2 on
+  a map screen, 3 in gameplay.
+* **Why build 116 changed the artifact without fixing it.** It perturbed slot
+  contents and timing, not the lead. The strip went from structured to flat -
+  a different wrong value, not a right one.
+* **Why the SDRAM work helped but did not cure it.** Lower latency moves the
+  race the right way; the owner saw a real improvement. It just does not move
+  it past a 13-clock budget when contention stretches the round trip - and
+  SDSCHED-74 records that the CDC done-return chain ALONE costs ~400 ns (~3
+  clocks) of that budget.
+
+## The fix, and what to be careful about
+
+Give cell 0's fetch more lead. **There are 60 blanking clocks and the design
+uses 13 of them.** The lead comes from `pf_x2 = vis_x + 16` (two cells), so the
+naive change is a bigger constant - but `pf_x2` feeds BOTH the map lookup and
+the display fine phase, so changing it shifts the picture. A correct fix has to
+lengthen the *fetch* lead without moving the *display* phase, e.g. a dedicated
+line-start preload during early hblank.
+
+`sim/run_pfline_tb.sh` now judges it, and the mutation above is the control
+that keeps the judge honest.
