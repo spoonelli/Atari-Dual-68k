@@ -940,13 +940,16 @@ durable fix is to extend `sys/build_id.tcl` (MiSTer) and the Pocket packaging to
 a short SHA, so the binary is self-identifying instead of relying on this table. That
 touches shared MiSTer framework code and has not been done.
 
-### BUILD 108 gate results (CI run 32804328092, commit `972bbf4` / branch head `4bec224`)
+### BUILD 108 gate results (CI run 32804328092, netlist commit `972bbf4`)
 
 **This is the build to flash and test.** REFRESH-112 (interval 224 → 160) and
-CLKFIX-106 (Pocket `psram` CLOCK_SPEED 85.909 → 35.795455). The two commits after
-`972bbf4` are documentation and one RTL *comment*, so `4bec224` is the same netlist;
-`check_slack.py` reported *All analysed clocks have non-negative slack*, TNS 0.000 on
-all eight.
+CLKFIX-106 (Pocket `psram` CLOCK_SPEED 85.909 → 35.795455).
+
+`972bbf4` is cited because it is the **netlist-determining** commit: every later commit
+on `mister-port` is documentation, `core.json`, or an RTL *comment*, none of which reach
+synthesis. Cite the netlist commit rather than the branch head — the head moves every
+time someone edits this file, including this row. `check_slack.py` reported *All analysed
+clocks have non-negative slack*, TNS 0.000 on all eight.
 
 **Timing and resources are IDENTICAL to BUILD 107 — every clock, to three decimals.**
 
