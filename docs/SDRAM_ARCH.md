@@ -318,6 +318,29 @@ row-residency 64. Every cell: **0 data mismatches, 0 protocol violations.**
 | C — **banks only** | 71.45% | 11.51 | 39,891 | 51.0 / 185 |
 | D — **both** | **79.22%** | **6.15** | **50,628** | **18.7 / 101** |
 
+And the miss split, which shows the mechanism directly:
+
+| controller | client switch | same-client stride | refresh |
+|---|---|---|---|
+| `sdram_simple` (baseline) | **87.40%** (28,931) | 0.23% | 5.63% |
+| B — open-row only | 82.54% (32,582) | 0.50% | 9.32% |
+| D — open-row + banks | **0.00% (2 accesses)** | 14.11% | 6.67% |
+
+Bank interleaving takes client-switch misses from **28,931 to two**. What is
+left is genuine same-client stride (14.11%, consistent with the motion-object
+stream's own 84% same-row locality) and refresh (6.67%, which no row policy can
+avoid because `AUTO REFRESH` precharges every bank).
+
+> **A correction to an earlier version of this table.** It reported
+> `client_switch = 13.79%` for configuration D. That was a defect in the
+> taxonomy, not a property of the design: the classifier compared against the
+> previous access *overall* rather than the previous access **to that bank**.
+> Under banking each bank keeps its own open row, so a client's own stride miss
+> was being relabelled a "client switch" whenever another client happened to be
+> served in between — which, with banking working, is nearly always. The
+> row-hit rate was never affected (79.22% either way, since the fix only
+> reclassifies misses), which is how the two versions can be reconciled.
+
 **The interaction is the entire win.** B and C each land within half a clock of
 the A control. Banking raises the *opportunity* from 7% to 71%; open-row is
 what cashes it. Either alone is not worth the risk; together they halve service

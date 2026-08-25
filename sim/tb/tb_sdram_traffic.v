@@ -181,6 +181,15 @@ module tb_sdram_traffic;
     reg [1:0]  or_bank;
     reg [12:0] or_row;
     integer    prev_client;
+    // Per-BANK last client. With bank interleaving the question "did a client
+    // switch cost us this row?" must be asked about the previous access TO
+    // THAT BANK, not the previous access overall - each bank keeps its own
+    // open row, so what some other client did to some other bank is
+    // irrelevant. Using the global previous client (as the first version of
+    // this taxonomy did) mislabels a client's OWN stride miss as a client
+    // switch whenever another client happened to be served in between, which
+    // in the banked configuration is almost always.
+    integer    prev_client_bank [0:3];
     reg        refresh_closed;            // a refresh closed the row since last access
 
     integer n_acc, n_hit, n_miss_switch, n_miss_stride, n_miss_refresh, n_miss_cold;
@@ -253,7 +262,9 @@ module tb_sdram_traffic;
         owner = C_NONE; grant_clk = 0; demand_clk = 0;
         or_valid = 0; or_bank = 0; or_row = 0; prev_client = C_NONE;
         orb_valid = 4'd0;
-        for (k = 0; k < 4; k = k + 1) orb_row[k] = 13'd0;
+        for (k = 0; k < 4; k = k + 1) begin
+            orb_row[k] = 13'd0; prev_client_bank[k] = C_NONE;
+        end
         refresh_closed = 0; cmdbus_d = 3'b111;
         lfsr = 32'h1234_5678;
         n_seqrow = 0; pr_valid = 0; pr_bank = 0; pr_row = 0;
@@ -436,11 +447,12 @@ module tb_sdram_traffic;
                 n_miss_refresh = n_miss_refresh + 1;
             end else if (!orb_valid[gbank(gw)] && !or_valid) begin
                 n_miss_cold = n_miss_cold + 1;
-            end else if (owner != prev_client) begin
+            end else if (owner != prev_client_bank[gbank(gw)]) begin
                 n_miss_switch = n_miss_switch + 1;
             end else begin
                 n_miss_stride = n_miss_stride + 1;
             end
+            prev_client_bank[gbank(gw)] = owner;
             chk_word <= gw;
             orb_valid[gbank(gw)] <= 1'b1;
             orb_row[gbank(gw)]   <= gw[21:9];
