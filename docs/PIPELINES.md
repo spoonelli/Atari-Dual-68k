@@ -859,6 +859,16 @@ layer**, and any download slow enough to be plausible still clears it. Second, t
 still correct, and all that is gone is the A/B ping-pong, i.e. the design silently
 reverts to the one-in-flight arrangement that `PF_SINGLE_CH` exists to reject.
 
+**Synthesis cost, measured** (Quartus CI on `pfreset-111`, run `32807078145`): **M10K
+283 / 308 — delta 0**, as expected for a change that adds a reset arm to nine existing
+registers and no storage. Worst-case setup **+5.488 ns** (was +5.698), worst-case hold
+**+0.087 ns** (was +0.103); all 64 analysed clock/corner rows non-negative. The hold row
+trips the gate's 0.150 ns margin warning — so did the +0.103 baseline — and the named
+worst-hold path is `escape_jsa|jt51_sh` feeding an `altshift_taps` M10K, i.e. inside the
+FM synth, nowhere near the fetch channel or the SDRAM grant path. A −0.016 ns hold move
+is well inside this design's documented ±0.157 ns perturbation sensitivity; do not read
+it as causation.
+
 **What this does not establish.** PHASE 1 models the Pocket boot download as
 `chk_state == 4'd0` with the core held in reset, and in that model the pre-fix RTL
 wedges deterministically — which would mean a flat playfield from power-on. The Pocket
