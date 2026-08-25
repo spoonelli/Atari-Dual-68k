@@ -110,10 +110,19 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
 ## MiSTer (DE10-Nano)
 
 There is a second front end in `src/mister/` that runs the **same machine RTL**
-on a DE10-Nano, loaded from a community-standard `.mra`. It compiles, and that
-is all anyone can honestly claim so far — it has never been run on hardware.
-Requirements, SD-card layout, the ROM-mapping rationale, and an explicit
-verified/unverified list are in [`docs/MISTER.md`](docs/MISTER.md).
+on a DE10-Nano, loaded from a community-standard `.mra`.
+
+**It has been flashed exactly once**, at BUILD 105: it booted, played, and drew
+a completely flat playfield. That was diagnosed (the playfield fetch channel
+did not reset with the core) and fixed, **and the fixed build has still never
+been flashed** — nor has anything added since, including the BUILD 112 merge
+that brings this port up to the Pocket line. Everything past BUILD 105 is
+simulated and CI-verified only.
+
+Requirements, SD-card layout, the ROM-mapping rationale, the BUILD 112
+inventory and an explicit three-way simulated / CI-verified / on-hardware split
+are in [`docs/MISTER.md`](docs/MISTER.md). Read that before assuming any of it
+works.
 
 ## Get it
 
