@@ -512,8 +512,108 @@ Listed so nobody mistakes this for a finished result.
 
 ## 9. Gate and CI results
 
-*(filled in from the runs on this branch — see the commit that adds this
-section's numbers)*
+### 9.1 Synthesis — a true A/B, not a comparison against prose
+
+Two CI builds from the **same tree on the same day**, differing only in
+`localparam SDRAM_OPENROW_EN`. That matters: comparing against the recorded
+baseline figures would fold in every unrelated change between that build and
+this one.
+
+| | control `EN=0` (run 32815732669) | experimental `EN=1` (run 32814970038) | delta |
+|---|---|---|---|
+| **M10K** | **299 / 308** | **299 / 308** | **0** |
+| worst setup | +5.627 ns (Slow 0C) | +5.456 ns (Slow 85C) | −0.171 |
+| worst hold | +0.007 ns (Fast 0C) | +0.091 ns (Fast 0C) | +0.084 |
+| all 64 clock/corner rows | non-negative | non-negative | — |
+| gate | PASS (margin warning) | PASS (margin warning) | — |
+
+**M10K delta is 0**, as required. The controller adds four 13-bit row
+registers, a 4-bit valid vector and three 8-bit comparators — no storage.
+
+**The hold difference is not evidence of anything.** `docs/DEVIATIONS.md` D5
+records ±0.157 ns of movement from placement perturbation alone — larger than
+either number here. Note the *control* landed at **+0.007 ns**, far thinner
+than the +0.090 in the recorded baseline, from RTL that is functionally the
+shipping design. That is D5's lottery, and it is the reason no causal claim is
+made in either direction. Both builds trip the 0.150 ns margin warning; so did
+the baseline; it is a warning, not a failure.
+
+### 9.2 Gates
+
+| gate | result | the number that matters |
+|---|---|---|
+| `run_sdram_model_tb.sh` (openrow) | **PASS** | all 8 modes; wrong-row mutation caught 600/600 |
+| `run_sdram_model_tb.sh` (simple) | **PASS** | all 8 modes — the modes test the hazard, not the module |
+| `run_sdram_refresh_tb.sh` (openrow) | **PASS** | worst 216 clk / 6.034 µs; **both** controls rejected |
+| `run_sdram_refresh_tb.sh` (simple) | **PASS** | worst 224 clk / 6.258 µs; both controls rejected |
+| `run_prio_tb.sh` | **PASS** | 507904 / 507904 = 100.0000% |
+| `run_mob_tb.sh` | **PASS** | MOB PRIO 100.0000%; VS-MAME `wrong_pen=0`, 10047/10047 |
+| `run_mob_order_check.sh` | **PASS** | 9 cells, `b_shorter=0` in every one |
+| `run_psram_tb.sh` | **PASS** | 41.0 ns headroom; control rejected with real violations |
+| `run_pf_tb.sh` | **PASS** | 9600 cells, 0 mismatches, `issueB=4021` non-zero |
+| `run_pf_reset_tb.sh` | **PASS** | — |
+| `run_stain_tb.sh` | **PASS** | 11320 / 11320 stained px; fixture has 16680 stained px |
+| `run_cadence_tb.sh` | **PASS** | exact count, all three decoys rejected |
+| `run_tasrace.sh` | see §9.3 | |
+| `run_vshad3_tb.sh` | see §9.3 | |
+
+Two notes on gates that did not simply pass:
+
+- **`run_mob_order_check.sh` fails out of the box for everyone.** Its default
+  is `BASE_REF=origin/mo-chan4`, and that ref does not exist on the remote —
+  `mo-chan4` is a local-only branch that was never pushed. `git show` exits 128
+  and the gate dies in 0 s. Nothing to do with this work; run it with
+  `BASE_REF=mo-chan4`. Worth fixing at source.
+- **`run_vshad3_tb.sh` was invalidated by me, not by the change.** I removed
+  orphaned Docker containers while it was mid-run and killed one of its cells,
+  which then reported "the bench produced no result at all". Re-run clean —
+  see §9.3.
+
+### 9.3 Long-running gates
+
+*(tasrace and vshad3 results recorded in the commit that adds them)*
+
+### 9.4 Clock branch CI — `sdram-clock-EXPERIMENTAL`
+
+Run 32815667926, **success**. 50.113637 MHz, shadows off by default.
+
+| | 35.795455 MHz control | 50.113637 MHz | 
+|---|---|---|
+| M10K | 299 / 308 | **299 / 308** |
+| worst setup | +5.627 ns | **+4.534 ns** |
+| worst hold | +0.007 ns | **+0.110 ns** |
+| all 64 rows | non-negative | non-negative |
+
+Confirmed from the fit report artifact, not inferred: `outclk_2` and `outclk_3`
+solved to **50.113636 MHz** and `outclk_0` stayed at **7.15909 MHz**, so the
+59.9227 Hz refresh rate is untouched. No PLL frequency warnings; zero critical
+warnings in either build.
+
+**This refutes the setup-headroom ceiling estimated in §7.** That estimate —
+critical path ≈ 22.45 ns from the +5.488 ns baseline slack, so a cap near
+44.5 MHz — is wrong, and wrong in the way `docs/TIMING.md` §13.3 predicts:
+reported slack shows **where Quartus stopped**, not what it can achieve. Asked
+for a 19.95 ns period it delivered one with 4.5 ns to spare. **The internal
+logic would very likely close higher still.**
+
+#### The hold-path composition changed, and the obvious reading is wrong
+
+Worst 30 hold paths on the clock branch: **20 jt51 FM, 1 TMS5220, 9 other —
+and not one `gpll[2] → gpll[0]` cross-domain path.** (The single `gpll[2]` entry
+is `recheck_ctr → recheck_ctr`, same-domain.) At 5:1, BUILD 110's worst 20 were
+*10 playfield CDC* / 9 jt51 / 1 APF bridge — the CDC family was half of it.
+
+It is tempting to call that the two-for-one fix for D5. **It is not, and the
+mechanism says so.** 7:1 is still an *integer, phase-aligned* ratio: every
+seventh SDRAM edge lands exactly on a pixel edge, so the coincident-edge
+relationship D5 describes is unchanged in principle. Nothing structural has
+been fixed. The most likely explanation is placement — the same lottery D5
+warns about, in the favourable direction for once.
+
+**Actually breaking the coincidence needs a NON-INTEGER ratio, which was not
+tested, and which no analysis in this repo has ever covered.** That remains the
+open question, and it is the one worth pursuing if D5 is to be fixed rather
+than re-rolled.
 
 ---
 
