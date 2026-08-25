@@ -31,12 +31,14 @@ hidden in a footnote; if you are deciding whether to install it, read the
    card. It merges into the existing `Cores/`, `Platforms/` and `Assets/`
    folders.
 2. Build `atari_escape.rom` from dumps you own and put it in
-   `/Assets/eprom/common/`:
+   `/Assets/eprom/common/` on the SD card. The builder is
+   [`support/build_rom.py`](https://github.com/spoonelli/Atari-Dual-68k/blob/main/support/build_rom.py)
+   in the source repository:
    ```
    python3 support/build_rom.py /path/to/eprom ./atari_escape.rom
    ```
-   The builder verifies all 28 chips against known-good CRC32s and refuses
-   anything that does not match. Details in [`ROMS.md`](ROMS.md).
+   It verifies all 28 chips against known-good CRC32s and refuses anything that
+   does not match. Details in [`ROMS.md`](ROMS.md).
 3. Launch **Atari Dual 68k** from the Pocket menu. It asks for the ROM on
    startup.
 
@@ -60,7 +62,7 @@ sound board delivers music, effects and speech in real time.
 | | |
 |---|---|
 | **Video** | Alpha layer, playfield and motion objects, IRGB palette with authentic attract dimming. Native raster: 456×262 total, 336×240 visible, **59.9227 Hz** — exact, derived from the board's 14.318 MHz colorburst family. |
-| **Audio** | Atari JSA-I: 6502 + YM2151 FM + TMS5220 speech, over the board's serial SCOM link. Per-channel FM level sliders and separate music/speech volume in the Interact menu. |
+| **Audio** | Atari JSA-I: 6502 + YM2151 FM + TMS5220 speech, over the board's serial SCOM link. Separate music and speech volume in the Interact menu. |
 | **CPUs** | Two 68000-family cores running **genuinely concurrently** with shared RAM and the mailbox handshake, as the real board does. (MAME time-slices; this does not.) |
 | **Controls** | Emulated hall-effect stick via the ADC0809, including the game's own in-game calibration screens. Dock analog stick takes priority when deflected; invert/swap/deadzone options in the menu. |
 | **High scores** | **Persist across a power cycle.** The emulated 2804 EEPROM is snapshotted to the SD card ~1.17 s after the game stops writing it, so a score survives an unclean power-off, not just a clean exit. |
@@ -237,13 +239,27 @@ vendored here, so the firmware's actual rule cannot be read off a normative
 document. What *is* proven is that the core itself cannot influence the path —
 the FPGA only ever sends a numeric slot id over the bridge and never a filename.
 
-Given that being wrong means silently destroying somebody's high-score table on
-upgrade, the rename waits for one device test: install the renamed core
-alongside an existing `.sav` and confirm the scores still appear. It is a
-five-line change once that is done.
+Being wrong would mean silently destroying somebody's high-score table on
+upgrade, so this release does not make the change on inference alone. One
+device test settles it: install the renamed core alongside an existing `.sav`
+and confirm the scores still appear.
 
-Two further things to know if it does happen: the old
-`/Cores/spoonelli.ataridual68k/` folder will remain on the SD card and show up
-as a **second entry** in the Pocket menu until deleted, and the platform's
-display name (`Atari Dual 68k`) is a separate string worth deciding on at the
-same time.
+**But the timing argument runs the other way, and it is the stronger one.**
+This is the first public release. If the rename is going to happen at all,
+*now* is when it costs least — right now almost nobody has an install or a
+save to orphan, and every release from here makes that population larger. Note
+that this holds under **both** answers to the open question: if saves are
+platform-keyed the rename is free, and if they are core-keyed the rename
+orphans a set of saves that is currently close to empty and will never be
+smaller. Deferring to 1.0 is the one option that is worse under both branches.
+
+The recommendation is therefore: **do the device test, and if it passes, rename
+before tagging** — not after. It is a five-line change (`core.json` shortname,
+two lines in `package.sh`, two doc references); `platform_ids` stays `eprom`
+and `data.json` must not be touched.
+
+Two further things if it happens: the old `/Cores/spoonelli.ataridual68k/`
+folder stays on the SD card and shows up as a **second entry** in the Pocket
+menu until deleted — worth a line in the release notes when it does — and the
+platform's display name (`Atari Dual 68k`) is a separate string worth deciding
+on at the same time.
