@@ -335,13 +335,26 @@ against the shipped commit — is exactly the divergence 8.3 describes:
 | 0x054000 VS3=1 VS3ON=1 | 5.015 ok | 5.015 ok |
 | 0x054000 VS3=1 VS3ON=0 | 4.015 ok | 4.015 ok |
 | **0x050000 VS3=1 VS3ON=1** | **4.015 ok** | **25.015 FAIL** |
-| 0x054000 VS3=0 VS3ON=1 | 4.015 ok | — |
+| 0x054000 VS3=0 VS3ON=1 | 4.015 ok | 4.015 ok |
+
+Clean: `VSHAD3 GATE: PASS (4/4 rows)`, exit 0.
+Mutant: `VSHAD3 GATE: FAIL (1 of 4 rows)`, exit 1.
 
 **25.015 clocks per bus cycle against 4.015** — a 6.2x slowdown on the video
 CPU, from a single wrong bit in an address compare, with nothing asserting and
 nothing mismatching. That is what "served by neither" costs, and it is why the
-gate trips on `>= 6.000` by name. Rows 1 and 2 still passed under the mutation,
-which matters: the gate is not simply failing everything it is shown.
+gate trips on `>= 6.000` by name.
+
+Note that **three of the four rows still passed** under the mutation, and that
+they are the right three: the mutation only widened `v_shad_rng` over
+0x50000-0x53FFF, so rows aimed at 0x54000 are genuinely unaffected and a gate
+that failed them too would be reporting noise. The gate failed exactly the row
+whose address the mutation broke. It discriminates; it does not just alarm.
+
+Note also the second signal in that row, which is why the bench reports bus
+cycles and not only a rate: `buscycles` collapsed from 49,808 to **7,995** in
+the same 200,000-clock window. A rate alone could in principle be argued about;
+a CPU that completed one sixth as much work in the same time cannot be.
 
 ## 8.5 Fit and timing (CI run 32807811821, branch `vshad3-partial-112`)
 
