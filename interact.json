@@ -145,7 +145,7 @@
         "persist": false,
         "writeonly": true,
         "defaultval": 0,
-        "value": 0
+        "value": 1
       }
     ],
     "messages": []
