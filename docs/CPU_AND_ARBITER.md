@@ -224,6 +224,31 @@ Two near-misses, both checked and both benign:
   rather than unwinding it — it reloads A7 from the reset SSP at `$000000` and
   re-enters via the reset PC at `$000004`. Frame-size-agnostic by construction.
 
+**The CPU never leaves supervisor mode — checked statically as well.** §1.3
+establishes this dynamically (S=1 at every `MOVE SR` site and every frame sample
+over 400 s). Here is the independent static half, which matters because it is
+the premise the whole `SR_Read` argument rests on. Only four things can clear
+the S bit: `MOVE <ea>,SR`, `ANDI #imm,SR` (`$027C`), `EORI #imm,SR` (`$0A7C`),
+and `RTE`. Scanning every even offset of both images:
+
+| Form | Raw hits (main / extra) | Verdict |
+|---|---|---|
+| `MOVE #imm,SR` with S=0 in the immediate | 1 / 1 (`$6B7F2`, `imm=$48A0`) | **data** — mid-record in a 6-byte-stride table (`483C 03F0 36FE / 484E 04E9 46FD / 486A 04E9 46FC / 48A0 04E9 47F7 / …`); the `46FC` is a record field, not an opcode |
+| `ANDI #imm,SR` clearing S | 2 / 0 (`$21BBC`, `$21F84`) | **data** — entries in a monotonic word table (`022B 0279 022C 027A 022D 00A9 027B 022E 027C 027D …`) |
+| `EORI #imm,SR` toggling S | 1 / 0 (`$1179C`) | **data** — entry in a strictly counting table (`0A74 0A75 0A76 0A77 … 0A7C 0A7D 0A7E …`) |
+| `MOVE #imm,SR` with S=1 | 22 / 10 | the real ones — `$2000/$2300/$2500/$2700`, all supervisor (plus 2/2 more ASCII false hits, `$6B31`/`$6B54` = `"k1"`/`"kT"`, in the same stride table) |
+| `RTE` | see above | restores only frames this CPU pushed while supervisor; the two hand-built user-mode frames are never consumed |
+
+So no reachable instruction can drop the CPU to user mode, and `MOVE from SR`
+becoming privileged cannot fire. (The register/memory forms of `MOVE <ea>,SR`
+cannot be resolved statically — they restore a previously-saved SR — which is
+exactly what §1.3's dynamic measurement covers, and it agrees: 0 privilege
+violations in 400 s with the detector falsified four ways.)
+
+Note the same `CPU(0)` switch also *enables* `MOVE from CCR`, a 68010-only
+opcode. §1.3 already measured that: 12/11 raw hits, **0** on a reachable
+instruction boundary, all in that same `$60000` stride table.
+
 **VBR is provably zero for the life of the machine.** TG68K resets it to zero
 (`TG68KdotC_Kernel.vhd:4056`) and only `MOVEC` can write it (`:4064`) — and the
 even-offset opcode scan finds **no `$4E7A`/`$4E7B` anywhere in either 512 KB
