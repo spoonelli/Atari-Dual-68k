@@ -80,24 +80,60 @@ EEPROM and persist across power-offs, exactly as the cabinet did.
 The full test procedure, and what to do if scores do *not* persist, is in
 [`EEPROM_SAVE.md`](EEPROM_SAVE.md).
 
-## Dev-build diagnostics (expected, not a bug)
+## The build number, and the diagnostic HUD
 
-Dev builds show a cyan **build number** bottom-right — check it matches the
-zip you flashed — plus a diagnostic HUD:
+Every build shows a cyan **build number** in the bottom-right corner, on a
+clean screen and with the HUD up alike. Check it matches the zip you flashed —
+this is the only on-device guard against flashing the wrong file. It reads two
+hex digits (the low half of `BUILD_ID`); see "Build number" below.
 
-- **L** toggles the debug overlay
-- **R** cycles 4 HUD pages: 0 = JSA/sound status · 1 = world-engine (extra
-  CPU) PC + restart counter · 2 = main-CPU forensics / CRAM checksums ·
-  3 = engine state + frame counter
-- **R2 (hold)** = video-fetch kill test (screen garbles while held — a probe,
+**The HUD is OFF by default and nothing else draws over the picture.** Press
+**L** to bring it up. It is a development tool, not a fault, and it is not
+removed from release builds — the forensics pages are how problems get
+diagnosed from a photo.
+
+With the HUD up:
+
+- **L** toggles it back off
+- **R** cycles **6 HUD pages** (0-5), shown in the rightmost digit of the hex row:
+  - **0** — default: JSA/sound status, coin/credit counters, extra-CPU bus-cycle length
+  - **1** — second-processor window: extra-68k PC (frame-latched) + last mailbox response
+  - **2** — main-CPU window: video-CPU PC, last main write address, crash forensics
+  - **3** — engine window: actor-table head word + game mode bytes
+  - **4** — `apply_stain` diagnostic: stained pixels, span first/last line
+  - **5** — cadence page: video- and world-CPU logic frames per 256 video frames,
+    plus video-CPU bus cycles/frame. `0100` hex = 1.0000 updates/frame;
+    MAME's reference is `00FF`/`0100` (see [`PERF_CADENCE.md`](PERF_CADENCE.md))
+- **R (hold)** = hide motion objects · **L2 (hold)** = hide the alpha layer ·
+  **R2 (hold)** = video-fetch kill test (screen garbles while held — a probe,
   not a fault)
 
-The planned release core (`spoonelli.eprom`) will ship with all diagnostics
-removed.
+The three hold-to-act probes above only respond **while the HUD is on**, so a
+player cannot blank the sprites or the screen by accident. `R` still advances
+the page counter with the HUD hidden; the page it lands on is whatever appears
+when you next press **L**.
+
+### Build number
+
+The stamp is the **low two hex digits** of the 16-bit `BUILD_ID` — BUILD 112
+shows `12`. With the HUD up, the two digits to its left (the debug-page number
+and the top `BUILD_ID` digit) are covered by the checksum bit row, so the same
+two digits are what you read in both states, and a photo of a clean screen and
+a photo of the HUD report the same number.
+
+> Because only two of the four digits are on screen, the stamp distinguishes
+> builds within a run of 256, not absolutely: `0x3112` and `0x2112` both read
+> `12`. That has been enough so far — consecutive builds differ in the low
+> digits — but it is worth knowing when comparing two builds far apart.
 
 ## Reporting problems
 
-A photo or short video showing the on-screen build number plus HUD page 1 or
-2 usually contains everything needed to diagnose an issue — the forensics
-pages latch crash addresses and checksums precisely so one picture tells the
-story.
+Press **L** to bring up the HUD, then **R** to reach page 2 (main-CPU
+forensics) or page 1 (second-processor window). A photo or short video showing
+the on-screen build number plus one of those pages usually contains everything
+needed to diagnose an issue — the forensics pages latch crash addresses and
+checksums precisely so one picture tells the story.
+
+For a **performance** complaint (sluggishness in crowds) photograph **page 5**
+instead: it reports the cadence figure directly, in the same units MAME is
+quoted in.

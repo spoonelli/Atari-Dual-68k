@@ -56,11 +56,46 @@ The Pocket creates that file on its own -- nothing to install. Delete it to
 reset the machine to a factory-fresh EEPROM.
 EOF
 
-# guard: refuse to package any ROM data
+# ---------------------------------------------------------------- ROM guards
+# RC-113: the *.rom name check below is a REGRESSION TRIPWIRE, not an active
+# check -- no path in this script stages a .rom, so on an unmodified script it
+# can never fire. (Proven: re-adding a `cp dist/assets/.../. -> Assets/` line,
+# the exact regression it exists to catch, makes it fire and produce no zip.)
+# It is also blind to a ROM under any other name. So it is backed by two checks
+# that constrain the ACTUAL output rather than a filename:
+#
+#   1. Assets/ must contain exactly the placeholder note and nothing else.
+#      This is where a ROM would land, and it is asserted by content, not name.
+#   2. Nothing outside the bitstream may be large. A 2 MB ROM cannot hide in a
+#      renamed file without tripping this.
+#
+# Guard 1: no file named like a ROM, anywhere in the tree.
 if find "$STAGE" -iname '*.rom' | grep -q .; then
     echo "!! REFUSING to package: ROM file found in staging tree" >&2
     exit 1
 fi
+
+# Guard 2: the Assets tree ships EXACTLY the placeholder, whatever it is called.
+ASSET_FILES="$(cd "$STAGE" && find "Assets" -type f | sort)"
+if [ "$ASSET_FILES" != "Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" ]; then
+    echo "!! REFUSING to package: Assets/ must contain only the ROM placeholder." >&2
+    echo "   found:" >&2
+    echo "$ASSET_FILES" | sed 's/^/     /' >&2
+    exit 1
+fi
+
+# Guard 3: nothing but the bitstream may be big. Catches ROM data smuggled in
+# under a non-.rom name (the platform image is the largest legitimate asset).
+MAXK=600
+while IFS= read -r f; do
+    case "$f" in "$STAGE/$CORE_DIR/bitstream.rbf_r") continue;; esac
+    sz=$(( $(wc -c < "$f") / 1024 ))
+    if [ "$sz" -gt "$MAXK" ]; then
+        echo "!! REFUSING to package: ${f#$STAGE/} is ${sz} KB (limit ${MAXK} KB)." >&2
+        echo "   Only the bitstream may exceed this. Is this ROM data?" >&2
+        exit 1
+    fi
+done < <(find "$STAGE" -type f)
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"

@@ -625,6 +625,11 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                     endcase
                 end else if(diag_on && in_hexrow) begin
                     vidout_rgb <= hex_px ? 24'hFFFF00 : 24'h101040;
+                end else if(ver_stamp) begin
+                    // Only reachable with diag_on == 0: every branch above that
+                    // covers rows 228..233 requires diag_on. This is the clean-boot
+                    // build stamp.
+                    vidout_rgb <= ver_px ? 24'h00FFFF : 24'h101010;
                 end else begin
                     vidout_rgb <= alpha_rgb;
                 end
@@ -1383,7 +1388,12 @@ psram #(.CLOCK_SPEED(35.795455)) cram0 (
     wire       allcomplete_sd;
 synch_3 s_acsd(dataslot_allcomplete, allcomplete_sd, clk_sdram);
     wire vidkill_sd;
-    wire vidkill_src = cont1_key[11] | m_vidkill_px;
+    // RC-113: R2-hold vidkill is a destructive bring-up tool (it starves the MO
+    // fetch path) sitting on a button a player will press. Gated behind the HUD
+    // for the same reason as the layer-isolation holds -- press L1 to arm it.
+    // diag_on is declared with the other HUD controls further down; module-scope
+    // forward reference, proven to elaborate by sim/quartus_analyze.sh.
+    wire vidkill_src = (cont1_key[11] & diag_on) | m_vidkill_px;
 synch_3 s_vk(vidkill_src, vidkill_sd, clk_sdram);   // R2 hold or debug mode 6
 
 always @(posedge clk_sdram) core_rstn_sd <= core_reset_n;
@@ -2232,6 +2242,17 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire [3:0] ver_row = hexfont(ver_digit, ver_gy);
     wire       ver_px  = (vx0[3]==1'b0) && ver_row[2'd3 - vx0[2:1]];
     wire in_hexrow = (visible_y >= 'd100) && (visible_y < 'd124) && (visible_x >= 'd44) && (visible_x < 'd300);
+    // RC-113: the build stamp must survive the HUD being OFF -- it is the only
+    // on-device guard against flashing/labelling mistakes, and the HUD no longer
+    // boots on. Same rows (228..233) and same two digits (x296..327) as when the
+    // HUD is on, so a photo of a clean screen and a photo of the HUD read the
+    // SAME number. x264..295 stays clear because with the HUD on those columns
+    // belong to the chk2 bit row, which is what limits the stamp to 2 of the 4
+    // ver slots in BOTH states -- see the note above BUILD_ID.
+    // vx0[3]==0 restricts the painted area to each 8px glyph box, so a clean
+    // screen gets two small plates rather than a 64px-wide bar.
+    wire ver_stamp = (visible_y >= 'd228) && (visible_y < 'd234)
+                     && (visible_x >= 'd296) && (visible_x < 'd328) && (vx0[3]==1'b0);
 
     // ---------------- playfield pipeline (pixel domain)
     // Prefetch 2 cells ahead: map lookup at phase 0, SDRAM gfx request at phase 3
@@ -2771,10 +2792,14 @@ escape_stain ustain (
     wire [15:0] dbg_jsa_link, dbg_jsa_pc;
     wire [15:0] dbg_resp_stat, dbg_coin_cred;
     wire        wdog_expired;
-    // LANE3x: L1 TOGGLES the debug overlay (was hold-to-show). Starts ON.
+    // LANE3x: L1 TOGGLES the debug overlay (was hold-to-show).
+    // RC-113: starts OFF. The overlay covered ~16% of the picture (rows 0-7,
+    // 100-123, 228-239) on every boot, so every gameplay screenshot had a hex
+    // bar through it. Nothing is removed -- L1 brings the whole HUD back, and
+    // R still cycles dbgmode 0..5 underneath whether or not it is shown.
     wire l1_s;
 synch_3 s_diag(cont1_key[8], l1_s, clk_sys_7159);
-    reg  diag_on = 1'b1;
+    reg  diag_on = 1'b0;
     reg  l1_d = 1'b0;
     always @(posedge clk_sys_7159) begin
         l1_d <= l1_s;
@@ -2795,9 +2820,16 @@ synch_3 s_step(cont1_key[15], step_s, clk_sys_7159);    // Start = self-test ste
     end
     wire [15:0] aud_l_feed = tone_s ? (tone_sq ? 16'h1800 : 16'hE800) : core_audio_l;
     wire [15:0] aud_r_feed = tone_s ? (tone_sq ? 16'h1800 : 16'hE800) : core_audio_r;
-    wire iso_mo_off, iso_alpha_off;
-synch_3 s_isomo(cont1_key[9],  iso_mo_off,    clk_sys_7159);   // R: hide motion objects
-synch_3 s_isoal(cont1_key[10], iso_alpha_off, clk_sys_7159);   // L2: hide alpha layer
+    // RC-113: the layer-isolation bring-up tools are now gated behind the HUD.
+    // They are HOLD-to-act on R and L2 -- buttons a player will press -- and
+    // blanking every sprite (or the whole text layer) with no on-screen
+    // explanation reads as a core bug on a clean boot. Press L1 first to arm
+    // the debug surface, exactly as for the overlay itself. Nothing is removed.
+    wire iso_mo_off_raw, iso_alpha_off_raw;
+synch_3 s_isomo(cont1_key[9],  iso_mo_off_raw,    clk_sys_7159);   // R: hide motion objects
+synch_3 s_isoal(cont1_key[10], iso_alpha_off_raw, clk_sys_7159);   // L2: hide alpha layer
+    wire iso_mo_off    = iso_mo_off_raw    & diag_on;
+    wire iso_alpha_off = iso_alpha_off_raw & diag_on;
     // hall-effect stick emulation: d-pad -> absolute ADC axis targets, analog
     // stick (dock) takes priority when deflected — see rtl/hall_stick.v
     wire [7:0] adc_p1x, adc_p1y, adc_p2x, adc_p2y;
