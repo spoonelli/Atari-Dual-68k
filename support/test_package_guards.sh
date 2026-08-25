@@ -73,6 +73,23 @@ provoke "guard 4: small payload hidden in Cores/" \
         'cp "'"$TMP"'/small.bin" "$STAGE/$CORE_DIR/chars.dat"' refuse
 provoke "guard 4: a core definition file gone missing" \
         'rm -f "$STAGE/$CORE_DIR/video.json"' refuse
+# ARTWORK-113: the marquee is under the ROM rule. Guards 3 and 4 both pass it
+# (under the size limit, at an expected manifest path), so only guard 5 stands
+# between the real art and a release zip. Provoke it with the ACTUAL artwork
+# when it is present, and with a same-sized stand-in when it is not, so this
+# still proves the guard fires on a machine that does not hold the art.
+ART="/Users/lloyd/Documents/Lloyd Projects/artwork/eprom.bin"
+if [ -f "$ART" ]; then
+    provoke "guard 5: the real marquee art as the platform image" \
+            'cp "'"$ART"'" "$STAGE/Platforms/_images/$PLATFORM.bin"' refuse
+else
+    echo "  SKIP  guard 5 with real art (not present on this machine)"
+fi
+# Content-substitution control: any non-placeholder image must be refused, not
+# merely the one known bad file. A hash guard that only knew one hash would be
+# a blocklist, and blocklists miss art v6.
+provoke "guard 5: any non-placeholder image (unknown art)" \
+        'dd if=/dev/urandom of="$STAGE/Platforms/_images/$PLATFORM.bin" bs=171930 count=1 2>/dev/null' refuse
 
 echo
 echo "$pass passed, $fail failed"
