@@ -254,7 +254,15 @@ Part 1 §1 already recorded that the hold-critical set is {playfield CDC, speech
 FM audio}. `mg_data` is four times wider than the playfield pair and crosses
 identically; it has simply not lost a lottery yet.
 
-## 10. Proposal — scoped hold multicycle. NOT SHIPPED.
+## 10. Proposal — scoped hold multicycle. NOT SHIPPED, AND RE-SCOPED BY §11.
+
+> **Read §11 first.** Measurement after this section was written showed BUILD
+> 110's *binding* hold path is jt51 FM audio on a same-domain `gpll[0]` path,
+> not the CDC family this proposal targets. The proposal below is still correct
+> about the CDC family and still removes ~4,200 paths from the placement
+> lottery — but it would not have widened BUILD 110's margin. Treat it as one
+> candidate among several, not the answer.
+
 
 ```tcl
 # PROPOSAL ONLY - not in core_constraints.sdc. See docs/TIMING.md §10.
@@ -333,28 +341,117 @@ that it passed by luck, which is exactly the thing we had to work out by hand.
 Left unapplied because changing a threshold in the same commit that restores the
 mechanism muddies both; it wants its own decision.
 
-### 10c. Suggested sequencing
+## 11. CORRECTION: BUILD 110's worst hold path is jt51 FM, not the playfield CDC
 
-1. **Restored already:** the per-path reporter, its CI step, and the margin
-   warning. Every future thin number is now cheap to attribute.
-2. Ship alpha on BUILD 110, knowing the margin is luck and saying so.
-3. Apply §10 to end the 4,200-path lottery; verify with `report_exceptions`.
-4. Close §8a's seven control paths deliberately — §10b if the SDRAM region is
-   opened, placement/`set_max_skew` if not.
+*Added after the restored reporter ran on BUILD 110's own RTL (run 32793948178).
+It contradicts an inference in §9 and §10, so it is recorded as a correction
+rather than folded silently into them.*
+
+The restored diagnostic did the job it exists for, immediately: **it proved a
+guess wrong.** §9 inferred that the failing endpoints were the
+`vg_data -> pfring` family. For BUILD 110 that is **not** what binds.
+
+Run 32793948178 is BUILD 110's exact RTL plus the diagnostics (workflow and
+script files are not Quartus inputs). It reproduced **hold +0.103 exactly**,
+confirming a third time that the fitter is deterministic — and it named the
+paths:
+
+**Fast 1100mV 0C — the binding corner. 20 worst paths span 0.103 to 0.124, a
+0.021 ns band:**
+
+| slack | from | to | launch | latch |
+|---|---|---|---|---|
+| **0.103** | `jt51_csr_op\|u_reg1op\|bits[6][0]` | `m_block6a0~porta_datain_reg7` | **gpll[0]** | **gpll[0]** |
+| 0.109 | `jt51_pg\|ph_X[5]` | `m_block6a0~porta_datain_reg5` | gpll[0] | gpll[0] |
+| 0.110 | `jt51_csr_op\|u_reg1op\|bits[4][0]` | `m_block6a0~porta_datain_reg5` | gpll[0] | gpll[0] |
+| 0.110 | `vg_dataB[25]` | `pfring1[25]` | gpll[2] | gpll[0] |
+| 0.113 | `pmp_wr_data_latch[22]` | `block1a12~portb_datain_reg10` | clk_74a | clk_74a |
+
+Composition of those 20: **10 playfield CDC, 9 jt51 FM, 1 APF bridge.** At
+Fast 85C the order flips back — 10 paths from 0.124 to 0.141, worst
+`vg_dataB[25] -> pfring1[25]`, 8 of 10 playfield CDC.
+
+Three consequences, and they are not comfortable for §10.
+
+1. **The worst path is same-domain.** `gpll[0] -> gpll[0]`, jt51 register into a
+   block-RAM data input. It is a genuine single-cycle path in one clock domain.
+   **No multicycle is justifiable there** — §8's stability argument does not
+   apply and neither does anything like it.
+
+2. **A `pfring`-only exemption would not have widened BUILD 110's margin at
+   all.** It removes 10 of the top 20 and leaves the binding path untouched at
+   0.103. §10 is not wrong about the CDC family, but it was aimed at the wrong
+   target for this build.
+
+3. **This is a cluster at the floor, not a thin path.** Twenty paths inside
+   0.021 ns, across three unrelated subsystems. Fix one family and the next is
+   already waiting 0.007 ns behind it — which is exactly what the build history
+   shows: BUILD 107's worst was TMS5220 speech, 108's was the playfield CDC,
+   110's is jt51 FM. Part 1 §1 named the hold-critical set as {playfield CDC,
+   speech, FM audio} and was right; §9 above narrowed it too far.
+
+**What this means for the fix.** The common factor is not a structure, it is a
+*clock*: every path in the cluster latches on **gpll[0]**, the 7.159 MHz
+pixel/CPU clock, and the measured skew on it (~0.53 ns against ~0.60 ns of data
+delay, Part 1 §1) consumes essentially the whole budget. That points at global
+levers rather than per-path exceptions:
+
+- clock-network routing/regioning for gpll[0], or `set_max_skew` on it;
+- the §10b phase-offset idea, which helps the CDC family but does nothing for
+  the same-domain jt51 and bridge paths;
+- and, most cheaply, accepting that this design has a floor around +0.10 ns and
+  **gating on the margin** (§10bb) so a build that lands on it says so.
+
+§10 should therefore be re-scoped or held: it is a real improvement to the CDC
+family and a real reduction in the number of tickets in the lottery (~4,200
+paths), but **it is not the thing standing between BUILD 110 and comfortable
+margin.** Nothing has been applied, so nothing needs undoing.
+
+A throwaway branch `hold-repro110` (BUILD 110 RTL, `BUILD_ID` back to 3109,
+reporter present) was pushed to reproduce the *failing* build and name its
+failing pairs — the one gap remaining, since the original failure predates the
+restored reporter. **Never merge it.**
+
+
+## 12. Suggested sequencing
+
+1. **Done in this commit:** the per-path reporter, its CI step and the margin
+   warning are restored. Their very first run corrected a wrong inference
+   (§11), which is the whole argument for having them.
+2. **Settle the failing build.** `hold-repro110` names what actually failed at
+   -0.054. Until that lands, "which family failed the gate" is still inference.
+3. **Ship alpha on BUILD 110** — but on the understanding that +0.103 is this
+   design's floor, not a comfortable margin, and that it got there via a
+   version constant.
+4. **Raise the margin floor** (§10bb) so the next build that lands on the floor
+   announces it. Cheapest useful change on this list; gates nothing.
+5. **Then decide the real fix on evidence**, not on §10 as written. The cluster
+   is ~20 paths inside 0.021 ns across three subsystems, all latching on
+   gpll[0] — so the candidates worth costing are the *global* ones (clock
+   regioning / `set_max_skew` on gpll[0]) alongside §10 for the CDC family.
+   §10 alone removes ~4,200 tickets from the lottery but does not move BUILD
+   110's binding path.
 
 ## What is measured, what is inferred
 
 **Measured:** the four builds' per-corner hold/setup and M10K (CI run IDs
 above); the comment-only build reproducing BUILD 109 across all twenty values
-with byte-identical report size; the 0.002 ns hold relationship and the named
-endpoints `vg_dataB[27] → pfring0..3[27]` with their skew and data delay (Part 1
-§1); `vg_doneB_85 → vg_doneB_s_q` at 0.077; **4,266** RR paths on
-`gpll[2] → gpll[0]`; TNS 0.000 in every passing build and −0.201/−0.118 in the
-failing one; the RTL structure, widths and line numbers in §8 and §9.
+with byte-identical report size; BUILD 110's RTL + diagnostics reproducing
++0.103 exactly (run 32793948178), a third independent determinism control; the
+0.002 ns hold relationship and the endpoints `vg_dataB[27] -> pfring0..3[27]`
+with skew and data delay (Part 1 §1); `vg_doneB_85 -> vg_doneB_s_q` at 0.077;
+**4,266** RR paths on `gpll[2] -> gpll[0]`; TNS 0.000 in every passing build and
+-0.201/-0.118 in the failing one; **BUILD 110's full worst-20 at Fast 0C —
+range 0.103 to 0.124, composition 10 playfield CDC / 9 jt51 FM / 1 APF bridge,
+worst path jt51 `gpll[0] -> gpll[0]`** (§11); the RTL structure, widths and line
+numbers in §8 and §9.
 
-**Inferred:** that the ≥4 failing endpoints in the failing build are that same
-`vg_data → pfring` family — the TNS arithmetic and the 4-way fanout both fit,
-and it is the family that heads every per-path report we have, but that build
-produced no per-path report because the reporter was not on its branch. **Step 1
-of §10c fixes exactly that**, and it should be done before §10 is committed
-rather than after.
+**Corrected:** §9 inferred the failing endpoints were the `vg_data -> pfring`
+family. §11 measured otherwise for BUILD 110. The inference was flagged as such
+and the reporter caught it on its first run.
+
+**Still inferred:** which registers actually failed in the `cpu-68010` build at
+-0.054. That build predates the restored reporter, so its per-path detail does
+not exist. `hold-repro110` (throwaway, never merge) is in flight to produce it.
+Given §11, the earlier assumption that it was the CDC family should be treated
+as unproven — jt51 FM is at least as likely.
