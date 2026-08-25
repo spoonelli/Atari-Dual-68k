@@ -538,7 +538,25 @@ history the two lines need to keep converging).
 and CLKFIX-106 onto `mister-port` before this merge started. None of that work
 is redone here and none of it is touched. `REFRESH_INTERVAL=160` /
 `DEFER_CAP=48` are the owner's values, unchanged.
-**Merged from:** `origin/tas-atomic` at `d45b884`.
+**Merged from:** `origin/tas-atomic`, first at `d45b884` and then again at
+`a2cc5b4` when that branch moved eleven commits underneath this one.
+
+> **Correction to commit `7af144e`'s message.** That merge commit says
+> *"tas-atomic still carries `psram #(.CLOCK_SPEED(85.909))`"*. **It does
+> not, and did not.** `tas-atomic` fixed that constant in `6596423` (BUILD
+> 106) and `mister-port` fixed it independently in `972bbf4` (CLKFIX-106);
+> both branches read `35.795455` at the merge point, and the four `core_top.v`
+> conflicts actually resolved were **comment text only**, not the parameter.
+> The commit message is wrong; the code is right, and the section on CLKFIX-106
+> below has always said *"matching `tas-atomic`"*, correctly. Recorded here
+> because a pushed commit message cannot be corrected without a force-push on
+> a shared branch, and leaving a false claim in the log to avoid a paragraph of
+> admission is how this project acquires the errors it later has to hunt.
+
+**Pocket-side delta.** After both merges this branch differs from
+`origin/tas-atomic` under `src/fpga/` by **comment text only** — four hunks in
+`core_top.v` and one in `sdram_simple.v`, no RTL. The two lines have converged
+on everything that synthesises.
 
 ### What came across
 
