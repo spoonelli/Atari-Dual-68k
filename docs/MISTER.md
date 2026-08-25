@@ -528,10 +528,13 @@ game logic has an order of magnitude more margin than the framework it sits in.
 ## BUILD 112 — catching up to the Pocket line
 
 `mister-port` sat at BUILD 105/107/108 while the Pocket line ran on to BUILD
-112. `mister-112` is `mister-port` **merged with** `tas-atomic` (not rebased —
-a rebase would have replayed the MiSTer commits on top of a `core_top.v` that
-still carries the CLKFIX-106 defect, and would have discarded the merge
-history the two lines need to keep converging).
+112. `mister-112` is `mister-port` **merged with** `tas-atomic`, not rebased.
+A rebase would have rewritten commits the owner had already pushed to
+`mister-port` — including their own REFRESH-112 and CLKFIX-106 work — and
+`tas-atomic` moved twice during this session, which a rebase would have had to
+absorb by rewriting history again each time. A merge records both lines as they
+actually were and leaves the owner's commits with the hashes they were pushed
+under.
 
 **Base:** `origin/mister-port` at `02d061d`, which is **byte-identical to
 `origin/refresh-112`** — the owner's own session had already pushed REFRESH-112
@@ -729,6 +732,18 @@ Each bench drives a file this workflow actually compiles:
 | `run_sdram_refresh_tb.sh` | refresh interval vs JEDEC | its own in-run negative controls report 250/48 at 8.7721 µs and 224/48 at 8.0457 µs as FAIL |
 | `run_vshad3_tb.sh` (parallel job) | partial shadow decode + runtime toggle | the toggle changes measured fetch cost 5.015 → 4.015 clk; a still-32 KB range would score 5.015 at `0x50000` |
 | `support/check_slack.py` | negative slack, any corner | a fixture whose only negative row is at the third corner |
+| release ROM-free check | ROM data in the staged release | five provocations, all refused (see the `.mra` section) |
+
+**Run locally on this tree but not wired into CI:**
+`sim/run_cadence_tb.sh` — **PASS**, `video_starts=137 expected=137`,
+`world_starts=0 expected=0`, *"all three decoys rejected"*. It exercises the
+CADENCE-107 counters that BUILD 112 adds to `escape_core.vhd`, which this
+platform compiles, and it carries its own decoys so it cannot match nothing.
+It is **not** a CI step for the same reason `tb_vshad3` is a separate job — it
+is a full-machine GHDL elaboration in the tens of minutes. Worth adding as a
+second parallel job if the meters ever get a readout here; today they compile
+with nothing to display them, so the gate protects code nobody on this
+platform can observe.
 
 **Known CI gap, stated rather than hidden:** `sim/run_pf_reset_tb.sh` — the
 Pocket's PFRESET gate — is wired into **no** workflow at all. Neither
@@ -1210,6 +1225,32 @@ build that fixes the playfield, which **nobody has flashed**.
 * Audio levels through the MiSTer audio path.
 * EEPROM persistence — deliberately not wired (see BUILD 103 above); high
   scores do not survive a power cycle on MiSTer.
+
+**Added at BUILD 112, MiSTer-specific and still outstanding:**
+
+* **The `ROM Shadow 0x54000` OSD entry has never been opened.** The RTL path
+  it drives is simulated (`run_vshad3_tb.sh`, 4/4), and the CDC and atomicity
+  arguments are written down, but the `CONF_STR` string, the `status[8]` bit,
+  the inverted `On,Off` ordering and the `sync2` into `clk_sys` are all
+  unexercised outside synthesis. **First thing to check on the next flash:
+  that the default is ON.** The ordering is inverted specifically because
+  `hps_io` powers `status[]` up at zero, and getting that backwards would ship
+  every first-boot player the non-default configuration silently.
+* **The partial shadow's benefit on this platform is entirely unmeasured.**
+  See the section above for what does and does not transfer from the Pocket's
+  5.19x. Sprite dropouts under a busy playfield is the observation to make.
+* **`CPU_TYPE=1` (68010) has never run on MiSTer hardware.** The A/B that
+  showed behaviour identical and interrupt entry ~5 clocks slower was run on
+  the Pocket's bench, and the CPU is shared RTL, so the risk is low — but it
+  is not zero and it has not been exercised here.
+* **The CADENCE-107 meters compile but cannot be read on MiSTer.** There is no
+  HUD and no `status[]` readback path, so `dbg_cadv`/`dbg_cadw` are live
+  counters with no display. If the owner wants the logic-frame cadence figure
+  from a DE10-Nano, that wiring does not exist yet.
+* **`escape_stain` is newly a module here.** The substitution is
+  equivalence-checked over 2 000 000 cycles with zero differences, so this is
+  a low-risk item — but it is a change to synthesised logic that no hardware
+  has seen.
 
 ### FIRST FLASH RESULT (BUILD 105 on real hardware) — and what it actually was
 
