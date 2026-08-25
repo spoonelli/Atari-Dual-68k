@@ -1911,13 +1911,16 @@ end
     wire [2:0] gy   = (visible_y - 'd100) >> 2;      // glyph row
     always @(posedge clk_sys_7159) begin
     end
-    // LANE3y: R cycles FOUR debug pages, every click meaningful (the old
+    // LANE3y: R cycles SIX debug pages, every click meaningful (the old
     // 0-7 counter had two dead duplicates and put destructive vidkill in
     // the walk path - it faked a broken floor on the 2026-08-19 video):
     //   0 JSA (resp/coin+credits) | 1 extra-CPU (PC/mbox)
     //   2 main-CPU (PC/wr-region) | 3 engine (actor head/mode bytes)
     //   4 apply_stain diagnostic (MOSTAIN-2)
-    // vidkill stays on R2 HOLD only; CRAM sums retired (sim benches cover).
+    //   5 cadence (CADENCE-107)
+    // The wrap is at 5 (see the dbgmode counter above): pages 6 and 7 do NOT
+    // exist and cannot be reached by cycling. vidkill stays on R2 HOLD only,
+    // now gated by diag_on; CRAM sums retired (sim benches cover).
     //
     // MOSTAIN-2 page 4 answers ONE question: how much of the marker does the
     // stain actually cover? BUILD 105 does fire on hardware - the START marker
@@ -1993,8 +1996,12 @@ end
     // fetch probe, MO-kill, MO-priority). The design sits at the routing
     // ceiling (constant hotspot X33_Y23-X43_Y33: 63% peak on '37', 74% on
     // failed '38' attempts); these probes held wide muxes + counters alive
-    // through the render path. Tied off so Quartus prunes them. Modes kept:
-    // 0 normal | 6 vidkill | 7 CRAM self-test sums.
+    // through the render path. Tied off so Quartus prunes them.
+    // NOTE: this comment used to read "Modes kept: 0 normal | 6 vidkill |
+    // 7 CRAM self-test sums", which was the origin of a 0-7 page count that
+    // spread into info.txt and the docs. Modes 6 and 7 do NOT exist -- the
+    // counter wraps at 5, m_vidkill_px is tied to 1'b0 twenty lines below,
+    // and the CRAM sums are retired. Live modes are 0..5.
     wire m_pfmap   = 1'b0;
     // LANE3k: mode 2 returns as the SECOND-PROCESSOR window - the extra 68k
     // draws the in-game world; when gameplay fails to populate, this names

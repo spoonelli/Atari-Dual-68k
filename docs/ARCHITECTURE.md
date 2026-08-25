@@ -169,6 +169,8 @@ Pocket save system, and release packaging (`spoonelli.eprom` clean build).
 The engineering history — what the 150+ builds taught, which instruments
 cracked which bugs, and what a veteran would have done from day one — is
 distilled in [`LESSONS.md`](LESSONS.md). The on-device debug tooling
-(forensics HUD pages, crash latches, CRAM checksums, freeze rescue, scene
-replay benches) is a permanent part of dev builds; see
-[`POCKET_TEST.md`](POCKET_TEST.md).
+(six forensics HUD pages, crash latches, freeze rescue, scene
+replay benches) is a permanent part of **every** build, release included —
+it is hidden by default and reachable with L1, not compiled out. The CRAM
+self-test checksums were retired at TASLOCK-102 and the sim benches cover
+them now. See [`POCKET_TEST.md`](POCKET_TEST.md).
