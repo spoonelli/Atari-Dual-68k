@@ -36,6 +36,8 @@ module tb_pfline;
 
     parameter [8:0] XSCROLL = 9'd0;
     parameter integer GFX_LAT = 6;     // fetch latency in pixel clocks
+    parameter [8:0]   LEAD    = 9'd16; // PFBW-122 fetch lead
+    parameter integer NCH     = 2;     // PFBW-122 playfield fetch channels
 
     reg clk = 0; always #5 clk = ~clk;
     reg rstn = 0;
@@ -81,12 +83,12 @@ module tb_pfline;
         cellword = {8{a[8:5]}};
     endfunction
 
-    wire [23:0] vg_addrA_px, vg_addrB_px;
-    wire        vg_reqA_px,  vg_reqB_px;
-    reg  [31:0] vg_dataA = 0, vg_dataB = 0;
-    reg         vg_doneA_s = 0, vg_doneB_s = 0;
-    reg         reqA_d = 0, reqB_d = 0;
-    reg  [7:0]  latA = 0, latB = 0;
+    wire [23:0] vg_addrA_px, vg_addrB_px, vg_addrC_px, vg_addrD_px;
+    wire        vg_reqA_px,  vg_reqB_px,  vg_reqC_px,  vg_reqD_px;
+    reg  [31:0] vg_dataA = 0, vg_dataB = 0, vg_dataC = 0, vg_dataD = 0;
+    reg         vg_doneA_s = 0, vg_doneB_s = 0, vg_doneC_s = 0, vg_doneD_s = 0;
+    reg         reqA_d = 0, reqB_d = 0, reqC_d = 0, reqD_d = 0;
+    reg  [7:0]  latA = 0, latB = 0, latC = 0, latD = 0;
 
     always @(posedge clk) begin
         if(vg_reqA_px != reqA_d && latA == 0) begin reqA_d <= vg_reqA_px; latA <= GFX_LAT; end
@@ -99,9 +101,20 @@ module tb_pfline;
             latB <= latB - 8'd1;
             if(latB == 8'd1) begin vg_dataB <= cellword(vg_addrB_px); vg_doneB_s <= ~vg_doneB_s; end
         end
+        if(vg_reqC_px != reqC_d && latC == 0) begin reqC_d <= vg_reqC_px; latC <= GFX_LAT; end
+        else if(latC != 0) begin
+            latC <= latC - 8'd1;
+            if(latC == 8'd1) begin vg_dataC <= cellword(vg_addrC_px); vg_doneC_s <= ~vg_doneC_s; end
+        end
+        if(vg_reqD_px != reqD_d && latD == 0) begin reqD_d <= vg_reqD_px; latD <= GFX_LAT; end
+        else if(latD != 0) begin
+            latD <= latD - 8'd1;
+            if(latD == 8'd1) begin vg_dataD <= cellword(vg_addrD_px); vg_doneD_s <= ~vg_doneD_s; end
+        end
     end
 
-    escape_pf #(.VID_V_BPORCH(V_BPORCH), .VID_V_ACTIVE(V_ACTIVE)) dut (
+    escape_pf #(.VID_V_BPORCH(V_BPORCH), .VID_V_ACTIVE(V_ACTIVE),
+                .LEAD(LEAD), .NCH(NCH)) dut (
         .clk(clk), .core_reset_n(rstn),
         .vis_x(vis_x), .visible_x(visible_x), .visible_y(visible_y),
         .x_count(x_count), .y_count(y_count),
@@ -109,9 +122,13 @@ module tb_pfline;
         .vpshift_s(5'd0), .m_pfmap(1'b0),
         .pf_vaddr(pf_vaddr), .pf_vdata(pf_vdata), .pfx_vdata(pfx_vdata),
         .vg_addrA_px(vg_addrA_px), .vg_addrB_px(vg_addrB_px),
+        .vg_addrC_px(vg_addrC_px), .vg_addrD_px(vg_addrD_px),
         .vg_reqA_px(vg_reqA_px),   .vg_reqB_px(vg_reqB_px),
+        .vg_reqC_px(vg_reqC_px),   .vg_reqD_px(vg_reqD_px),
         .vg_dataA(vg_dataA), .vg_dataB(vg_dataB),
+        .vg_dataC(vg_dataC), .vg_dataD(vg_dataD),
         .vg_doneA_s(vg_doneA_s), .vg_doneB_s(vg_doneB_s),
+        .vg_doneC_s(vg_doneC_s), .vg_doneD_s(vg_doneD_s),
         .pf_pix_o(pf_pix), .pf_att_o(pf_att)
     );
 
@@ -182,6 +199,19 @@ module tb_pfline;
         end
     end
 
+    // PFBW-122: did the extra channels actually get used? A configuration
+    // change that silently does nothing looks exactly like a change that does
+    // nothing useful.
+    integer nA,nB,nC,nD;
+    reg rA,rB,rC,rD;
+    initial begin nA=0;nB=0;nC=0;nD=0; rA=0;rB=0;rC=0;rD=0; end
+    always @(posedge clk) if(rstn) begin
+        if(vg_reqA_px!==rA) begin nA=nA+1; rA=vg_reqA_px; end
+        if(vg_reqB_px!==rB) begin nB=nB+1; rB=vg_reqB_px; end
+        if(vg_reqC_px!==rC) begin nC=nC+1; rC=vg_reqC_px; end
+        if(vg_reqD_px!==rD) begin nD=nD+1; rD=vg_reqD_px; end
+    end
+
     task report_result;
         begin
             $display("PFLINE xscroll=%0d  lines scored=%0d  lines with a stale left edge=%0d",
@@ -205,6 +235,7 @@ module tb_pfline;
                 $display("  The frame stepping is wrong; do not read the widths above.");
                 $fatal;
             end
+            $display("PFLINE requests issued: A=%0d B=%0d C=%0d D=%0d", nA,nB,nC,nD);
             if(lines_bad == 0)
                 $display("PFLINE GATE: PASS - the cell ramp is unbroken on every line");
             else begin

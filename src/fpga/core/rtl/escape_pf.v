@@ -18,7 +18,21 @@
 
 module escape_pf #(
     parameter [9:0] VID_V_BPORCH = 10'd0,
-    parameter [9:0] VID_V_ACTIVE = 10'd0
+    parameter [9:0] VID_V_ACTIVE = 10'd0,
+    // PFBW-122: fetch lead in pixels. Any MULTIPLE OF 8 leaves pf_x2[2:0] -
+    // the display fine phase - bit-identical, so only the coarse column moves.
+    parameter [8:0]   LEAD = 9'd16,
+    // PFBW-122: playfield fetch channels, 2 or 4. Motion objects already have
+    // 4; the playfield had 2, and the drain rate is what the strip measurement
+    // says is binding. Note LEAD and NCH only help TOGETHER: with a 2-cell
+    // lead there are never more than ~2 requests outstanding, so extra
+    // channels have nothing to drain - which is why raising LEAD alone did
+    // nothing when it was tried on its own.
+    parameter integer NCH  = 2,
+    // PFBW-122: the line-start resync sets rp = wp, i.e. ZERO ring buffering -
+    // the slot being read is the one just written. Backing rp off by N gives
+    // the fetch N cells of slack, which is what LEAD alone could not deliver.
+    parameter [1:0]   RP_OFF = 2'd0
 ) (
     input  wire        clk,
     input  wire        core_reset_n,
@@ -36,12 +50,20 @@ module escape_pf #(
     input  wire [15:0] pfx_vdata,
     output reg  [23:0] vg_addrA_px,
     output reg  [23:0] vg_addrB_px,
+    output reg  [23:0] vg_addrC_px,
+    output reg  [23:0] vg_addrD_px,
     output reg         vg_reqA_px,
     output reg         vg_reqB_px,
+    output reg         vg_reqC_px,
+    output reg         vg_reqD_px,
     input  wire [31:0] vg_dataA,
     input  wire [31:0] vg_dataB,
+    input  wire [31:0] vg_dataC,
+    input  wire [31:0] vg_dataD,
     input  wire        vg_doneA_s,
     input  wire        vg_doneB_s,
+    input  wire        vg_doneC_s,
+    input  wire        vg_doneD_s,
     output wire [3:0]  pf_pix_o,
     output wire [4:0]  pf_att_o
 );
@@ -61,7 +83,10 @@ module escape_pf #(
     wire [8:0] pf_y   = visible_y[8:0] + yscroll;           // scrolled row (mod 512)
     // LANE3p: world X alignment - sim-proven correct at +32 (map col lookup
     // only; fetch timing untouched). Menu slider fine-tunes: +16+vpshift.
-    wire [8:0] pf_x2  = vis_x[8:0] + 9'd16 + {4'd0, vpshift_s} + xscroll;   // v72: fixed 3 ahead again -
+    // PFBW-122: fetch lead is a parameter. Any multiple of 8 leaves
+    // pf_x2[2:0] - the DISPLAY fine phase - bit-identical, so only the coarse
+    // column (map lookup, hence the fetch) moves earlier.
+    wire [8:0] pf_x2  = vis_x[8:0] + LEAD + {4'd0, vpshift_s} + xscroll;   // v72: fixed 3 ahead again -
                                                         // the runtime depth mux sent
                                                         // the fitter into a 90-minute
                                                         // spiral twice; slider deferred
@@ -71,7 +96,7 @@ module escape_pf #(
     reg  [3:0] pfcode_q0, pfcode_q1, pfcode_q2, pfcode_q3, pfcode_show; // v66 map debug
     // LANE3i: two fetches in flight (A/B ping-pong) - see channel decls at
     // the sdram-domain end. inflA/inflB = per-channel outstanding flags.
-    reg        inflA = 1'b0, inflB = 1'b0;
+    reg        inflA = 1'b0, inflB = 1'b0, inflC = 1'b0, inflD = 1'b0;
     reg  [31:0] pf_fetch, pf_show;
     // v81b: SLOT-ADDRESSED RING replaces the shift pipe. A late completion
     // in the shift design landed in the NEXT cell's slot - the alternating
@@ -79,7 +104,7 @@ module escape_pf #(
     // Each fetch now delivers into the slot for ITS OWN cell whenever it
     // completes; rp re-syncs to wp at every line start (-4 = 0 mod 4).
     reg  [31:0] pfring0, pfring1, pfring2, pfring3;
-    reg  [1:0]  pf_wp, pf_inflA, pf_inflB, pf_rp;
+    reg  [1:0]  pf_wp, pf_inflA, pf_inflB, pf_inflC, pf_inflD, pf_rp;
     // v84: request queue decouples issue cadence from channel latency.
     // The old unconditional toggle CANCELLED an unserved request when the
     // next cell's phase arrived (two toggles = no net change) - each burst
@@ -88,7 +113,7 @@ module escape_pf #(
     reg  [1:0]  pfq_slot0, pfq_slot1, pfq_slot2, pfq_slot3;
     reg  [2:0]  pfq_count;
     reg  [1:0]  pfq_wr, pfq_rd;
-    reg  vg_doneA_last, vg_doneB_last;
+    reg  vg_doneA_last, vg_doneB_last, vg_doneC_last, vg_doneD_last;
 
     always @(posedge clk_sys_7159) begin
         case(vis_x[2:0])
@@ -163,6 +188,26 @@ module escape_pf #(
             endcase
             inflA <= 1'b0;
         end
+        // PFBW-122: channels C/D, present only when NCH==4. With NCH==2 the
+        // generate below ties their requests off and nothing ever completes,
+        // so these branches are dead and the netlist matches the 2-channel
+        // build.
+        vg_doneC_last <= vg_doneC_s;
+        if(NCH == 4 && vg_doneC_s != vg_doneC_last) begin
+            case(pf_inflC)
+                2'd0: pfring0 <= vg_dataC;  2'd1: pfring1 <= vg_dataC;
+                2'd2: pfring2 <= vg_dataC;  default: pfring3 <= vg_dataC;
+            endcase
+            inflC <= 1'b0;
+        end
+        vg_doneD_last <= vg_doneD_s;
+        if(NCH == 4 && vg_doneD_s != vg_doneD_last) begin
+            case(pf_inflD)
+                2'd0: pfring0 <= vg_dataD;  2'd1: pfring1 <= vg_dataD;
+                2'd2: pfring2 <= vg_dataD;  default: pfring3 <= vg_dataD;
+            endcase
+            inflD <= 1'b0;
+        end
         vg_doneB_last <= vg_doneB_s;
         if(vg_doneB_s != vg_doneB_last) begin
             case(pf_inflB)
@@ -197,11 +242,33 @@ module escape_pf #(
                 inflB      <= 1'b1;
                 pfq_rd     <= pfq_rd + 2'd1;
                 pfq_count  <= pfq_count - 3'd1;
+            end else if(NCH == 4 && !inflC && !(vg_doneC_s != vg_doneC_last)) begin
+                case(pfq_rd)
+                    2'd0: begin vg_addrC_px <= pfq_addr0; pf_inflC <= pfq_slot0; end
+                    2'd1: begin vg_addrC_px <= pfq_addr1; pf_inflC <= pfq_slot1; end
+                    2'd2: begin vg_addrC_px <= pfq_addr2; pf_inflC <= pfq_slot2; end
+                    default: begin vg_addrC_px <= pfq_addr3; pf_inflC <= pfq_slot3; end
+                endcase
+                vg_reqC_px <= ~vg_reqC_px;
+                inflC      <= 1'b1;
+                pfq_rd     <= pfq_rd + 2'd1;
+                pfq_count  <= pfq_count - 3'd1;
+            end else if(NCH == 4 && !inflD && !(vg_doneD_s != vg_doneD_last)) begin
+                case(pfq_rd)
+                    2'd0: begin vg_addrD_px <= pfq_addr0; pf_inflD <= pfq_slot0; end
+                    2'd1: begin vg_addrD_px <= pfq_addr1; pf_inflD <= pfq_slot1; end
+                    2'd2: begin vg_addrD_px <= pfq_addr2; pf_inflD <= pfq_slot2; end
+                    default: begin vg_addrD_px <= pfq_addr3; pf_inflD <= pfq_slot3; end
+                endcase
+                vg_reqD_px <= ~vg_reqD_px;
+                inflD      <= 1'b1;
+                pfq_rd     <= pfq_rd + 2'd1;
+                pfq_count  <= pfq_count - 3'd1;
             end
         end
         // line-start re-sync (lead 4 = 0 mod 4) + queue flush
         if(x_count == 10'd0) begin
-            pf_rp <= pf_wp;
+            pf_rp <= pf_wp - RP_OFF;   // PFBW-122
             pfq_count <= 3'd0; pfq_rd <= pfq_wr;
             // PFLINE-116: PRIME the show registers here too.
             //

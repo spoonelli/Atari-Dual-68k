@@ -9,7 +9,7 @@ IMAGE="${IVERILOG_IMAGE:-hdlc/iverilog:latest}"
 mkdir -p "$REPO/sim/build"
 for XS in ${XSCROLLS:-0 2 3 5 6}; do
   docker run --rm -v "$REPO":/work -w /work "$IMAGE" bash -c "
-    iverilog -g2012 -Ptb_pfline.XSCROLL=$XS -Ptb_pfline.GFX_LAT=${GFX_LAT:-6} -Ptb_pfline.GFX_LAT=${GFX_LAT:-6} -Pescape_pf.RP_OFFSET=${RP_OFF:-0} -Ptb_pfline.GFX_LAT=${GFX_LAT:-6} -o sim/build/tb_pfline.vvp \
+    iverilog -g2012 -Ptb_pfline.XSCROLL=$XS -Ptb_pfline.GFX_LAT=${GFX_LAT:-6} -Ptb_pfline.GFX_LAT=${GFX_LAT:-6} -Ptb_pfline.LEAD=${LEAD:-16} -Ptb_pfline.NCH=${NCH:-2} -Pescape_pf.RP_OFF=${RPO:-0} -Ptb_pfline.GFX_LAT=${GFX_LAT:-6} -o sim/build/tb_pfline.vvp \
       src/fpga/core/rtl/escape_pf.v sim/tb/tb_pfline.v && \
     timeout 300 vvp sim/build/tb_pfline.vvp" 2>&1 | grep -E "PFLINE"
 done
