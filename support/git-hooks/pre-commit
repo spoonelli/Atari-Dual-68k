@@ -1,0 +1,22 @@
+#!/bin/sh
+# Block ROM data from ever being committed (belt-and-suspenders; gitignore is the first line)
+bad=$(git diff --cached --name-only | grep -iE '\.rom$|\.hex$' )
+if [ -n "$bad" ]; then
+    echo "COMMIT BLOCKED: ROM-derived file(s) staged:" >&2
+    echo "$bad" >&2
+    exit 1
+fi
+# also block any staged file > 3MB that isn't a known-safe type
+for f in $(git diff --cached --name-only); do
+    if [ -f "$f" ]; then
+        sz=$(wc -c < "$f")
+        case "$f" in
+            *.pdf|*.sof|*.rbf|*.stp) ;;
+            *) if [ "$sz" -gt 3000000 ]; then
+                   echo "COMMIT BLOCKED: unexpectedly large file staged: $f ($sz bytes)" >&2
+                   exit 1
+               fi ;;
+        esac
+    fi
+done
+exit 0

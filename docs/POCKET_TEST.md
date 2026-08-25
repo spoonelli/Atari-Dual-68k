@@ -57,9 +57,12 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
 | Select | Coin |
 | Start | Self-test step/continue switch |
 
-The Interact menu (Pocket **+** button) has Service Mode, Soft Reset,
-stick options (invert/swap/deadzone), World X Align, **Music / Speech
-volume** sliders, and **EEPROM Autosave**.
+The Interact menu (Pocket **+** button) has 11 entries: Service Mode, Soft Reset
+Core, Skip Self-Test, stick options (Invert Stick X / Y, Swap Stick Axes, Analog
+Deadzone), **Music / Speech volume** sliders, **EEPROM Autosave**, and ROM
+Shadow 0x54000. The developer-only tuning toggles were removed from the menu;
+they are still reachable in the RTL but no longer clutter the player-facing
+list.
 
 ## Saved data
 
