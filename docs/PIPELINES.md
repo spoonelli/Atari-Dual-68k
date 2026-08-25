@@ -104,7 +104,7 @@ There is **no separate video clock**; video runs on `clk_sys_7159`.
 > | `sdram_simple.v:3` | "28.636 MHz SDRAM domain (4x CPU)" | **FIXED (REFRESH-111)** — a *third* wrong figure for this clock, which the `85.909` greps could never have found |
 > | `sdram_simple.v:151-156` | argues from "250-clk interval = 2.9us" | **FIXED (REFRESH-111)** — and the replacement arithmetic was wrong too; see §"the refresh constant" below |
 > | `core_top.v:1280` (now `:1309`) | "one clk_sdram cycle (11.6ns)" | **FIXED (REFRESH-111)** — 27.94 ns |
-> | `escape_core.vhd:100,105,655,657`; `escape_mob.v:69,275` | "85.9MHz domain" | **stale comments only** — not yet swept |
+> | `escape_core.vhd:143,148,724,726`; `escape_mob.v:69,275` | "85.9MHz domain" | **FIXED (REFRESH-111)** — now "35.8MHz". Comments only, but note the `85.909` grep never found these: they are written `85.9`. |
 > | `sim/tb/tb_pf_cram.v:6,25,101` | `psram #(.CLOCK_SPEED(85.909))`, "the real 12:1 clock ratio" | **FIXED (PFCLK-111)** — parameter, simulated clock and ratio all corrected together (fixing only the parameter would have produced `run_psram_tb.sh`'s *negative control*). But see the warning header now in that file: **the bench has never passed for unrelated reasons**, so it was never validating the 7-cycle machine either. |
 > | `sim/tb/tb_mob_perf.v:30` | "10 clocks at 85.909MHz = 116ns" | **FIXED (PERFDIV-111)** — 279 ns, and the conclusion it supported inverts: the comment used it to argue MO port occupancy is "well under ONE pixel clock", when 279 ns is **two** pixel clocks |
 > | `src/mister/rtl/pll.v:7-8` | "57.272727 MHz SDRAM" | **stale** — residue of a reverted 8:1 draft. Not on this branch. |
