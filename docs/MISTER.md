@@ -815,9 +815,12 @@ build that fixes the playfield, which **nobody has flashed**.
   REFRESH-107 was listed here as "the arithmetic is unambiguous"; it was in fact
   wrong, in the safe-looking direction, which is exactly why this row now cites
   a bench instead of arithmetic. What is still unverified on hardware is the
-  **bandwidth** consequence: +1.94 pp of refresh occupancy comes out of the
-  sprite client, and sprite throughput under a full playfield load has never
-  been exercised on a real board.
+  **bandwidth** consequence. In simulation the playfield loses nothing (13,794
+  fetches granted and completed at both 224/48 and 160/48), but no bench on this
+  branch puts the MO client on the real arbiter, so the sprite cost is bounded
+  by a latency sensitivity curve rather than measured — see the refresh section
+  above. Sprite throughput under a full playfield load has never been exercised
+  on a real board.
 * SDRAM bandwidth with the playfield added and the BUILD 104 4-channel motion
   object engine — the ~71%-of-a-line figure is arithmetic from `sdram_simple`'s
   FSM, not measurement. **The budget has still never been exercised**: until
