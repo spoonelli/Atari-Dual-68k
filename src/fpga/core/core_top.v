@@ -1188,6 +1188,28 @@ psram #(.CLOCK_SPEED(35.795455)) cram0 (
     // one-line revert if the device ever disagrees. 2 = DTACK-only, a bench
     // diagnostic that is deliberately broken; never ship it.
     localparam TASLOCK_EN  = 1;
+    // CPU-110 CABINET VARIANT SELECT for BOTH 68k cores.
+    //   0 = 68000, the JAMMA board
+    //   1 = 68010, the dedicated cabinet
+    // *** THIS LINE IS THE ONE PLACE TO CHANGE IT. ***
+    //
+    // Both values are authentic. Escape shipped in two cabinet variants with
+    // different CPUs, both confirmed from photographs: the dedicated board is
+    // an MC68010P8 (Motorola, date code A71R8813, matching SP-332's U68010 at
+    // 45J/20P -- SP-332 is the dedicated-cabinet package), and the JAMMA board
+    // is a 68000, which is what MAME models. This is a hardware-variant
+    // selector, not a hedge; neither setting is a "fallback".
+    //
+    // BUILD 109 and everything before it ran 0 and was a faithful JAMMA
+    // machine. That was never a bug. 110 switches to the dedicated board.
+    //
+    // BUILD 110 IS AN A/B AGAINST 109 AND THE PASS CONDITION IS "NO VISIBLE
+    // DIFFERENCE". Only two kernel features change (SR_Read, VBR_Stackframe)
+    // and both are measured inert on this ROM. Do NOT expect a speed change:
+    // TG68K implements no 68010 loop mode, and loop mode measures 0.0000% of
+    // the video CPU's frame work here regardless. Anything you can actually
+    // see on 110 is a finding to chase, not a win.
+    localparam CPU_TYPE    = 1;
     wire [23:0] fpv_addr_w, fpe_addr_w;      // escape_core exports (7.159 dom)
     wire        fpv_spec_w, fpe_spec_w;
     reg  [23:0] fpv_addr_s, fpe_addr_s;      // 35.8-domain samples
@@ -2707,8 +2729,12 @@ hall_stick hall_p2 (
 // I could not measure: docs/VSHAD3.md. This branch exists to be built and
 // A/B'd on hardware against HUD page 5; the shipping branch leaves VSHAD3_EN
 // at its default of 1 and is bit-identical to BUILD 107 in this respect.
+// CPU-110: CPU_TYPE is overridden here as well. The entity's own default is
+// also 1 (68010 / dedicated cabinet), but read THIS line, not the default --
+// and the localparam above is where the JAMMA/68000 setting lives.
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
               .VSHAD3_EN(0),
+              .CPU_TYPE(CPU_TYPE),
               .TASLOCK_EN(TASLOCK_EN)) ecore (
     .clk        ( clk_sys_7159 ),
     .reset_n    ( core_reset_n ),
