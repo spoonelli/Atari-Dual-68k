@@ -100,14 +100,14 @@ There is **no separate video clock**; video runs on `clk_sys_7159`.
 >
 > | Site | Says | Status |
 > |---|---|---|
-> | `core_constraints.sdc:4-5` | "85.909MHz = exactly 12 x 7.159MHz" | **stale** — the constraint itself is fine (`derive_pll_clocks`), only the justification is wrong |
-> | `sdram_simple.v:3` | "28.636 MHz SDRAM domain (4x CPU)" | **stale**, and contradicts line 14 of the same header |
-> | `sdram_simple.v:151-156` | argues from "250-clk interval = 2.9us" | **stale** — the threshold is 160, and 250 was never 2.9 µs |
-> | `core_top.v:1280` | "one clk_sdram cycle (11.6ns)" | **stale** — 27.94 ns |
-> | `escape_core.vhd:100,105,655,657`; `escape_mob.v:69,275` | "85.9MHz domain" | **stale comments only** |
-> | `sim/tb/tb_pf_cram.v:6,25,101` | `psram #(.CLOCK_SPEED(85.909))`, "the real 12:1 clock ratio" | **a live wrong parameter.** That bench exercises 7-cycle PSRAM read waits where the shipped core uses 3. It models a machine this core is not. |
-> | `sim/tb/tb_mob_perf.v:30` | "10 clocks at 85.909MHz = 116ns" | **stale** — 279 ns |
-> | `src/mister/rtl/pll.v:7-8` | "57.272727 MHz SDRAM" | **stale** — residue of a reverted 8:1 draft |
+> | `core_constraints.sdc:4-5` | "85.909MHz = exactly 12 x 7.159MHz" | **FIXED (REFRESH-111)** — now "35.795455MHz = exactly 5 x 7.159091MHz". The constraint itself was always fine (`derive_pll_clocks`); only the justification was wrong |
+> | `sdram_simple.v:3` | "28.636 MHz SDRAM domain (4x CPU)" | **FIXED (REFRESH-111)** — a *third* wrong figure for this clock, which the `85.909` greps could never have found |
+> | `sdram_simple.v:151-156` | argues from "250-clk interval = 2.9us" | **FIXED (REFRESH-111)** — and the replacement arithmetic was wrong too; see §"the refresh constant" below |
+> | `core_top.v:1280` (now `:1309`) | "one clk_sdram cycle (11.6ns)" | **FIXED (REFRESH-111)** — 27.94 ns |
+> | `escape_core.vhd:143,148,724,726`; `escape_mob.v:69,275` | "85.9MHz domain" | **FIXED (REFRESH-111)** — now "35.8MHz". Comments only, but note the `85.909` grep never found these: they are written `85.9`. |
+> | `sim/tb/tb_pf_cram.v:6,25,101` | `psram #(.CLOCK_SPEED(85.909))`, "the real 12:1 clock ratio" | **FIXED (PFCLK-111)** — parameter, simulated clock and ratio all corrected together (fixing only the parameter would have produced `run_psram_tb.sh`'s *negative control*). But see the warning header now in that file: **the bench has never passed for unrelated reasons**, so it was never validating the 7-cycle machine either. |
+> | `sim/tb/tb_mob_perf.v:30` | "10 clocks at 85.909MHz = 116ns" | **FIXED (PERFDIV-111)** — 279 ns, and the conclusion it supported inverts: the comment used it to argue MO port occupancy is "well under ONE pixel clock", when 279 ns is **two** pixel clocks |
+> | `src/mister/rtl/pll.v:7-8` | "57.272727 MHz SDRAM" | **stale** — residue of a reverted 8:1 draft. Not on this branch. |
 >
 > Authoritative sites: the PLL file above, `core_top.v:1080-1087` (CLKFIX-106) and
 > `sdram_simple.v:110-118`. `sim/tb/tb_psram_timing.v` exists specifically to catch
@@ -479,12 +479,22 @@ spec) at a cost of 14 refreshes per line instead of 9; occupancy rose 4.4% → 6
 BUILD 106's to −0.1% / +0.8% (`GFX_DASH_ARTIFACT.md` §8). There is no case for
 reverting it.
 
-> **The three branches disagree on this constant and should be reconciled
-> deliberately.** `tas-atomic` uses 160; `mister-port` uses 224 (6.258 µs typical,
-> 7.599 µs worst, ~3% margin) with the deferral intact; `sdram-sched` keeps 250 and
-> deletes the deferral instead. `6596423` is not an ancestor of `origin/mister-port`,
-> and that branch's `sdram_simple.v:14` still carries `// 85.909 MHz`. REFRESH-107
-> predicted this drift in its own commit message; it has already happened.
+> **RECONCILED (REFRESH-111): one policy, `REFRESH_INTERVAL=160`, `DEFER_CAP=48`,
+> both platforms.** The three branches disagreed — `tas-atomic` 160, `mister-port`
+> 224 with the deferral intact, `sdram-sched` 250 with the deferral deleted — and
+> **all three justifications were hand arithmetic that was wrong the same way.**
+> Every one assumed `worst = INTERVAL + DEFER_CAP`; measured against the real FSM
+> it is `INTERVAL + DEFER_CAP + 16`, the extra clocks being the transaction still
+> in flight when the cap expires (`refresh_due` is only consumed from `S_IDLE`).
+>
+> That correction convicts `mister-port`: its 224 does **not** land at the 7.599 µs
+> its comment claims, it lands at a measured **8.046 µs — still out of spec**, on
+> the platform whose playfield also shares this bus. The interval and the deferral
+> cap are now module **parameters** on `sdram_simple`, so the platforms cannot
+> silently disagree again. Full measurements, the trade-off table and the
+> bandwidth accounting: [`DEVIATIONS.md`](DEVIATIONS.md) §F1. Gate:
+> `sim/run_sdram_refresh_tb.sh`, which carries the original 250/48 **and**
+> `mister-port`'s 224/48 as negative controls that must both be reported FAIL.
 
 ---
 
