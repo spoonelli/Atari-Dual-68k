@@ -933,6 +933,39 @@ the OSD is a convenience.
   `9cd7670bbf69ebe57935ae3b764d7953092951a6b92be4303b05c605ecdb3f58`.
   The merge did not touch the file (`git diff origin/mister-port -- ` on it is
   empty); it was re-measured anyway.
+
+  **And it is now gated, not just measured once.** The MiSTer release surface
+  is three files — a bitstream, the `.mra`, and a markdown file — which is far
+  smaller than the Pocket's (`support/package.sh` copies whole `Assets/` and
+  `Platforms/` trees and needs four guards plus `support/test_package_guards.sh`
+  to police them). It is checked anyway, because *"it cannot happen"* is
+  precisely how the Pocket's zero-ROM hole stayed open: a 2 228 224-byte ROM
+  renamed `gfxdata.bin` walked into a release zip past a guard no code path
+  could trigger. The new **Release must contain no ROM data** CI step rejects
+  any file that is not `.rbf`/`.mra`/`.md`, any non-ASCII byte in the manifest,
+  any `<part>` carrying inline payload, an oversized manifest, and a manifest
+  with implausibly few `crc=` references. **Provoked, all five:**
+
+  | | |
+  |---|---|
+  | control — the real staged release | **passes**, 0 non-ASCII, 30 crc refs |
+  | a ROM staged as `gfxdata.bin` | refused, *UNEXPECTED FILE IN RELEASE* |
+  | ROM bytes appended to the `.mra` | refused, 5 018 non-ASCII bytes |
+  | **one** non-ASCII byte in the `.mra` | refused, 1 non-ASCII byte |
+  | an inline `<part>` payload | refused, *INLINE `<part>` PAYLOAD* |
+  | the `.mra` replaced by a stub | refused, *ONLY 0 crc= REFS* |
+
+  The non-ASCII test uses `tr`, not `grep -P`. BSD grep has no `-P`, so a `-P`
+  check errors out and the surrounding `if` reads as "clean" — a gate that
+  cannot fail on half the machines anyone would run it on. That was caught by
+  provoking it rather than by reading it: the first version of this guard
+  refused the appended-ROM case for the *wrong reason* (the crc count), and
+  only the byte-level provocation showed why.
+
+  `support/test_package_guards.sh`, which arrived with the second tas-atomic
+  merge, also passes here: **7 passed, 0 failed**, including a control asserting
+  the happy path still produces a zip — so a guard that refuses *everything*
+  cannot pass either.
 * **d18c7db (Alex)** and **MiSTer-devel** for
   [`Arcade-Atari-system1_MiSTer`](https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer)
   (GPL-3.0), the schematic-based Atari System 1 core this project's RTL base was
@@ -1056,7 +1089,7 @@ deciding what ships.
 | Refresh interval 160/48 vs JEDEC | **yes**, with failing controls | **yes** | **never** — and the *bandwidth* cost is simulated, not measured on a board |
 | PFRESET (playfield channel reset) | **yes**, 13 794/13 794 both phases | **yes** | **never** — this is the BUILD 105 fix, still unflashed |
 | Timing / fit / M10K | n/a | **yes**, `support/check_slack.py`, all corners | n/a |
-| `.mra` is ROM-free | n/a | byte-checked | n/a |
+| `.mra` is ROM-free | n/a | **yes** — gated, 5 provocations refused | n/a |
 
 **Things simulation here specifically cannot tell you.** `tb_mister_pf` uses a
 *stub* machine and a *behavioural* SDRAM: it proves fetches are issued, granted

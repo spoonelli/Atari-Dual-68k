@@ -131,12 +131,61 @@ jobs:
         if: always()
         run: python3 support/check_slack.py src/mister/output_files/Arcade-Escape.sta.rpt
 
+      # The MiSTer release surface is three files and none of them can carry
+      # ROM data: a bitstream, a CRC-only .mra manifest, and a markdown file.
+      # That is much smaller than the Pocket's (support/package.sh copies whole
+      # Assets/ and Platforms/ trees and needs four guards plus
+      # support/test_package_guards.sh to police them). It is checked anyway,
+      # because "it cannot happen" is how the Pocket's zero-ROM hole stayed
+      # open: a 2,228,224-byte ROM renamed gfxdata.bin walked into a release
+      # zip past a guard that no code path could trigger.
       - name: Stage release files
         run: |
           mkdir -p mister-release
           cp src/mister/output_files/Arcade-Escape.rbf mister-release/escape.rbf
           cp src/mister/releases/*.mra mister-release/
           cp docs/MISTER.md mister-release/README.md
+
+      - name: Release must contain no ROM data
+        run: |
+          set -eu
+          fail=0
+          # 1. nothing but the three expected kinds of file
+          while IFS= read -r f; do
+            case "$f" in
+              *.rbf|*.mra|*.md) ;;
+              *) echo "UNEXPECTED FILE IN RELEASE: $f" >&2; fail=1 ;;
+            esac
+          done <<EOF
+          $(find mister-release -type f)
+          EOF
+          # 2. the .mra is a text manifest: ASCII only, and no <part> may carry
+          #    inline payload. A part with data between its tags is a ROM byte.
+          for m in mister-release/*.mra; do
+            sz=$(wc -c < "$m")
+            echo "mra: $m ($sz bytes)"
+            # Count bytes outside tab/LF/CR + printable ASCII. Done with tr,
+            # not `grep -P`: BSD grep has no -P, so a -P check silently errors
+            # out and the `if` reads as "clean". That is a gate that cannot
+            # fail on half the machines anyone would run it on.
+            nonascii=$(LC_ALL=C tr -d '\011\012\015\040-\176' < "$m" | wc -c | tr -d ' ')
+            echo "  non-ASCII bytes: $nonascii"
+            if [ "$nonascii" -ne 0 ]; then
+              echo "NON-ASCII BYTES IN $m - a manifest must be text" >&2; fail=1
+            fi
+            if LC_ALL=C tr -d '\n' < "$m" | grep -qE '<part>[^<]{16,}</part>'; then
+              echo "INLINE <part> PAYLOAD IN $m" >&2; fail=1
+            fi
+            if [ "$sz" -gt 65536 ]; then
+              echo "MRA IS $sz BYTES - far too big to be CRC references" >&2; fail=1
+            fi
+          done
+          # 3. prove this check is looking at something rather than matching
+          #    nothing: the manifest must actually carry CRC references.
+          n=$(grep -o 'crc="' mister-release/*.mra | wc -l | tr -d ' ')
+          echo "crc= references: $n"
+          [ "$n" -ge 20 ] || { echo "ONLY $n crc= REFS - is this really the manifest?" >&2; fail=1; }
+          exit $fail
 
       - name: Upload MiSTer core
         uses: actions/upload-artifact@v4
