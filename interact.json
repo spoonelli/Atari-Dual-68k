@@ -135,6 +135,17 @@
         "writeonly": true,
         "defaultval": 1,
         "value": 1
+      },
+      {
+        "name": "Developer HUD",
+        "id": 38,
+        "type": "check",
+        "enabled": true,
+        "address": "0xA0000154",
+        "persist": false,
+        "writeonly": true,
+        "defaultval": 0,
+        "value": 0
       }
     ],
     "messages": []

@@ -66,7 +66,7 @@ sound board delivers music, effects and speech in real time.
 | **CPUs** | Two 68000-family cores running **genuinely concurrently** with shared RAM and the mailbox handshake, as the real board does. (MAME time-slices; this does not.) |
 | **Controls** | Emulated hall-effect stick via the ADC0809, including the game's own in-game calibration screens. Dock analog stick takes priority when deflected; invert/swap/deadzone options in the menu. |
 | **High scores** | **Persist across a power cycle.** The emulated 2804 EEPROM is snapshotted to the SD card ~1.17 s after the game stops writing it, so a score survives an unclean power-off, not just a clean exit. |
-| **Boot** | Clean picture. The diagnostic HUD is off by default (press **L1** for it). |
+| **Boot** | Clean picture. The diagnostic HUD is off by default and, from build 114, is gated behind **Developer HUD** in the core menu -- L1 does nothing until that is ticked. |
 
 ### Verified exactly against the reference
 
@@ -191,7 +191,9 @@ target: [`DEVIATIONS.md`](DEVIATIONS.md).
 
 ## Using the diagnostic HUD
 
-The core boots clean. Press **L1** to bring up the on-screen HUD; press it
+The core boots clean. From build 114 the diagnostic layer is behind
+**Developer HUD** in the core's menu (default off); tick it first, or L1 does
+nothing. With it on, press **L1** to bring up the on-screen HUD; press it
 again to hide it. **R1** cycles 6 pages (0–5):
 
 | Page | Shows |

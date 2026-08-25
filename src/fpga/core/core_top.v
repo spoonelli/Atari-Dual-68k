@@ -798,6 +798,15 @@ end
     // Default ON. The BRAM is instantiated and filled either way, so this
     // costs no M10K and can be flipped on device without a reflash.
     reg        vshad3_on_74 = 1'b1;   // 0xA0000150: 'ROM Shadow 0x54000'
+    // HUD-113: 0xA0000154 'Developer HUD' (interact.json id 38). Defaults OFF
+    // so a player never meets the diagnostic overlay: with this clear, L1 and
+    // R1 do nothing and are free for game use. The HUD RTL is still compiled
+    // in, so a user helping debug a report can enable it from the menu with no
+    // rebuild, and anyone who pulls the core gets it unchanged. See
+    // docs/RELEASE_CHECKLIST.md section F for why it is a runtime gate rather
+    // than a compile-time-only flag: a repo default that differs from the
+    // shipped build means what people build is not what people tested.
+    reg        hud_en_74    = 1'b0;   // 0xA0000154: 'Developer HUD'
     reg        ee_autoen_74 = 1'b1;   // 0xA0000140: 'EEPROM Autosave' (default ON)
                                       // (0x120-0x13C belong to the MIX-100
                                       //  per-FM-channel mixer)
@@ -811,6 +820,7 @@ end
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000140) ee_autoen_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000150) vshad3_on_74 <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000154) hud_en_74    <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
@@ -860,6 +870,8 @@ synch_3 s_irqst(irqstrict_74, irqstrict_s, clk_sys_7159);
     // it cannot change which memory answers a bus cycle already in flight.
     wire vshad3_on_s;
 synch_3 s_vshad3(vshad3_on_74, vshad3_on_s, clk_sys_7159);
+    wire hud_en_s;
+synch_3 s_huden(hud_en_74, hud_en_s, clk_sys_7159);
 synch_3 s_inpb(inprobe_74, inprobe_s, clk_sys_7159);
 synch_3 #(.WIDTH(3)) s_prefd(prefd_74, prefd_s, clk_sys_7159);
 synch_3 s_pfprobe(pfprobe_74, pfprobe_s, clk_sys_7159);
@@ -2275,7 +2287,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3113;   // SDRAM open-row + banking, P2 bomb on X - screen shows '13'
+    localparam [15:0] BUILD_ID = 16'h3114;   // + Developer HUD menu gate (id 38, default OFF) - screen shows '14'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2850,7 +2862,13 @@ synch_3 s_diag(cont1_key[8], l1_s, clk_sys_7159);
     reg  l1_d = 1'b0;
     always @(posedge clk_sys_7159) begin
         l1_d <= l1_s;
-        if(l1_s & ~l1_d) diag_on <= ~diag_on;
+        // HUD-113: force the overlay down and swallow the L1 edge whenever the
+        // menu gate is clear. Clearing diag_on unconditionally (rather than
+        // only ignoring the edge) matters: turning the gate OFF while the HUD
+        // is up must put the picture back, not strand it on screen with no
+        // way to dismiss it.
+        if(!hud_en_s)          diag_on <= 1'b0;
+        else if(l1_s & ~l1_d)  diag_on <= ~diag_on;
     end
     wire coin1_s, coin2_s;
 synch_3 s_coin(cont1_key[14], coin1_s, clk_sys_7159);   // Select = coin 1 (JSA)

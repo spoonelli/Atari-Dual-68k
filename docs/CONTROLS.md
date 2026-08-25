@@ -73,9 +73,18 @@ Read off `core_top.v` `.p1_buttons` and cross-checked against `input.json`:
 
 Not game controls — development tooling, and none of it is on by default.
 
+> **These controls are OFF by default.** As of build 114 the whole
+> diagnostic layer sits behind **Developer HUD** in the core's menu
+> (`interact.json` id 38, default unchecked). With it unchecked, L1, R1,
+> R and L2 do nothing and the overlay cannot appear -- a player never
+> meets it. Tick it to get everything in this table back; no rebuild is
+> needed, which is deliberate so that someone helping debug a report can
+> turn it on without a toolchain. See docs/RELEASE_CHECKLIST.md section F.
+
+
 | Pocket | Effect |
 |---|---|
-| **L1** | Show / hide the diagnostic HUD. **Starts hidden.** |
+| **L1** | Show / hide the diagnostic HUD. **Starts hidden**, and does nothing at all unless **Developer HUD** is enabled in the core menu (see below). |
 | **R1** | Cycle HUD page 0-5 (works with the HUD hidden; the page shows next time you press L1) |
 | **L2** | Toggle the trace view |
 | **R1 (hold)** | Hide motion objects |
