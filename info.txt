@@ -1,5 +1,5 @@
 Atari Dual 68k (Escape from the Planet of the Robot Monsters, 1989)
-Alpha release candidate - openFPGA core for Analogue Pocket
+Alpha - openFPGA core for Analogue Pocket
 
 Dual 68000 + JSA-I audio (YM2151 + TMS5220 speech), hall-effect stick.
 High scores and settings persist to the SD card.

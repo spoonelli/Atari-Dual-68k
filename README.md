@@ -3,11 +3,8 @@
 An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68000 board
 whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**).
 
-The core implements the **`eprom` configuration only**: two 68000s and JSA-I
-audio. The same board family also ran the *Klax* and *Guts n' Glory*
-prototypes, but those are **not supported** — they are single-CPU and use
-JSA-II with an OKI6295, and no OKI6295 exists in this RTL. `build_rom.py`
-accepts the MAME `eprom` set and refuses chips whose CRCs do not match it.
+The core implements the **`eprom` configuration only** — two 68000s and JSA-I
+audio. See [Other games on this hardware](#other-games-on-this-hardware).
 
 > Built for the [Analogue Pocket](https://www.analogue.co/pocket) via the openFPGA framework.
 > This project ships **no ROMs**. You must supply your own dumps.
@@ -59,6 +56,45 @@ marquee art is user-supplied and not distributed, like the ROMs.
 
 Full hardware map, roadmap, and schematic findings: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+## Other games on this hardware
+
+MAME's `eprom.cpp` driver covers five sets on this board family.
+**Only `eprom` is supported.** The core has never been run against any of the
+others — the rows below describe what they would require, not partial support.
+
+| Set | Title | Status |
+|---|---|---|
+| **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
+| `eprom2` | Escape … (set 2) | Not supported. Same machine config and same hardware; differs only in program-ROM revisions (all rev 1, plus a `.40e`/`.50e` pair set 1 lacks). Plausibly a small step rather than a project — but nobody has tried it, so that is a guess. |
+| `klaxp1` | Klax (prototype set 1) | Not supported. Future target. |
+| `klaxp2` | Klax (prototype set 2) | Not supported. Future target. |
+| `guts` | Guts n' Glory (prototype) | Not supported. Future target. |
+
+Two structural differences make the Klax and Guts prototypes future work
+rather than near-misses:
+
+- **They are single-CPU.** The second 68000 is `eprom`/`eprom2` only
+  (`docs/ARCHITECTURE.md`). The shared-RAM mailbox, the TAS interlock and the
+  dual-CPU arbitration — most of this project's hard-won machinery — simply go
+  unused. So they are *simpler* than Escape, but they exercise a configuration
+  this core has never run.
+- **They use JSA-II, which adds an OKI6295.** Escape uses JSA-I (YM2151 +
+  TMS5220). The OKI6295 is a device that does not exist in this RTL at all;
+  `jotego/jt6295` is earmarked for it.
+
+`support/build_rom.py` builds only the `eprom` set and refuses any chip whose
+CRC32 does not match, so a Klax or Guts romset cannot currently be assembled
+into a core image even to try.
+
+**Not an alpha target.** This section is a roadmap note, not a promise.
+
+## Related: the MiSTer port
+
+A MiSTer port of this core exists on the `mister-port` branch. It boots, but it
+has had **far less hardware validation** than the Pocket core and is not part of
+this release. Some fixes are still in flight there. Treat it as work in
+progress rather than something to install alongside this.
+
 ## Hardware being implemented
 
 Primary reference is the original Atari SP-332 schematic package (see
@@ -69,7 +105,7 @@ present, serial SCOM sound link).
 
 | Block        | Real chip                               | Implementation |
 |--------------|-----------------------------------------|----------------|
-| CPUs ×2      | **68010** dedicated cab / **68000** JAMMA, @ 7.16 MHz, shared RAM | TG68K, our decode/arbitration (see C5) |
+| CPUs ×2      | Both drawings specify **68010**; production shipped **68000 and 68010 alike**, @ 7.16 MHz, shared RAM | TG68K, either selectable, defaults to 68010 (see C5) |
 | Sound        | Atari **JSA-I** (6502 + YM2151 + TMS5220) via serial SCOM | ✅ T65 + [jt51](https://github.com/jotego/jt51) + TMS5220 (System 1 core, patched) |
 | Video        | Atari motion objects + playfield + alpha | ✅ re-architected line engine, MAME-scene verified |
 | Protection   | **SLAPSTIC** (present on board)          | watch-item; MAME boots without it |
@@ -128,12 +164,21 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
 
 ## Get it
 
-**Recommended:** grab the latest package from the
-[**Releases page**](https://github.com/spoonelli/Atari-Dual-68k/releases) —
-unzip onto your Pocket SD, add your own ROM per
-[`docs/ROMS.md`](docs/ROMS.md), play. The core boots to a clean picture; the
-diagnostic HUD is off until you press **L1**. What works, what is
-known-imperfect and what is missing:
+Download the packaged zip from the
+[**Releases page**](https://github.com/spoonelli/Atari-Dual-68k/releases).
+That is the supported route; building from source is for contributors.
+
+1. Unzip onto your Pocket SD card — it merges `Cores/`, `Platforms/` and
+   `Assets/` into the existing folders.
+2. Put **your own** `atari_escape.rom` in `/Assets/eprom/common/`. This project
+   distributes no ROM data; build the image from dumps you own per
+   [`docs/ROMS.md`](docs/ROMS.md).
+3. Launch the core. It asks for the ROM on startup. High scores save
+   themselves to `/Saves/eprom/common/` — you do not create that file.
+
+Requires Pocket firmware 1.1+ set up for unofficial cores. The core boots to a
+clean picture; the diagnostic HUD is off until you press **L1**. What works,
+what is known-imperfect and what is missing:
 [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md).
 
 ## Build it yourself (contributors)
@@ -189,22 +234,46 @@ Thanks: LMSS, DJS, LCS, TBPL, EG
   reading material, under their own BSD-3-Clause terms — see
   [`reference/NOTICE.md`](reference/NOTICE.md), which reproduces the full licence.
   The schematics take precedence where the two references
-  disagree (autovectored IRQs, SLAPSTIC, serial SCOM). On CPU type the two references
-  appeared to differ for weeks, and **both turned out to be right about different
-  boards**: Escape shipped in two cabinet variants, and the dedicated cabinet is a
-  **68010** (`MC68010P8`, Motorola, date code `A71R8813`, photographed — matching the
-  schematic's `U68010` at 45J and 20P, since SP-332 is inferred to be the
-  dedicated-cabinet package, from the absence of a JAMMA edge connector on sheet 1;
-  the package carries no BOM or revision page) while the **JAMMA** version is
-  reported to be a **68000**, which is what MAME models. *That second half rests on
-  an unphotographed inspection with no part number or date code recorded, and by this
-  project's own standard does not yet clear the bar — treat it as unconfirmed.* This core
-  supports both, and it is safe rather than lucky either way — the ROM contains no
-  68010-only instruction, no handler reads an exception-frame format word or does
-  pointer arithmetic around the frame, and 68010 loop mode is never entered (measured:
-  0.0000% of the video CPU's per-frame work sits in a loop-mode-eligible `DBcc` loop).
-  See [`docs/CPU_AND_ARBITER.md`](docs/CPU_AND_ARBITER.md). Thank you to the
-  MAME developers for decades of preservation work that made this core possible.
+  disagree (autovectored IRQs, SLAPSTIC, serial SCOM). **On CPU type they never
+  actually disagreed.** Both schematic packages — SP-332 (rev **D** of drawing
+  `A046145-01`) and the JAMMA manual TM-336 (rev **E** of the *same* drawing) —
+  draw `U68010` at designators **45J** (`VCPU`) and **20P** (`ECPU`). The
+  assembly drawing (Fig 4-3, `A046147-01 F`) calls out Atari house number
+  **`137414-002`** at both CPU positions rather than a Motorola part number:
+  **one BOM line, either chip.** That is how a 68010 drawing and 68000-stuffed
+  boards coexist with nobody being wrong.
+
+  Production shipped **both parts across both cabinet types** — 68000 and 68010
+  have each now been photographed in a dedicated cabinet *and* in a JAMMA one,
+  all four combinations. **It is not a cabinet distinction.** The distribution
+  is **unknown**, and four boards cannot establish one, so this project states
+  no pattern. Service swap-outs over 37 years plausibly mixed them further,
+  which costs nothing: the game uses no 68010 feature, so a 68000 is a
+  symptom-free substitute.
+
+  Worth naming because every performance comparison in this repo rests on it:
+  **MAME instantiates `M68000`, so MAME matches a 68000-stuffed board.** This
+  core defaults to `CPU_TYPE = 1` (68010 — the specified part, and the one on
+  the owner's board), with 68000 selectable in one place. Both are
+  configurations real boards shipped in.
+
+  It is safe rather than lucky either way — the ROM contains no
+  68010-only instruction on any reachable path, all four handlers are
+  stack-balanced, VBR is provably 0, and 68010 loop mode is never entered
+  (measured: 0.0000% of the video CPU's per-frame work sits in a
+  loop-mode-eligible `DBcc` loop). See
+  [`docs/CPU_AND_ARBITER.md`](docs/CPU_AND_ARBITER.md).
+
+  > **This claim has now inverted four times**, and the sequence is kept
+  > visible because the pattern is the lesson: *"production boards carry
+  > 68000s, verified from a real board"* (which traced to one unphotographed
+  > inspection) → refuted by photograph → *"JAMMA 68000 / dedicated 68010"* →
+  > refuted by two more photographs → the present form. Every turn came from
+  > someone generalising past their evidence. The current statement is
+  > deliberately the weakest one the photographs support.
+
+  Thank you to the MAME developers for decades of preservation work that made
+  this core possible.
 - The **openFPGA** community and **Analogue** for the Pocket core framework
   ([`open-fpga/core-template`](https://github.com/open-fpga/core-template)).
 - **d18c7db (Alex)** and **MiSTer-devel** for

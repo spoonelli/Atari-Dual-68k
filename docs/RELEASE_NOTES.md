@@ -22,11 +22,31 @@ hidden in a footnote; if you are deciding whether to install it, read the
 
 - An Analogue Pocket on firmware 1.1+, set up to run unofficial cores.
 - **Your own ROM.** This project does not distribute ROM data and never will.
-  Build `atari_escape.rom` from dumps you own — see [`ROMS.md`](ROMS.md) — and
-  put it in `Assets/eprom/common/` on the SD card.
-- That is all. The core creates its own save file.
+  The download below contains **no ROM data and no arcade artwork** — the
+  packaging script refuses to build if either reaches it.
 
-Install steps are in [`POCKET_TEST.md`](POCKET_TEST.md).
+## Install
+
+1. Download the zip attached to this release and unzip it onto your Pocket SD
+   card. It merges into the existing `Cores/`, `Platforms/` and `Assets/`
+   folders.
+2. Build `atari_escape.rom` from dumps you own and put it in
+   `/Assets/eprom/common/`:
+   ```
+   python3 support/build_rom.py /path/to/eprom ./atari_escape.rom
+   ```
+   The builder verifies all 28 chips against known-good CRC32s and refuses
+   anything that does not match. Details in [`ROMS.md`](ROMS.md).
+3. Launch **Atari Dual 68k** from the Pocket menu. It asks for the ROM on
+   startup.
+
+High scores and operator settings save themselves to
+`/Saves/eprom/common/atari_escape.sav`. **You do not create that file** — the
+Pocket writes it the first time the game changes the EEPROM, and reloads it on
+every launch. Delete it to reset the machine to factory-fresh.
+
+Full on-device notes, including the diagnostic HUD:
+[`POCKET_TEST.md`](POCKET_TEST.md).
 
 ---
 
@@ -67,12 +87,33 @@ comparisons against MAME's own implementation:
 **Sprite dropouts in dense crowds.** Under heavy motion-object load the core
 can drop sprite scanlines the real board would draw. This is a bandwidth
 problem: the Pocket reaches its graphics data over SDRAM and a PSRAM chip,
-where the arcade board had parallel mask ROMs and no contention at all. The
-**rate depends on the ROM-shadow configuration** (Interact menu → *ROM Shadow
-0x54000*), which trades sprite bandwidth against CPU cadence. That trade is
-**still being measured, and this release does not claim a figure for it.**
-Whichever way the toggle ships, the other setting remains available in the
-menu — if crowds look wrong to you, try flipping it.
+where the arcade board had parallel mask ROMs and no contention at all.
+
+The rate is measured, per robot-object-frame:
+
+| Configuration | Dropout rate | 95% CI |
+|---|---|---|
+| Real arcade board | 0 events in ~7,150 | [0, 5.16e-04] |
+| No ROM shadow | 1.252e-03 | [8.51e-04, 1.78e-03] |
+| Full 32 KB shadow | 3.222e-04 | [1.47e-04, 6.12e-04] |
+| **This release (16 KB partial)** | **2.410e-04** | **[9.69e-05, 4.97e-04]** |
+
+The shipped configuration is **5.19× better than running with no shadow**
+(p = 1.0e-05) and statistically indistinguishable from the full 32 KB shadow
+(p = 0.62), while using 16 block-RAMs instead of 25 and handing 5.5% of
+video-CPU execution back to the more accurate 4-clock fastpath. Its entire
+confidence interval sits inside the bound established for the real board.
+
+The *ROM Shadow 0x54000* toggle in the Interact menu is **on by default and
+should stay that way** — turning it off is the 1.252e-03 row above. It is
+exposed for diagnosis, not as a tuning knob.
+
+**A left-edge artifact.** Native columns 0-1 render stale playfield data on
+some screens. MAME convicts it, so it is a real bug rather than a display
+quirk. It is **not new** — it is present identically in earlier builds and is
+not a regression from anything in this release. It is a known item, deferred
+rather than fixed; no fix is imminent. Recorded in
+[`DEVIATIONS.md`](DEVIATIONS.md).
 
 **The game runs slightly under arcade speed in places.** Measured, the video
 CPU completes **0.973** logic frames per video frame against MAME's **0.9977**.

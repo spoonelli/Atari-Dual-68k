@@ -10,14 +10,52 @@
 # first time the core writes its EEPROM (see docs/EEPROM_SAVE.md). Shipping a
 # save here would overwrite the owner's high scores on every update.
 #
-# NEVER includes ROM data: a guard fails the build if any *.rom would be packaged.
+# NEVER includes ROM data: three guards below refuse to build if any reaches the
+# staging tree. They are tested against deliberately broken inputs; see the
+# comment above them for what each one actually constrains.
 #
-# Usage: ./support/package.sh <path/to/bitstream.rbf_r> [out.zip]
+# Usage: ./support/package.sh <path/to/bitstream.rbf_r> [out.zip] [version]
+#
+# ---------------------------------------------------------------- releasing
+# Cutting a GitHub Release (proposed scheme -- RC-113):
+#
+#   tag     v0.1.0-alpha        semver, "v" prefix, prerelease suffix.
+#                               Sorts correctly, sorts BEFORE v0.1.0, and GitHub
+#                               shows a "Pre-release" badge off the suffix alone.
+#                               Next ones: v0.1.1-alpha, v0.2.0-beta, v1.0.0.
+#   title   "v0.1.0-alpha - Escape from the Planet of the Robot Monsters"
+#                               The tag alone tells a stranger nothing; lead with
+#                               the version, then the game, because that is what
+#                               a search lands on.
+#   asset   AtariDual68k-Pocket-v0.1.0-alpha.zip
+#                               ./support/package.sh <rbf> "" v0.1.0-alpha
+#                               Never ship the internal build tag as the asset
+#                               name -- "AtariDual68k-VSHAD3-16K-112.zip" means
+#                               nothing on a Releases page.
+#   body    docs/RELEASE_NOTES.md, which is written to work as the release-page
+#           body: what it is, what you need, install, then limitations.
+#   tick    "Set as a pre-release".
+#
+# Before tagging, confirm the on-screen build number in the running core matches
+# the bitstream in the zip. That check exists because a build once shipped
+# showing the wrong number.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-RBF="${1:?usage: package.sh <bitstream.rbf_r> [out.zip]}"
-OUT="${2:-$REPO/output/AtariDual68k-pocket.zip}"
+RBF="${1:?usage: package.sh <bitstream.rbf_r> [out.zip] [version]}"
+# RC-113: the default asset name has to survive being seen with no context, on
+# a Releases page, by someone who has never heard of this project. Internal
+# build tags like "VSHAD3-16K-112" do not. Pass a version as $3 to stamp it:
+#   ./support/package.sh <rbf> "" v0.1.0-alpha
+#     -> AtariDual68k-Pocket-v0.1.0-alpha.zip
+VERSION="${3:-}"
+if [ -n "$VERSION" ]; then
+    DEFAULT_OUT="$REPO/output/AtariDual68k-Pocket-${VERSION}.zip"
+else
+    DEFAULT_OUT="$REPO/output/AtariDual68k-Pocket.zip"
+fi
+OUT="${2:-$DEFAULT_OUT}"
+[ -n "$OUT" ] || OUT="$DEFAULT_OUT"
 case "$OUT" in /*) ;; *) OUT="$PWD/$OUT";; esac
 
 AUTHOR="spoonelli"

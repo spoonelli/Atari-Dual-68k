@@ -57,9 +57,26 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
 | Select | Coin |
 | Start | Self-test step/continue switch |
 
-The Interact menu (Pocket **+** button) has Service Mode, Soft Reset,
-stick options (invert/swap/deadzone), World X Align, **Music / Speech
-volume** sliders, and **EEPROM Autosave**.
+### The Interact menu
+
+Pocket **+** button. Eleven entries:
+
+| Entry | |
+|---|---|
+| Service Mode | the cabinet's operator switch |
+| Soft Reset Core | |
+| Skip Self-Test | |
+| Invert Stick X / Y, Swap Stick Axes, Analog Deadzone | stick options |
+| Music Volume, Speech Volume | |
+| EEPROM Autosave | on by default; see below |
+| ROM Shadow 0x54000 | **leave on** — see [`RELEASE_NOTES.md`](RELEASE_NOTES.md) |
+
+> **The Pocket renders only the first 16 interact variables.** Anything past
+> index 16 is invisible on device — which is exactly how the ROM Shadow toggle
+> came to be unreachable while sitting at index 27 in a 28-entry menu. That cap
+> is the reason the menu was trimmed from 28 entries to these 11, and the reason
+> development controls must not be added back to it. The RTL and its bridge
+> decodes are untouched; the controls are simply not exposed.
 
 ## Saved data
 
