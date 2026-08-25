@@ -920,6 +920,67 @@ active.
 `escape_mister.v` through power-on → download-under-reset → release and counts
 served fetches. See "Verified here".
 
+### How to tell what you flashed (read this before reporting a capture)
+
+A capture attributed to the wrong build is worse than no capture. The identifiers that
+actually exist are weaker than the `BUILD nnn` numbering implies:
+
+| where | what it shows | how far it gets you |
+|---|---|---|
+| MiSTer OSD, `V,v` line | `BUILD_DATE`, auto-generated `%y%m%d` by `sys/build_id.tcl` | the **day** only — two builds on one day are indistinguishable, and it maps to no commit |
+| Pocket `core.json` | `version` + `date_release`, **hand-maintained** | only as good as the last person to bump it; it sat at `0.0.1` / `2026-08-06` through BUILD 106 **and** 107 |
+| `BUILD nnn` in this file | *(CI run id, commit sha)* | the only real link from a flashed binary to a tree — and it exists only because someone wrote the row |
+
+So the rule: **a build that gets flashed gets a `BUILD nnn` row here, with its CI run id
+and commit sha, before the capture is taken.** Nothing in the toolchain enforces this;
+the date in the OSD will not save you.
+
+Known weakness, not yet fixed: neither platform embeds its git SHA in the bitstream. The
+durable fix is to extend `sys/build_id.tcl` (MiSTer) and the Pocket packaging to bake in
+a short SHA, so the binary is self-identifying instead of relying on this table. That
+touches shared MiSTer framework code and has not been done.
+
+### BUILD 108 gate results (CI run 32804328092, commit `972bbf4` / branch head `4bec224`)
+
+**This is the build to flash and test.** REFRESH-112 (interval 224 → 160) and
+CLKFIX-106 (Pocket `psram` CLOCK_SPEED 85.909 → 35.795455). The two commits after
+`972bbf4` are documentation and one RTL *comment*, so `4bec224` is the same netlist;
+`check_slack.py` reported *All analysed clocks have non-negative slack*, TNS 0.000 on
+all eight.
+
+**Timing and resources are IDENTICAL to BUILD 107 — every clock, to three decimals.**
+
+| clock | setup | hold | vs BUILD 107 |
+|---|---|---|---|
+| `emu\|pll` general[0] — 7.159091 MHz CPU + pixel | +15.831 ns | +0.263 | **0.000** |
+| `emu\|pll` general[1] — 35.795455 MHz SDRAM | +14.587 ns | +0.254 | **0.000** |
+| `SDRAM_CLK` | +3.442 | +17.450 | **0.000** |
+| `pll_hdmi` divclk (tightest in the design) | **+0.880** | **+0.229** | **0.000** |
+| `FPGA_CLK1_50` / `FPGA_CLK2_50` / `spi_sck` / `pll_audio` | +8.636 / +12.556 / +6.061 / +15.976 | +0.415 / +0.372 / +0.352 / +0.251 | **0.000** |
+
+Resources also unchanged: 18,846 / 41,910 ALMs (45%), 386 / 553 M10K (70%), 76 / 112
+DSP, 21,197 registers.
+
+That identity is **expected, not luck**, and should not be read as headroom won: the
+refresh change swaps one constant in a same-width comparator (224 → 160) and the new
+`DEFER_CAP == 0` term folds away at 48, so the netlist is structurally unchanged and the
+fitter reproduced the same placement. Given this design's measured ±0.157 ns placement
+perturbation sensitivity, a 0.000 ns delta is the *strongest* possible evidence that
+nothing moved.
+
+Sim gates on this tree: `run_sdram_refresh_tb` PASS (both out-of-spec controls FAILed),
+`run_psram_tb` PASS (41.0 ns headroom, wrong-clock control FAILed), `run_mob_tb`
+10047/10047 100.0000% with VS-MAME `wrong_pen=0`, `run_mob_order_check` 9/9 cells
+`b_shorter=0`, `run_prio_tb` 507904/507904, `run_mister_pf_tb` 13,794/13,794.
+`run_stain_tb` is **not applicable** on this branch — `escape_stain.v` does not exist
+here (it postdates merge base `b3926e7`), so it is unrun, not passing.
+
+**What to watch on hardware.** The refresh fix targets *silent* corruption, so a clean
+boot does not confirm it; the discriminator table below still applies. The genuine
+unknown is **sprites**: refresh now takes +1.94 pp of SDRAM bus from the lowest-priority
+client and no bench here puts MO on the real arbiter, so watch specifically for sprite
+dropouts under a busy playfield.
+
 ### BUILD 107 gate results (CI run 32763926809, commit `dba85b4`)
 
 Every step green, including `tb_mister_pf` on a clean checkout (13,794 / 13,794
