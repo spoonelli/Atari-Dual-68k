@@ -2288,7 +2288,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3116;   // PFLINE: prime pf_show/pf_next at line start (left-edge strip) - screen shows '16'
+    localparam [15:0] BUILD_ID = 16'h3117;   // PFLINE-b: line-start prime slot is wp-1 + MO tile-hole gate - screen shows '17'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2502,11 +2502,30 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             // The load mirrors the phase-7 case exactly, but off the value
             // pf_rp is being resynced TO (pf_wp), not the old pf_rp - reading
             // the register here would give the pre-assignment value.
-            case(pf_wp)
+            // PFLINE-116b: the slot is pf_wp MINUS ONE, not pf_wp.
+            //
+            // Walk the cadence. After the resync rp = wp. The phase-7 load at
+            // vis_x=7 stages the cell shown at vis_x 8..15 - i.e. CELL 1 - and
+            // takes ring[rp] = ring[wp], then increments rp. Cell 2 loads at
+            // vis_x=15 from ring[wp+1]. So cell N uses ring[wp + N - 1], and
+            // CELL 0 - the one this prime is for - needs ring[wp - 1].
+            //
+            // Priming with ring[wp] gave cell 0 cell 1's data: still wrong,
+            // just wrong in a new way. Measured on device (build 116, map
+            // screen frame 1285): cols 0-1 went from 62-69 distinct colours
+            // down the column (build 115, per-line scene content) to exactly
+            // ONE flat value, sd 0.0. The prime demonstrably took effect - the
+            // columns stopped serving stale per-line data - but a flat 2 px
+            // strip remained, which is the signature of a constant wrong slot.
+            //
+            // With wp-1 the sequence is continuous across the line boundary:
+            // prime ring[wp-1], ring[wp]; first phase-7 reloads ring[wp],
+            // ring[wp+1]; every cell then advances by exactly one slot.
+            case(pf_wp - 2'd1)
                 2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
                 2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
             endcase
-            case(pf_wp + 2'd1)
+            case(pf_wp)
                 2'd0: pf_next <= pfring0;  2'd1: pf_next <= pfring1;
                 2'd2: pf_next <= pfring2;  default: pf_next <= pfring3;
             endcase
