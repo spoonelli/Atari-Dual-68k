@@ -672,8 +672,30 @@ this one.
 | all 64 clock/corner rows | non-negative | non-negative | — |
 | gate | PASS (margin warning) | PASS (margin warning) | — |
 
-**M10K delta is 0**, as required. The controller adds four 13-bit row
-registers, a 4-bit valid vector and three 8-bit comparators — no storage.
+**M10K delta is 0**, as required — the controller adds registers and
+comparators, no storage. M10K was the binding constraint (299/308 = 97%), so
+this is the number that had to be zero, and it is.
+
+Logic cost, from the fit reports:
+
+| | control `EN=0` | experimental `EN=1` | delta |
+|---|---|---|---|
+| the controller entity itself | `sdram_simple` **79.8 ALMs** | `sdram_openrow` **328.6 ALMs** | **+248.8** |
+| whole design, ALMs | 12,740 / 18,480 (69%) | 13,527 / 18,480 (73%) | +787 |
+| whole design, registers | 10,283 | 11,671 | +1,388 |
+
+**Only ~249 of the +787 ALMs are the controller**, and roughly 254 of the
++1,388 registers. The module is about 4× the size of `sdram_simple`, which is
+what per-bank row tracking, the hit comparison and the bank map cost, and is
+unsurprising.
+
+**The remaining ~538 ALMs and ~1,134 registers are elsewhere in the design and
+are NOT attributed here.** The most likely explanation is that physical
+synthesis made different retiming and register-duplication choices against a
+different critical path — the compile log shows those passes running — but that
+is a hypothesis, not a measurement. It was not isolated. What can be said is
+that ALMs are not the binding resource on this design (73% against an M10K
+ceiling already at 97%), so the headroom exists either way.
 
 **The hold difference is not evidence of anything.** `docs/DEVIATIONS.md` D5
 records ±0.157 ns of movement from placement perturbation alone — larger than
