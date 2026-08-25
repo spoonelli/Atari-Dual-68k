@@ -32,7 +32,20 @@ module escape_pf #(
     // PFBW-122: the line-start resync sets rp = wp, i.e. ZERO ring buffering -
     // the slot being read is the one just written. Backing rp off by N gives
     // the fetch N cells of slack, which is what LEAD alone could not deliver.
-    parameter [1:0]   RP_OFF = 2'd0
+    parameter [1:0]   RP_OFF = 2'd0,
+    // PFCACHE-123: playfield tile-row cache. The floor is a lattice of
+    // REPEATED tiles, so adjacent cells constantly fetch the SAME address. A
+    // hit costs one clock instead of a full round trip, which attacks the one
+    // quantity the strip is proven to depend on: arrival time. 0 disables it
+    // and the netlist matches the shipping build.
+    parameter integer PFC_EN = 0,
+    // The address is 0x120000 + tile*32 + row*4, so addr[1:0] are always 0 and
+    // addr[4:2] is the ROW. Indexing on addr[3:0] (the obvious choice) uses
+    // only FOUR distinct values and makes every tile collide - measured: 16
+    // entries, 4 ever used, and the cache scored 0-3 hits on a realistic map.
+    // Index above the low two bits so both row and tile discriminate.
+    parameter integer PFC_N  = 32,
+    parameter integer PFC_IX = 5
 ) (
     input  wire        clk,
     input  wire        core_reset_n,
@@ -115,6 +128,31 @@ module escape_pf #(
     reg  [1:0]  pfq_wr, pfq_rd;
     reg  vg_doneA_last, vg_doneB_last, vg_doneC_last, vg_doneD_last;
 
+    // ---- PFCACHE-123 storage. MLAB, not M10K: the fit is at 299/308.
+    localparam integer PFC_TAG = 24 - PFC_IX - 2;
+    (* ramstyle = "MLAB" *) reg [31:0]         pc_data [0:PFC_N-1];
+    (* ramstyle = "MLAB" *) reg [PFC_TAG-1:0]  pc_tag  [0:PFC_N-1];
+    reg [PFC_N-1:0] pc_val;
+    // address at the head of the request queue
+    reg [23:0] qa;
+    always @(*) begin
+        case(pfq_rd)
+            2'd0: qa = pfq_addr0;  2'd1: qa = pfq_addr1;
+            2'd2: qa = pfq_addr2;  default: qa = pfq_addr3;
+        endcase
+    end
+    reg [1:0] qslot;
+    always @(*) begin
+        case(pfq_rd)
+            2'd0: qslot = pfq_slot0;  2'd1: qslot = pfq_slot1;
+            2'd2: qslot = pfq_slot2;  default: qslot = pfq_slot3;
+        endcase
+    end
+    wire [PFC_IX-1:0] pc_ix   = qa[PFC_IX+1:2];
+    wire pc_hit = (PFC_EN != 0) && pc_val[pc_ix]
+                  && (pc_tag[pc_ix] == qa[23:PFC_IX+2]);
+    wire [31:0] pc_out = pc_data[pc_ix];
+
     always @(posedge clk_sys_7159) begin
         case(vis_x[2:0])
             3'd0: begin
@@ -187,6 +225,11 @@ module escape_pf #(
                 2'd2: pfring2 <= vg_dataA;  default: pfring3 <= vg_dataA;
             endcase
             inflA <= 1'b0;
+            if(PFC_EN != 0) begin
+                pc_data[vg_addrA_px[PFC_IX+1:2]] <= vg_dataA;
+                pc_tag [vg_addrA_px[PFC_IX+1:2]] <= vg_addrA_px[23:PFC_IX+2];
+                pc_val [vg_addrA_px[PFC_IX+1:2]] <= 1'b1;
+            end
         end
         // PFBW-122: channels C/D, present only when NCH==4. With NCH==2 the
         // generate below ties their requests off and nothing ever completes,
@@ -215,12 +258,28 @@ module escape_pf #(
                 2'd2: pfring2 <= vg_dataB;  default: pfring3 <= vg_dataB;
             endcase
             inflB <= 1'b0;
+            if(PFC_EN != 0) begin
+                pc_data[vg_addrB_px[PFC_IX+1:2]] <= vg_dataB;
+                pc_tag [vg_addrB_px[PFC_IX+1:2]] <= vg_addrB_px[23:PFC_IX+2];
+                pc_val [vg_addrB_px[PFC_IX+1:2]] <= 1'b1;
+            end
         end
         // issue side: drain the queue into whichever channel is free (one
         // issue per pixel clock; the old wait-for-MO gate is gone - the
         // sdram-domain priority chain arbitrates PF vs MO now)
         if(pfq_count != 3'd0) begin
-            if(!inflA && !(vg_doneA_s != vg_doneA_last)) begin
+            // PFCACHE-123: a hit needs no bus transaction at all - write the
+            // ring slot now and retire the request. This is the whole point:
+            // the strip is a function of ARRIVAL TIME, and a hit arrives in
+            // one clock.
+            if(pc_hit) begin
+                case(qslot)
+                    2'd0: pfring0 <= pc_out;  2'd1: pfring1 <= pc_out;
+                    2'd2: pfring2 <= pc_out;  default: pfring3 <= pc_out;
+                endcase
+                pfq_rd    <= pfq_rd + 2'd1;
+                pfq_count <= pfq_count - 3'd1;
+            end else if(!inflA && !(vg_doneA_s != vg_doneA_last)) begin
                 case(pfq_rd)
                     2'd0: begin vg_addrA_px <= pfq_addr0; pf_inflA <= pfq_slot0; end
                     2'd1: begin vg_addrA_px <= pfq_addr1; pf_inflA <= pfq_slot1; end
@@ -385,6 +444,7 @@ module escape_pf #(
             inflA      <= 1'b0;  inflB      <= 1'b0;
             pfq_count  <= 3'd0;  pfq_wr     <= 2'd0;  pfq_rd <= 2'd0;
             pf_wp      <= 2'd0;  pf_rp      <= 2'd0;
+            pc_val     <= {PFC_N{1'b0}};
         end
     end
 

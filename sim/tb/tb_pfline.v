@@ -38,6 +38,21 @@ module tb_pfline;
     parameter integer GFX_LAT = 6;     // fetch latency in pixel clocks
     parameter [8:0]   LEAD    = 9'd16; // PFBW-122 fetch lead
     parameter integer NCH     = 2;     // PFBW-122 playfield fetch channels
+    // PFCACHE-123: how often the map repeats a tile code. The original fixture
+    // made EVERY cell distinct, which is the worst possible case for a cache -
+    // it would score zero hits by construction and the test could not have
+    // shown a benefit whether or not one existed. A real floor is a lattice of
+    // repeated tiles, so MAPMOD models that. 64 = no repeats within a 42-cell
+    // line (the old behaviour); 4 = heavy repetition, like the game's floor.
+    parameter integer MAPMOD  = 64;
+    // These MUST be tb parameters passed down through the instantiation.
+    // -Pescape_pf.X targets the module TYPE and iverilog only overrides the
+    // ROOT module - so that form silently does nothing and the sweep measures
+    // the default. It cost two vacuous sweeps before the counter caught it.
+    parameter integer PFC_EN  = 0;
+    parameter [1:0]   RP_OFF  = 2'd0;
+    // the nibble is 4 bits, so the ramp wraps at min(MAPMOD,16)
+    localparam integer RAMPMOD = (MAPMOD > 16) ? 16 : MAPMOD;
 
     reg clk = 0; always #5 clk = ~clk;
     reg rstn = 0;
@@ -77,7 +92,10 @@ module tb_pfline;
     // re-implementing the DUT's scroll/fine-phase arithmetic - which matters,
     // because duplicating that arithmetic is how a wrong model gets baked into
     // both sides of a test.
-    wire [15:0] pf_vdata  = {10'd0, pf_vaddr[11:6]};
+    // NOTE: MAPMOD as an integer, NOT MAPMOD[5:0] - at 64 that slice is zero
+    // and the modulo is undefined, which silently changed the baseline.
+    wire [5:0]  tilecode  = pf_vaddr[11:6] % MAPMOD;
+    wire [15:0] pf_vdata  = {10'd0, tilecode};
     wire [15:0] pfx_vdata = 16'h0000;
     function [31:0] cellword(input [23:0] a);
         cellword = {8{a[8:5]}};
@@ -114,7 +132,8 @@ module tb_pfline;
     end
 
     escape_pf #(.VID_V_BPORCH(V_BPORCH), .VID_V_ACTIVE(V_ACTIVE),
-                .LEAD(LEAD), .NCH(NCH)) dut (
+                .LEAD(LEAD), .NCH(NCH),
+                .PFC_EN(PFC_EN), .RP_OFF(RP_OFF)) dut (
         .clk(clk), .core_reset_n(rstn),
         .vis_x(vis_x), .visible_x(visible_x), .visible_y(visible_y),
         .x_count(x_count), .y_count(y_count),
@@ -184,7 +203,7 @@ module tb_pfline;
         if(visible_x == 0) begin this_line_first_ok = -1; viol_first = -1; end
         hist[visible_x] = pf_pix;
         if(visible_x >= 10'd8) begin
-            if(pf_pix !== ((hist[visible_x-8] + 4'd1) & 4'hF)) begin
+            if(pf_pix !== ((hist[visible_x-8] + 4'd1) % RAMPMOD)) begin
                 bad_px = bad_px + 1;
                 if(viol_first < 0) viol_first = visible_x;
             end
@@ -202,14 +221,15 @@ module tb_pfline;
     // PFBW-122: did the extra channels actually get used? A configuration
     // change that silently does nothing looks exactly like a change that does
     // nothing useful.
-    integer nA,nB,nC,nD;
+    integer nA,nB,nC,nD, nhit;
     reg rA,rB,rC,rD;
-    initial begin nA=0;nB=0;nC=0;nD=0; rA=0;rB=0;rC=0;rD=0; end
+    initial begin nA=0;nB=0;nC=0;nD=0;nhit=0; rA=0;rB=0;rC=0;rD=0; end
     always @(posedge clk) if(rstn) begin
         if(vg_reqA_px!==rA) begin nA=nA+1; rA=vg_reqA_px; end
         if(vg_reqB_px!==rB) begin nB=nB+1; rB=vg_reqB_px; end
         if(vg_reqC_px!==rC) begin nC=nC+1; rC=vg_reqC_px; end
         if(vg_reqD_px!==rD) begin nD=nD+1; rD=vg_reqD_px; end
+        if(dut.pc_hit && dut.pfq_count!=3'd0) nhit=nhit+1;
     end
 
     task report_result;
@@ -235,7 +255,7 @@ module tb_pfline;
                 $display("  The frame stepping is wrong; do not read the widths above.");
                 $fatal;
             end
-            $display("PFLINE requests issued: A=%0d B=%0d C=%0d D=%0d", nA,nB,nC,nD);
+            $display("PFLINE requests issued: A=%0d B=%0d C=%0d D=%0d  cache_hits=%0d  PFC_EN=%0d", nA,nB,nC,nD,nhit,dut.PFC_EN);
             if(lines_bad == 0)
                 $display("PFLINE GATE: PASS - the cell ramp is unbroken on every line");
             else begin
