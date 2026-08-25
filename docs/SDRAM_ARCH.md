@@ -354,6 +354,15 @@ Throughput note: the baseline serves 33,102 of ~50,185 demanded accesses
 (66%) — the no-shadow configuration is **~34% oversubscribed** on the shipping
 controller. Configuration D serves 50,628, i.e. all of it.
 
+The baseline is genuinely bus-saturated, and the saturated cost per access is
+**18.1 clocks** (600,000 / 33,102), not the 15 the FSM spends: the 4-phase
+handshake, the grant decision and the `S_IDLE` ack-clear add ~3 clocks of
+arbitration overhead on top of every transaction. Per-client service is
+consistent with the priority chain — FPV 15,023 served against FPE's 12,473 on
+identical demand. (MO's *fraction* served, 68.5%, exceeds FPE's 59.4% only
+because MO's demand **rate** is 2.6× lower; a low-rate client can be well served
+at low priority whenever any slack exists. That is not a priority inversion.)
+
 ### 4.1 The bank map
 
 | bank | word addresses | contents | image bytes |
@@ -664,13 +673,28 @@ Two CI builds from the **same tree on the same day**, differing only in
 baseline figures would fold in every unrelated change between that build and
 this one.
 
-| | control `EN=0` (run 32815732669) | experimental `EN=1` (run 32814970038) | delta |
+| | control `EN=0` (32815732669) | experimental `EN=1` (32814970038) | **branch tip** (32817070783) |
 |---|---|---|---|
-| **M10K** | **299 / 308** | **299 / 308** | **0** |
-| worst setup | +5.627 ns (Slow 0C) | +5.456 ns (Slow 85C) | −0.171 |
-| worst hold | +0.007 ns (Fast 0C) | +0.091 ns (Fast 0C) | +0.084 |
-| all 64 clock/corner rows | non-negative | non-negative | — |
-| gate | PASS (margin warning) | PASS (margin warning) | — |
+| **M10K** | **299 / 308** | **299 / 308** | **299 / 308** |
+| worst setup | +5.627 ns | +5.456 ns | +5.476 ns |
+| worst hold | +0.007 ns | +0.091 ns | +0.053 ns |
+| all 64 rows | non-negative | non-negative | non-negative |
+| gate | PASS (margin warning) | PASS (margin warning) | PASS (margin warning) |
+
+**M10K delta is 0 in all three.**
+
+The three hold figures are worth pausing on, because they are the best
+demonstration of D5 this branch produced. The tip build differs from the
+`EN=1` build by **one flip-flop** — `refresh_age` widened 6 bits to 7, with no
+functional change at `DEFER_CAP=48`. That alone moved worst-case hold from
+**+0.091 to +0.053 ns**. Across three builds of functionally equivalent RTL the
+spread is **+0.007 / +0.053 / +0.091**, i.e. 0.084 ns, entirely from placement.
+
+So: **do not read any hold number on this branch as caused by the controller
+change.** D5 says ±0.157 ns of placement perturbation, larger than the margin
+itself, and this branch reproduced it by accident while trying to measure
+something else. All three builds pass all 64 rows; all three trip the 0.150 ns
+margin warning, as the baseline does; it is a warning, not a failure.
 
 **M10K delta is 0**, as required — the controller adds registers and
 comparators, no storage. M10K was the binding constraint (299/308 = 97%), so
@@ -721,8 +745,8 @@ the baseline; it is a warning, not a failure.
 | `run_pf_reset_tb.sh` | **PASS** | — |
 | `run_stain_tb.sh` | **PASS** | 11320 / 11320 stained px; fixture has 16680 stained px |
 | `run_cadence_tb.sh` | **PASS** | exact count, all three decoys rejected |
-| `run_tasrace.sh` | see §9.3 | |
-| `run_vshad3_tb.sh` | see §9.3 | |
+| `run_tasrace.sh` | **PASS** | six cells; see §9.3 |
+| `run_vshad3_tb.sh` | **PASS** | 4 / 4 rows |
 
 Two notes on gates that did not simply pass:
 
@@ -736,9 +760,29 @@ Two notes on gates that did not simply pass:
   which then reported "the bench produced no result at all". Re-run clean —
   see §9.3.
 
-### 9.3 Long-running gates
+### 9.3 The two long gates
 
-*(tasrace and vshad3 results recorded in the commit that adds them)*
+**`run_tasrace.sh` — PASS, six cells.** The three "expect the bug" cells
+produced **real** violation counts, which is the property the brief calls out:
+
+| cell | result |
+|---|---|
+| `clr.b` release, `TASLOCK_EN=0` | **51** foreign stores inside a TAS |
+| `clr.b` release, `TASLOCK_EN=1` | 0 foreign stores; interlock engaged 255× (207 writes) |
+| `move.b` release, `TASLOCK_EN=0` | **104** foreign stores; 51 of 414 trials ownerless |
+| `move.b` release, `TASLOCK_EN=2` DTACK-only | **156** foreign stores |
+| `move.b` release, `TASLOCK_EN=1` | 0 foreign stores; interlock engaged 208× (156 writes) |
+| never-wedge, stuck LOCK adversary | both CPUs survive; worst single stall 64 clks |
+
+51 / 104 / 156 — the counts the brief requires. The bench is measuring, not
+passing vacuously.
+
+**`run_vshad3_tb.sh` — PASS, 4/4 rows**, on a clean re-run. An earlier run
+reported "the bench produced no result at all" on one cell. That was **my
+fault, not the change's**: I removed orphaned Docker containers while the gate
+was mid-run and killed one of its cells. Recorded rather than quietly re-run,
+because a gate failure with an innocent explanation is exactly the kind of
+thing that should not be waved away without naming the cause.
 
 ### 9.4 Clock branch CI — `sdram-clock-EXPERIMENTAL`
 
