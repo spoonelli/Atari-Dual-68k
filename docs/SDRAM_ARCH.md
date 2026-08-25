@@ -577,6 +577,56 @@ this is a one-line change rather than a rediscovery.
 
 ---
 
+## 7b. Head to head: the clock alone also does it
+
+The coordinator asked this explicitly, so it was measured with the same rig:
+the shipping `sdram_simple` FSM, unchanged, at 50.113637 MHz (7:1), one frame
+= 836,306 clocks.
+
+| | baseline 35.8 MHz | **clock only** 50.1 MHz | **open-row+banks** 35.8 MHz |
+|---|---|---|---|
+| FSM changed? | — | **no** | yes (new module) |
+| MO served | 5,606 / 8,185 = **68.5%** | 8,185 / 8,185 = **100%** | 8,185 / 8,185 = **100%** |
+| MO demand→ack, **pixel clocks** | mean 21.2, worst 134 | mean **10.1**, worst 61 | mean **3.7**, worst 20.2 |
+| MO frame: partial lines | **11** | **0** | **0** |
+| MO frame: coverage | 99.21% | **99.47%** | **99.47%** |
+| margin to the 16–21 px dropout knee | none — past it | **1.6–2.1×** | **4.3–5.7×** |
+
+**Both levers independently achieve the objective in simulation.** The shadows
+can come out either way. That is a better position than expected, and it makes
+the choice a risk question rather than a capability one.
+
+Where they differ:
+
+- **Clock only** leaves `sdram_simple` — five freeze fixes, ~25 builds of
+  debugging — completely untouched. That is a large and real advantage. Its
+  cost is that the decisive risk is **unfalsifiable in CI**: the SDRAM pins
+  carry no timing constraints, so a green build says nothing about whether DQ
+  capture still works at the chip, and the 90° phase is a hand-swept constant
+  whose absolute skew this change alters (see `docs/SDRAM_CLOCK.md` §6). It
+  also has the **thinner margin** — mean 10.1 px against a knee at 16–21, and a
+  worst case of 61 px that is well past it. A busier scene than the 103-sprite
+  frame measured here would eat that first.
+- **Open-row + banks** carries FSM risk, but that risk is the kind simulation
+  can attack, and it was attacked: wrong-row serve, refresh-with-open-bank,
+  every JEDEC minimum, cross-bank write/read-back, same-row read-after-write —
+  all gated, all with the detector proven able to fire. Its margin is **3×
+  larger**, and its worst case (20.2 px) sits at the knee rather than far past
+  it.
+- **Together** a mean access is 0.88 CPU clocks (§7a).
+
+**Recommendation.** Try the clock branch on hardware **first** — it is the
+smaller change, it achieves the objective, and the only way to learn whether
+its risk is real is to flash it. If DQ capture holds at 50.113637 MHz, that is
+the cheapest route to the accuracy win and the FSM never has to be touched. If
+it does not hold, the open-row branch achieves the same end with more
+simulation evidence behind it and no change to the chip interface at all.
+
+They are not alternatives that have to be chosen between permanently — §7a
+shows they compose.
+
+---
+
 ## 8. What is NOT proven
 
 Listed so nobody mistakes this for a finished result.
@@ -714,6 +764,10 @@ than re-rolled.
 
 ## 10. Recommendation
 
+0. **The clock branch also achieves the objective, without touching the FSM.**
+   Measured, not assumed (§7b). Try it on hardware first; it is the smaller
+   change. Its risk is real but unfalsifiable in CI, and its margin to the
+   dropout knee is 3x thinner than the controller change's.
 1. **Open-row and bank interleaving should land together or not at all.**
    Measured separately, each alone is worth ~0.4 clocks of service latency
    against a leaner-FSM control — inside the noise of the change's own risk.
