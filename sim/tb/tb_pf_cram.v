@@ -80,6 +80,25 @@ module tb_pf_cram;
     // they would not be attributable evidence either way. 1 is the strongest
     // legitimate stress: it delays enough PF fetches past their 8-pixel cell
     // deadline to route 29% of them through channel B.
+    //
+    // PFRESET-111 - the issueB=3 at MO_BURST=4 is NOT a wedged channel.
+    // That column reads like the PFRESET-111 signature (a channel that stops
+    // being used for the rest of the run) so it was checked directly rather
+    // than assumed: at MO_BURST=4 the frame line reports
+    // "issueA=6954 issueB=3 doneA=6954 doneB=3" - every B issue COMPLETED, so
+    // inflB was never stuck, and the @2ms snapshot shows inflA=1 inflB=1, so B
+    // is reachable. B is simply almost never ARMED.
+    //
+    // That follows from the issue arm's shape (core_top.v:2339): B is taken
+    // only when a queue entry is ready on a pixel clock where A is ALREADY in
+    // flight. So issueB measures a phase relationship between the competitor's
+    // grant period and the 8-pixel cell cadence, not a rate - and a phase
+    // relationship is non-monotonic in burst length by construction. The
+    // 4021 -> 2432 -> 2546 -> 3 -> 4558 sequence is a beat, not a defect, and
+    // every point in it except the first is inside the region the checker
+    // already rejects as unattributable (STIMULUS ERROR, queue overflowed).
+    // Nothing to fix in the RTL; recorded so the next reader does not have to
+    // re-derive it.
     parameter MO_BURST  = 1;
     // ---------------- clocks: 35.795455MHz service, 7.159091MHz pixel (5:1)
     // These are mf_pllbase siblings on hardware (outclk_2 and the 7.159 core
