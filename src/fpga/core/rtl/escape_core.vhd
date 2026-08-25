@@ -102,8 +102,19 @@ entity escape_core is
         -- overrides FASTPATH_EN / VSHAD3_EN / TASLOCK_EN. The override in
         -- core_top.v is the single place to change it.
         --
-        -- EXPECT NO OBSERVABLE DIFFERENCE BETWEEN THE TWO. Only CPU(0) does
-        -- anything, and it gates exactly two kernel features
+        -- BEHAVIOUR IS IDENTICAL; TIMING IS NOT, BY ~5 CLOCKS PER INTERRUPT.
+        -- Measured A/B over 400 frames of dual-CPU traffic (worldwake bench,
+        -- CPU_TYPE 0 vs 1): every correctness and liveness metric is
+        -- identical - wakes 388/388, iacks 388/388, premature 0, restarts 0,
+        -- failpark 0, both ALIVE - but the vblank->360000 ack delay averages
+        -- 73 clocks at 0 and 78 clocks at 1. That +5 is the extended
+        -- exception frame doing exactly what it should: 8 bytes stacked
+        -- instead of 6 is one extra word write on entry and one extra word
+        -- read on RTE, i.e. ~2 bus cycles. It is authentic 68010 cost, not a
+        -- regression - a real MC68010P8 pays it too - and it is ~0.004% of a
+        -- 119,318-clock frame, so it is measurable but not perceptible.
+        --
+        -- Only CPU(0) does anything, and it gates exactly two kernel features
         -- (TG68KdotC_Kernel.vhd:138-145): SR_Read (MOVE from SR becomes
         -- privileged - inert, all 7 sites in this ROM run supervisor, and
         -- :2082 permits it whenever SVmode='1') and VBR_Stackframe (VBR plus
