@@ -804,6 +804,33 @@ always @(posedge clk_sys) begin
         pf_rp     <= pf_wp;
         pfq_count <= 3'd0;
         pfq_rd    <= pfq_wr;
+        // PFLINE-117: PRIME the show registers, exactly as the Pocket top
+        // level does (core_top.v, same defect - this pipeline is DUPLICATED
+        // between the two targets, so every fix to it has to be applied twice
+        // until it is factored into a shared module).
+        //
+        // The bug: pf_show/pf_next were loaded ONLY in the vis_x[2:0]==7
+        // branch, so from line start until the first phase-7 they still held
+        // what was staged at the PREVIOUS line's last cell - and staged off
+        // the pre-resync pf_rp, a slot that is not this line's first cell.
+        //
+        // The slot is pf_wp MINUS ONE. After the resync rp = wp, and the
+        // phase-7 load at vis_x=7 stages CELL 1 from ring[rp] = ring[wp]. So
+        // cell N uses ring[wp + N - 1] and cell 0 needs ring[wp - 1]; priming
+        // with ring[wp] hands cell 0 cell 1's data. Measured on Pocket
+        // hardware: cols 0-1 went from 62-69 distinct colours down the column
+        // to exactly one flat value, which is the signature of a constant
+        // wrong slot. See docs/MO_TILE_HOLES.md.
+        case (pf_wp - 2'd1)
+            2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
+            2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
+        endcase
+        case (pf_wp)
+            2'd0: pf_next <= pfring0;  2'd1: pf_next <= pfring1;
+            2'd2: pf_next <= pfring2;  default: pf_next <= pfring3;
+        endcase
+        pfcol_show <= pfcol_q3;
+        pfcol_next <= pfcol_q2;
     end
 
     // ---- PFRESET-107: the playfield fetch channel MUST reset with the core.

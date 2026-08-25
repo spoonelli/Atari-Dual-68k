@@ -107,10 +107,16 @@ def main():
     wrong = sum(1 for k, v in got.items() if k in gold and gold[k] != v)
     extra = sum(1 for k in got if k not in gold)
     missing = len(gold) - hit - wrong
+    # MOHOLE-116: report BOTH ratios. 'agreement' divides by what the ENGINE
+    # produced, so a pixel the engine never drew is not in the denominator and
+    # dropping pixels CANNOT lower it - this printed 'agreement=100.0000%'
+    # alongside 'missing=832'. 'coverage' divides by the REFERENCE, which is
+    # the number that actually moves when the engine loses pixels.
     print('VS-MAME engine_px=%d mame_px=%d (+%d special) agree=%d wrong_pen=%d '
-          'not_in_mame=%d missing=%d agreement=%.4f%%'
+          'not_in_mame=%d missing=%d agreement=%.4f%% coverage=%.4f%%'
           % (len(got), len(gold), gold_spec, hit, wrong, extra, missing,
-             100.0 * hit / len(got) if got else 0.0))
+             100.0 * hit / len(got) if got else 0.0,
+             100.0 * hit / len(gold)))
     # The reference drew a layer and the engine drew none: that is a total
     # miss, not a clean sheet. Without this it fell through to wrong==0 = PASS.
     if not got:
@@ -123,8 +129,30 @@ def main():
         print('VS-MAME FAIL %d pixels went to a different sprite than MAME '
               'gave them - DRAW ORDER CHANGED' % wrong)
         return 1
+    # MOHOLE-116: pixels the reference drew and the engine did not.
+    #
+    # This is the tile-hole artifact (docs/MO_TILE_HOLES.md) and it was
+    # UNGATED until now: `missing` was computed and printed, but the only
+    # failure paths were `wrong` and a TOTAL wipeout, so partial pixel loss
+    # always passed. It is the same shape of defect as the total-wipeout case
+    # someone patched above - caught then, missed for the partial case.
+    #
+    # This gate is proven to fire in both directions, which is the whole point
+    # (see docs/LESSONS.md on checks that cannot fail):
+    #   tb_mob GFX_JIT=0   -> missing=0    PASS
+    #   tb_mob GFX_JIT=48  -> missing=26   FAIL
+    #   tb_mob GFX_JIT=96  -> missing=832  FAIL
+    # The baseline is exact, so the threshold is 0 - not a tolerance someone
+    # has to justify later.
+    if missing:
+        print('VS-MAME FAIL %d pixels the reference drew are MISSING from the '
+              'engine output (coverage %.4f%%) - dropped tiles, not draw order'
+              % (missing, 100.0 * hit / len(gold)))
+        print('  NOTE: agreement% stays at 100 here by construction; it '
+              'divides by the engine output. Read coverage%.')
+        return 1
     print('VS-MAME PASS no pixel was won by a different sprite than MAME '
-          'gave it to')
+          'gave it to, and none went missing')
     return 0
 
 

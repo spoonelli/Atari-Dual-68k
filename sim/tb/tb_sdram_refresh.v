@@ -64,10 +64,22 @@ module tb_sdram_refresh;
     wire [15:0] dram_dq;
     assign dram_dq = 16'hZZZZ;      // no memory model needed: we watch commands
 
+`ifdef DUT_OPENROW
+    // SDRAM-ARCH: the same JEDEC retention gate, run against the open-row
+    // controller. An open row must never survive a refresh window, and the
+    // worst-case row interval must still be inside 7.8125 us WITH the extra
+    // PRECHARGE ALL that a refresh now has to issue first. Both negative
+    // controls must still be rejected.
+    sdram_openrow #(
+        .REFRESH_INTERVAL (REFRESH_INTERVAL),
+        .DEFER_CAP        (DEFER_CAP)
+    ) dut (
+`else
     sdram_simple #(
         .REFRESH_INTERVAL (REFRESH_INTERVAL),
         .DEFER_CAP        (DEFER_CAP)
     ) dut (
+`endif
         .clk(clk), .reset_n(reset_n),
         .dram_a(dram_a), .dram_ba(dram_ba), .dram_dq(dram_dq),
         .dram_dqm(dram_dqm), .dram_cas_n(dram_cas_n), .dram_ras_n(dram_ras_n),

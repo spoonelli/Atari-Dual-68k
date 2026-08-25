@@ -66,7 +66,8 @@ sound board delivers music, effects and speech in real time.
 | **CPUs** | Two 68000-family cores running **genuinely concurrently** with shared RAM and the mailbox handshake, as the real board does. (MAME time-slices; this does not.) |
 | **Controls** | Emulated hall-effect stick via the ADC0809, including the game's own in-game calibration screens. Dock analog stick takes priority when deflected; invert/swap/deadzone options in the menu. |
 | **High scores** | **Persist across a power cycle.** The emulated 2804 EEPROM is snapshotted to the SD card ~1.17 s after the game stops writing it, so a score survives an unclean power-off, not just a clean exit. |
-| **Boot** | Clean picture. The diagnostic HUD is off by default (press **L1** for it). |
+| **Boot** | Clean picture. The diagnostic HUD is off by default and, from build 114, is gated behind **Developer HUD** in the core menu -- L1 does nothing until that is ticked. |
+| **Build ID** | From build 115 the on-screen build stamp follows the HUD gate, so a clean screen carries no plate. Tick **Developer HUD** to see it. |
 
 ### Verified exactly against the reference
 
@@ -111,7 +112,14 @@ should stay that way** — turning it off is the 1.252e-03 row above. It is
 exposed for diagnosis, not as a tuning knob.
 
 **A left-edge artifact.** Native columns 0-1 render stale playfield data on
-some screens. MAME convicts it, so it is a real bug rather than a display
+some screens. **Exact repro and measurement (build 113 field capture,
+t=16.5-17.5s):** during the blue map/transition screen the whole picture is
+flat navy EXCEPT columns 0 and 1, which still show the *previous* gameplay
+scene - red wall segments and a fragment of grey floor, full screen height.
+Measured per native column against the flat-navy body: columns 0 and 1 are
+**100% non-navy**, columns 2-9 are **0%**. A hard two-column boundary. The
+transition screen is the best place to see it precisely because the rest of
+the frame is featureless, so the stale strip cannot be mistaken for content. MAME convicts it, so it is a real bug rather than a display
 quirk. It is **not new** — it is present identically in earlier builds and is
 not a regression from anything in this release. It is a known item, deferred
 rather than fixed; no fix is imminent. Recorded in
@@ -191,7 +199,9 @@ target: [`DEVIATIONS.md`](DEVIATIONS.md).
 
 ## Using the diagnostic HUD
 
-The core boots clean. Press **L1** to bring up the on-screen HUD; press it
+The core boots clean. From build 114 the diagnostic layer is behind
+**Developer HUD** in the core's menu (default off); tick it first, or L1 does
+nothing. With it on, press **L1** to bring up the on-screen HUD; press it
 again to hide it. **R1** cycles 6 pages (0–5):
 
 | Page | Shows |

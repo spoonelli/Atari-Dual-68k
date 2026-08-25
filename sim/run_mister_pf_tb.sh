@@ -24,7 +24,7 @@ docker run --rm -v "$REPO":/work -w /work "$IMG" bash -c "
     src/fpga/core/rtl/escape_stain.v \
     src/fpga/core/rtl/hall_stick.v \
     sim/tb/stub_escape_core.v \
-    sim/tb/sdram_model.v \
+    sim/tb/sdram_model_mem.v \
     sim/tb/tb_mister_pf.v && \
   vvp sim/build/tb_mister_pf.vvp" | tee sim/build/tb_mister_pf.log
 

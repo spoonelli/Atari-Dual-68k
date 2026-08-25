@@ -63,21 +63,28 @@ Read off `core_top.v` `.p1_buttons` and cross-checked against `input.json`:
 | Select        | Coin            | 14              |
 | Start         | Self-test step / continue | 15    |
 
-> **Known defect, P2 bomb.** `.p2_buttons` ORs in `cont2_key[8]` (**L1**) where
-> `.p1_buttons` uses `cont1_key[6]` (**X**). `input.json` declares P2's bomb as
-> `pad_btn_x`, identically to P1 — so as built, **player 2's X does nothing and
-> L1 fires the bomb instead**. The declared mapping and the RTL disagree. A
-> one-bit change (`cont2_key[8]` → `cont2_key[6]`) would align them; it is
-> **not** applied here because it changes player-facing behaviour and has not
-> been tested on hardware. `core_top.v:2941`.
+> **P2 bomb - FIXED in build 113.** `.p2_buttons` used to OR in
+> `cont2_key[8]` (**L1**) where `.p1_buttons` uses `cont1_key[6]` (**X**),
+> so X did nothing for P2 and L1 fired the bomb instead, contradicting
+> `input.json`. P2 now reads bit 6, matching P1. This was the same
+> bit-8-is-L1 confusion that produced the original P1 report.
 
 ### Debug controls
 
 Not game controls — development tooling, and none of it is on by default.
 
+> **These controls are OFF by default.** As of build 114 the whole
+> diagnostic layer sits behind **Developer HUD** in the core's menu
+> (`interact.json` id 38, default unchecked). With it unchecked, L1, R1,
+> R and L2 do nothing and the overlay cannot appear -- a player never
+> meets it. Tick it to get everything in this table back; no rebuild is
+> needed, which is deliberate so that someone helping debug a report can
+> turn it on without a toolchain. See docs/RELEASE_CHECKLIST.md section F.
+
+
 | Pocket | Effect |
 |---|---|
-| **L1** | Show / hide the diagnostic HUD. **Starts hidden.** |
+| **L1** | Show / hide the diagnostic HUD. **Starts hidden**, and does nothing at all unless **Developer HUD** is enabled in the core menu (see below). |
 | **R1** | Cycle HUD page 0-5 (works with the HUD hidden; the page shows next time you press L1) |
 | **L2** | Toggle the trace view |
 | **R1 (hold)** | Hide motion objects |

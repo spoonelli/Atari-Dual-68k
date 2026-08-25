@@ -627,8 +627,9 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                     vidout_rgb <= hex_px ? 24'hFFFF00 : 24'h101040;
                 end else if(ver_stamp) begin
                     // Only reachable with diag_on == 0: every branch above that
-                    // covers rows 228..233 requires diag_on. This is the clean-boot
-                    // build stamp.
+                    // covers rows 228..233 requires diag_on. Now also requires
+                    // hud_en_s, so with the menu gate clear this branch cannot
+                    // be reached at all and the screen is genuinely clean.
                     vidout_rgb <= ver_px ? 24'h00FFFF : 24'h101010;
                 end else begin
                     vidout_rgb <= alpha_rgb;
@@ -798,6 +799,15 @@ end
     // Default ON. The BRAM is instantiated and filled either way, so this
     // costs no M10K and can be flipped on device without a reflash.
     reg        vshad3_on_74 = 1'b1;   // 0xA0000150: 'ROM Shadow 0x54000'
+    // HUD-113: 0xA0000154 'Developer HUD' (interact.json id 38). Defaults OFF
+    // so a player never meets the diagnostic overlay: with this clear, L1 and
+    // R1 do nothing and are free for game use. The HUD RTL is still compiled
+    // in, so a user helping debug a report can enable it from the menu with no
+    // rebuild, and anyone who pulls the core gets it unchanged. See
+    // docs/RELEASE_CHECKLIST.md section F for why it is a runtime gate rather
+    // than a compile-time-only flag: a repo default that differs from the
+    // shipped build means what people build is not what people tested.
+    reg        hud_en_74    = 1'b0;   // 0xA0000154: 'Developer HUD'
     reg        ee_autoen_74 = 1'b1;   // 0xA0000140: 'EEPROM Autosave' (default ON)
                                       // (0x120-0x13C belong to the MIX-100
                                       //  per-FM-channel mixer)
@@ -811,6 +821,7 @@ end
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000140) ee_autoen_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000150) vshad3_on_74 <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000154) hud_en_74    <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
@@ -860,6 +871,8 @@ synch_3 s_irqst(irqstrict_74, irqstrict_s, clk_sys_7159);
     // it cannot change which memory answers a bus cycle already in flight.
     wire vshad3_on_s;
 synch_3 s_vshad3(vshad3_on_74, vshad3_on_s, clk_sys_7159);
+    wire hud_en_s;
+synch_3 s_huden(hud_en_74, hud_en_s, clk_sys_7159);
 synch_3 s_inpb(inprobe_74, inprobe_s, clk_sys_7159);
 synch_3 #(.WIDTH(3)) s_prefd(prefd_74, prefd_s, clk_sys_7159);
 synch_3 s_pfprobe(pfprobe_74, pfprobe_s, clk_sys_7159);
@@ -1763,8 +1776,21 @@ always @(posedge clk_sdram) begin
 end
 
     // ---------------- SDRAM controller
+    // SDRAM-ARCH (branch sdram-openrow-EXPERIMENTAL): compile-time select between
+    // the shipping controller and the open-row + bank-interleaved one. Flip
+    // this one localparam to A/B them; sdram_simple.v is not modified.
+    //
+    // Measured, no-shadow config, one frame of real traffic
+    // (sim/run_sdram_traffic_tb.sh):
+    //     sdram_simple   row-hit  6.7%   service 14.12 clk   MO 68.5% served
+    //     sdram_openrow  row-hit 79.2%   service  6.15 clk   MO  100% served
+    // and the MO fetch latency that produces takes the motion-object engine
+    // from 11 partially-rendered lines to 0 (sim/tools/mob_golden.py).
+    localparam SDRAM_OPENROW_EN = 1;
+
     wire sdram_init_done;
-sdram_simple sdr (
+generate if (SDRAM_OPENROW_EN != 0) begin : g_sdr_openrow
+sdram_openrow sdr (
     .clk        ( clk_sdram ),
     .reset_n    ( pll_core_locked ),
     .dram_a     ( dram_a ),
@@ -1796,6 +1822,33 @@ sdram_simple sdr (
     .rd_data    ( sd_rd_data ),
     .init_done  ( sdram_init_done )
 );
+end else begin : g_sdr_simple
+sdram_simple sdr (
+    .clk        ( clk_sdram ),
+    .reset_n    ( pll_core_locked ),
+    .dram_a     ( dram_a ),
+    .dram_ba    ( dram_ba ),
+    .dram_dq    ( dram_dq ),
+    .dram_dqm   ( dram_dqm ),
+    .dram_cas_n ( dram_cas_n ),
+    .dram_ras_n ( dram_ras_n ),
+    .dram_we_n  ( dram_we_n ),
+    .dram_cke   ( dram_cke ),
+    .wr_req     ( sd_wr_req ),
+    .wr_ack     ( sd_wr_ack ),
+    .wr_addr    ( sd_wr_addr ),
+    .wr_data    ( sd_wr_data ),
+    .rd_pre     ( (chk_state == 4'd10) ? rd_pre_q : 1'b1 ),
+    .rd_addr    ( (chk_state == 4'd10) ? rd_addr_q :
+                  (chk_state == 4'd1) ? 25'd0 :
+                  (chk_state == 4'd3) ? 25'h0110400 :
+                  (chk_state == 4'd5) ? 25'h0110410 :
+                  (chk_state == 4'd8 || chk_state == 4'd7) ? (25'h0110000 + {10'd0, chr_dma_word, 1'b0}) :
+                  {1'b0, core_rom_addr} ),
+    .rd_data    ( sd_rd_data ),
+    .init_done  ( sdram_init_done )
+);
+end endgenerate
 
     // ---------------- core reset: wait for ROM fully downloaded + sdram up
     wire dataslot_allcomplete_s, sdram_init_done_s;
@@ -2244,7 +2297,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3112;   // VSHAD3-16K: partial shadow at 0x54000 + runtime toggle (id 37) - screen shows '12'
+    localparam [15:0] BUILD_ID = 16'h3117;   // PFLINE-b: line-start prime slot is wp-1 + MO tile-hole gate - screen shows '17'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2267,7 +2320,18 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ver slots in BOTH states -- see the note above BUILD_ID.
     // vx0[3]==0 restricts the painted area to each 8px glyph box, so a clean
     // screen gets two small plates rather than a 64px-wide bar.
-    wire ver_stamp = (visible_y >= 'd228) && (visible_y < 'd234)
+    // HUD-114: the clean-boot build stamp is now part of the diagnostic layer
+    // rather than an always-on plate. It used to persist with diag_on == 0, so
+    // a player saw two cyan digits burned into every screen from power-on -
+    // exactly the "dev build" tell a release must not have. Qualified by
+    // hud_en_s, it follows the rest of the debug layer.
+    //
+    // The project rule that every build carries an on-screen ID is UNCHANGED:
+    // tick 'Developer HUD' in the core menu and the stamp is there, which is
+    // the same one action that reveals everything else you would check it
+    // alongside. What is gone is it being visible without asking.
+    wire ver_stamp = hud_en_s
+                     && (visible_y >= 'd228) && (visible_y < 'd234)
                      && (visible_x >= 'd296) && (visible_x < 'd328) && (vx0[3]==1'b0);
 
     // ---------------- playfield pipeline (pixel domain)
@@ -2423,6 +2487,60 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         if(x_count == 10'd0) begin
             pf_rp <= pf_wp;
             pfq_count <= 3'd0; pfq_rd <= pfq_wr;
+            // PFLINE-116: PRIME the show registers here too.
+            //
+            // The bug: pf_show/pf_next were loaded ONLY in the vis_x[2:0]==7
+            // branch, so from line start until the first phase-7 they still
+            // held whatever was staged at the PREVIOUS line's last cell - and
+            // worse, staged off the pre-resync pf_rp, i.e. a slot that is not
+            // this line's first cell at all. The first pixels of every line
+            // were therefore served from a stale, unrelated ring slot.
+            //
+            // Measured on device (build 113 capture, transition screen at
+            // t=17.0): native columns 0-1 carried the PREVIOUS SCENE's
+            // playfield - red wall and grey floor over a flat navy map screen
+            // - 100% non-navy in cols 0-1 against 0% in cols 2-9. Scene-level
+            // staleness, not one line's residue, which is exactly what an
+            // unprimed register that only reloads mid-cell produces.
+            //
+            // It also ate sprites: anything drawn in those columns was painted
+            // over by the stale playfield, which reads as a motion object
+            // "cut off before the draw window" while the floor still renders
+            // to its left.
+            //
+            // The load mirrors the phase-7 case exactly, but off the value
+            // pf_rp is being resynced TO (pf_wp), not the old pf_rp - reading
+            // the register here would give the pre-assignment value.
+            // PFLINE-116b: the slot is pf_wp MINUS ONE, not pf_wp.
+            //
+            // Walk the cadence. After the resync rp = wp. The phase-7 load at
+            // vis_x=7 stages the cell shown at vis_x 8..15 - i.e. CELL 1 - and
+            // takes ring[rp] = ring[wp], then increments rp. Cell 2 loads at
+            // vis_x=15 from ring[wp+1]. So cell N uses ring[wp + N - 1], and
+            // CELL 0 - the one this prime is for - needs ring[wp - 1].
+            //
+            // Priming with ring[wp] gave cell 0 cell 1's data: still wrong,
+            // just wrong in a new way. Measured on device (build 116, map
+            // screen frame 1285): cols 0-1 went from 62-69 distinct colours
+            // down the column (build 115, per-line scene content) to exactly
+            // ONE flat value, sd 0.0. The prime demonstrably took effect - the
+            // columns stopped serving stale per-line data - but a flat 2 px
+            // strip remained, which is the signature of a constant wrong slot.
+            //
+            // With wp-1 the sequence is continuous across the line boundary:
+            // prime ring[wp-1], ring[wp]; first phase-7 reloads ring[wp],
+            // ring[wp+1]; every cell then advances by exactly one slot.
+            case(pf_wp - 2'd1)
+                2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
+                2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
+            endcase
+            case(pf_wp)
+                2'd0: pf_next <= pfring0;  2'd1: pf_next <= pfring1;
+                2'd2: pf_next <= pfring2;  default: pf_next <= pfring3;
+            endcase
+            pfcol_show <= pfcol_q3;
+            pfcol_next <= pfcol_q2;
+            pfcode_show<= pfcode_q3;
         end
 
         // ---- PFRESET-111: the playfield fetch channel MUST reset with the
@@ -2819,7 +2937,13 @@ synch_3 s_diag(cont1_key[8], l1_s, clk_sys_7159);
     reg  l1_d = 1'b0;
     always @(posedge clk_sys_7159) begin
         l1_d <= l1_s;
-        if(l1_s & ~l1_d) diag_on <= ~diag_on;
+        // HUD-113: force the overlay down and swallow the L1 edge whenever the
+        // menu gate is clear. Clearing diag_on unconditionally (rather than
+        // only ignoring the edge) matters: turning the gate OFF while the HUD
+        // is up must put the picture back, not strand it on screen with no
+        // way to dismiss it.
+        if(!hud_en_s)          diag_on <= 1'b0;
+        else if(l1_s & ~l1_d)  diag_on <= ~diag_on;
     end
     wire coin1_s, coin2_s;
 synch_3 s_coin(cont1_key[14], coin1_s, clk_sys_7159);   // Select = coin 1 (JSA)
@@ -2947,7 +3071,13 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .vshad3_on  ( vshad3_on_s ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
-    .p2_buttons ( {cont2_key[4]|cont2_key[8], 1'b0, cont2_key[5]|cont2_key[8], cont2_key[7]|cont2_key[8]} ),
+    // P2BOMB-113: was cont2_key[8] (L1) in all three ORs where P1 uses
+    // cont1_key[6] (X). input.json declares P2's bomb as X, so the declared
+    // mapping and the RTL disagreed: X did nothing for P2 and L1 fired the
+    // bomb. Same root cause as the P1 'bomb does nothing' report (see the
+    // MOSDRAM-72 note above) - bit 8 is L1, not X. P2 now matches P1.
+    .p2_buttons ( {cont2_key[4]|cont2_key[6], 1'b0,
+                   cont2_key[5]|cont2_key[6], cont2_key[7]|cont2_key[6]} ),
     .adc_p1x    ( adc_p1x ),
     .adc_p1y    ( adc_p1y ),
     .adc_p2x    ( adc_p2x ),

@@ -27,6 +27,23 @@ module tb_mob;
     parameter XSCROLL = 123;
     parameter YSCROLL = 253;
     parameter GFX_LAT = 8;   // pixel-clock cycles per fetch (device-realistic)
+    // MOJIT-116: per-request latency JITTER. Default 0 keeps every existing
+    // gate bit-identical.
+    //
+    // Why this exists: with a constant GFX_LAT every channel completes in
+    // issue order with identical timing, so a defect that needs completions to
+    // arrive out of the order the consumer assumes CANNOT occur here. That is
+    // the shape of the tile-hole artifact seen on device (docs/MO_TILE_HOLES.md,
+    // frame 5629 wrong / 5636 right - same sprite, so the cause is transient,
+    // not static). All three existing detectors pass because the sprite IS
+    // accepted and IS drawn; only one tile inside it is missing.
+    //
+    // Real SDRAM latency varies with bank state, refresh and contention. This
+    // models that as GFX_LAT + (lfsr % (GFX_JIT+1)), per request, per channel.
+    // The LFSR is used rather than $random so a failing run is reproducible
+    // from GFX_SEED alone and can be handed to someone else.
+    parameter GFX_JIT  = 0;
+    parameter GFX_SEED = 16'hACE1;
 
     reg clk = 0;
     always #69.84 clk = ~clk;           // 7.159MHz pixel clock
@@ -84,6 +101,7 @@ module tb_mob;
     reg  [127:0] gfx_data;
     reg  [3:0]   req_d = 4'd0;
     reg  [6:0]   lat    [0:3];
+    reg  [15:0]  jit_r = GFX_SEED;   // MOJIT-116 galois LFSR, deterministic
     reg  [23:0]  addr_l [0:3];
     integer k;
     initial begin
@@ -95,7 +113,10 @@ module tb_mob;
             if(gfx_req[k] != req_d[k] && lat[k] == 0) begin
                 req_d[k]  <= gfx_req[k];
                 addr_l[k] <= gfx_addr[k*24 +: 24];
-                lat[k]    <= GFX_LAT[6:0];
+                lat[k]    <= GFX_LAT[6:0] + (GFX_JIT == 0 ? 7'd0
+                                             : (jit_r % (GFX_JIT + 1)));
+                jit_r     <= {jit_r[14:0], jit_r[15] ^ jit_r[13]
+                                         ^ jit_r[12] ^ jit_r[10]};
             end else if(lat[k] != 0) begin
                 lat[k] <= lat[k] - 7'd1;
                 if(lat[k] == 7'd1) begin

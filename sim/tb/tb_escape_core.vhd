@@ -7,8 +7,23 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use std.textio.all;
 
-entity tb_escape_core is end tb_escape_core;
+-- SDRAM-ARCH: two generics added, both inert by default.
+--   G_TRACE  path to write the ROM fetch address trace to. Empty (default) =
+--            no trace, byte-identical behaviour to before.
+--   G_US     how long to run before the check process stops the clock.
+-- This bench is the only one in the repo that runs the REAL game ROM
+-- (sim/work/combined_words.hex) through the REAL TG68K with SHAD_EN=>0, so it
+-- is the only honest source of a CPU program-fetch address sequence for the
+-- no-shadow configuration. Every other CPU bench uses a synthetic image whose
+-- row locality would be an artefact of the image, not of the game.
+entity tb_escape_core is
+    generic (
+        G_TRACE : string  := "";
+        G_US    : integer := 60
+    );
+end tb_escape_core;
 
 architecture tb of tb_escape_core is
     signal clk    : std_logic := '0';
@@ -115,9 +130,35 @@ begin
         end if;
     end process;
 
+    -- ROM fetch address trace. One line per REQUEST EDGE (not per ack), which
+    -- is the sequence sdram_simple would see. rom_addr is a byte address;
+    -- >= 0x080000 is the extra CPU (escape_core adds 0x080000 to extra-side
+    -- addresses), below that is the video CPU - so the client tag comes for
+    -- free and is not an assumption.
+    rom_trace : process(clk)
+        file     tf   : text;
+        variable l    : line;
+        variable opened : boolean := false;
+        variable prev : std_logic := '1';
+    begin
+        if G_TRACE /= "" then
+            if rising_edge(clk) then
+                if not opened then
+                    file_open(tf, G_TRACE, write_mode);
+                    opened := true;
+                end if;
+                if rom_req = '1' and prev = '0' then
+                    write(l, to_hstring(rom_addr));
+                    writeline(tf, l);
+                end if;
+                prev := rom_req;
+            end if;
+        end if;
+    end process;
+
     check : process
     begin
-        wait for 60 us;
+        wait for G_US * 1 us;
         report "=== escape_core (synthesizable) ===";
         report "  video CPU fetched reset PC: " & std_logic'image(dbg_v);
         report "  extra CPU released (360010 D0): " & std_logic'image(dbg_e);

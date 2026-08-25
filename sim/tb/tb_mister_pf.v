@@ -79,7 +79,8 @@ module tb_mister_pf;
         .rom_ready(rom_ready)
     );
 
-    sdram_model #(.WORDS(25'h00A0000)) chip (
+    // MERGE-117: renamed - see sim/tb/sdram_model_mem.v for why there are two.
+    sdram_model_mem #(.WORDS(25'h00A0000)) chip (
         .clk(clk_sdram), .a(SDRAM_A), .ba(SDRAM_BA), .dq(SDRAM_DQ),
         .dqm({SDRAM_DQMH, SDRAM_DQML}),
         .cas_n(SDRAM_nCAS), .ras_n(SDRAM_nRAS), .we_n(SDRAM_nWE),

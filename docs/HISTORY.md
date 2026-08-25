@@ -1,4 +1,4 @@
-# Atari Dual 68k — Development History (v1–v78)
+# Atari Dual 68k — Development History (v1–v78, builds 101–114)
 
 A field log of bringing Atari's dual-68000 "Escape" hardware (E.P.R.O.M.) to
 the Analogue Pocket: what broke, what we measured, and what each era taught.
@@ -113,7 +113,7 @@ Coins raced, sound was one blip in an hour, start never fired.
   placement-invariant read timing, reproducible builds. The structural exit
   from six weeks of lottery.
 
-## Era 6 — The freeze, and the atom that wasn't (build 101–102)
+## Era 8 — The freeze, and the atom that wasn't (build 101–102)
 An intermittent, reboot-only freeze survived eight refuted theories and
 roughly twenty builds: address-qualified waitstates, registered read
 capture, six different vblank-interrupt schemes, the CDC parity gap, a
@@ -168,6 +168,86 @@ spin-lock acquire at `$9B4`, retrying `tas.b $16CCCC` forever.
 - The `tas.b` read-modify-write measures 13 clocks wide here, with `/AS` HIGH
   for 3 of them. That 3-clock gap is the entire bug, as a number.
 
+## Era 9 — Persistence, sprites, and the wrong constant (builds 103–106)
+- **103** put EEPROM persistence on the TAS-fix base. It also failed to fit
+  (Quartus 170048): two 128x32 buffers inferred M10K against a 308-block
+  ceiling that was already full. Fixed with an explicit `ramstyle = "MLAB"`.
+  The M10K ceiling is the binding constraint on this part and has shaped every
+  decision since.
+- **104** took the sprite engine to a 4-channel fetch with a 3-deep prefetch
+  queue.
+- **105** added the `apply_stain` second pass and special-sprite masking. The
+  map marker came back — and the episode that followed is the one worth
+  keeping. I first called the residual a hardware failure, then "under-applied
+  at 27%". Both were wrong. The owner pointed at 1:23 of the CRT reference,
+  where the marker plainly **blinks**; my single-frame readings had been phase-
+  mixed across the blink. **A still frame cannot measure a blinking thing**,
+  and the 100% coverage target it implied never existed.
+- **106** corrected everything derived from a wrong SDRAM clock constant. The
+  PSRAM controller was parameterised at **85.909 MHz** while the clock is
+  **35.795455 MHz**, so every derived value was wrong at once: wait states, and
+  a refresh interval that was **out of JEDEC spec**. One constant, wrong,
+  silently poisoning a whole subsystem — and nothing failed loudly enough to
+  find it until someone read the parameter.
+
+## Era 10 — Diagnostics that can fail (builds 107–112)
+The theme of this era is not a bug; it is the discovery of how many of our
+checks could not have failed.
+- **107** put stain diagnostics on HUD page 4 "plus gates that can fail" — the
+  first build where provoking the check was part of shipping it.
+- **108** fixed the two-frame line-buffer ghost, confirmed on hardware.
+- **109** was a one-word A/B: `VSHAD3_EN=0`, which fits at **283/308** M10K
+  against the shipping branch's **308/308**. 25 blocks, measured rather than
+  estimated.
+- **110** added 68010 mode. Its lasting contribution was `HOLD-110`: BUILD 110
+  and the `cpu-68010` branch are **byte-identical RTL differing only in the
+  `BUILD_ID` constant**, and their worst-case hold slack differs by **0.157 ns**.
+  The timing gate's 0.050 ns margin floor could not survive that, and was
+  raised to 0.150. **On this design a placement perturbation moves hold more
+  than most real changes do** — so no hold number may be attributed to the last
+  edit without naming the path.
+- **111** found that the playfield fetch channel had no reset (the MiSTer
+  wedge). `PFSIM-113` then found the PF-CRAM rig **had never passed** — three
+  faults in the rig, none in the RTL.
+- **112** shipped a 16 KB partial ROM shadow at 0x54000 with a runtime toggle,
+  after a correction worth recording: I had advised shadowing
+  `0x50000-0x53FFF`, **wrong by 18:1** — three of those four pages are read
+  *exactly zero* times. The 16 KB partial measured indistinguishable from the
+  full 32 KB shadow at 9 fewer M10K.
+- Two more of my own claims were falsified in this era. I reported the desk
+  dropouts as playfield; the bench falsified the playfield's own prediction
+  **30/30 and 20/20** — they are motion objects. And I claimed "64 blocks of
+  M10K waste" when **86% of an M10K's bits are parity** and the design is
+  **96.5% efficient**. Both were relayed confidently and neither was measured.
+
+## Era 11 — Toward a release candidate (builds 113–114)
+- The SDRAM re-architecture was taken to three branches — clock (50.1 MHz),
+  open-row, and banking — and **both levers independently clear the dropout
+  knee**: MO latency 21.2 px baseline, 10.1 px on clock alone, 3.7 px with
+  open-row plus banking; 11 partial lines to 0 either way. My sequencing advice
+  had been backwards: I said open-row before banking, but **banking creates the
+  opportunity and open-row cashes it** (all three clients sat in bank 0, so
+  every client switch was necessarily a row miss).
+- **113** shipped open-row + banking, and fixed the P2 bomb: `.p2_buttons` read
+  `cont2_key[8]` (**L1**) where P1 reads `cont1_key[6]` (**X**) and
+  `input.json` declares X. A declared-vs-actual mismatch, and the same
+  bit-8-is-L1 confusion that produced the original P1 report.
+- **114** put the whole diagnostic layer behind a menu toggle (`Developer HUD`,
+  default off), so a player never meets it while anyone debugging a report can
+  enable it without a toolchain.
+- **The packaging guard did not hold.** Staged as `gfxdata.bin`, the real ROM
+  **packaged** — byte-identical, past a guard that only knew filenames. There
+  are now five guards constraining the *output by content*, each provoked by
+  `support/test_package_guards.sh`. Guard 5 pins the platform image by hash,
+  because the marquee is under the same rule as ROM data and guards 3 and 4
+  both pass it.
+- **The fill rate that the SDRAM analysis rested on was never measured.** The
+  39% -> 70% figures are estimates; `tb_vfill` was written to replace them with
+  a count and could not, because the bench never leaves boot: **1831 of 1831
+  fastpath-eligible cycles land in the first 16 KB, across 7 distinct pages in
+  480 us**. Not a 0% fill rate — a spin loop. The number remains unmeasured,
+  and the case for the rework rests on measured *latency*, not on starvation.
+
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)
 2. SDRAM chip-clock capture phase (v45)
@@ -193,3 +273,12 @@ spin-lock acquire at `$9B4`, retrying `tas.b $16CCCC` forever.
 - Keep ROMs out of the repo with mechanical guards, not vigilance.
 - The emulator's shortcuts (zero-time fetches, instant links) hide the exact
   class of bug an FPGA core must solve.
+- **A check that cannot fail is worse than no check**, because it also consumes
+  the attention that would have found the problem. This project has recorded
+  **sixteen** such instances, and the deepest form arrived late: a
+  proof-it-can-fail control is *itself calibrated*, and its calibration goes
+  stale exactly like the constant it guards. The SDRAM refresh gate's negative
+  controls correctly FAIL at 35.795455 MHz and correctly-looking **PASS** at
+  50.11 MHz, because the JEDEC limit in clocks moves 279.7 -> 391.5 — green,
+  banner printed, measuring nothing, at the precise moment someone raising the
+  clock needs it most. See `LESSONS.md`.

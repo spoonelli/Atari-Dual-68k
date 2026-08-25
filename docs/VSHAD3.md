@@ -113,6 +113,8 @@ one risk I cannot measure and one methodological point.
 * **The risk.** `fast_v_spec` fires speculatively on every non-shadow ROM
   address, so un-shadowing 32 KB of the video CPU's *hottest* code moves it from
   issuing fills on ~39% of its bus cycles to ~70%. `core_top.v:1630-1632`
+  **Both of those percentages are estimates and neither has ever been measured -
+  see section 7; do not cite them as data.**
   budgets for "both CPUs streaming fetches" and estimates MO keeps >=40% of the
   bus — an **estimate, not a measurement**, and the MO engine is the
   lowest-priority SDRAM client. If that extra fill traffic pushes the effective
@@ -381,3 +383,43 @@ and is not a failure: the baseline's +0.103 was already under the floor, and
 the tightest hold path is inside the PLL output counter
 (`altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk`), not in the shadow
 or decode path this change touches.
+
+## 7. MEASURED: the fill-rate input to the SDRAM analysis is still unmeasured
+
+`docs/SDRAM_ARCH.md` models the baseline partly on the video CPU issuing fills on
+**~70%** of its bus cycles with the vshad3 shadow off (vs ~39% on). That pair
+comes from `docs/VSHAD3.md:115`, which is honest about its neighbour being "an
+estimate, not a measurement" - but the pair itself was then used as an INPUT to a
+memory-system decision. `sim/tb/tb_vfill.vhd` was written to replace it with a
+count. It could not, and the reason matters more than the number would have.
+
+Over 480 us the video CPU executes **2194 bus cycles touching 7 distinct 256-byte
+pages**, lowest 0x000000, highest 0x3E02D0 (that one I/O, not ROM). Of 1831
+fastpath-eligible cycles, **1831 are in r1 (0x000000-0x003FFF)** - r2 and r3 are
+hit **zero** times, in both the cumulative and post-VBLANK windows.
+
+**That is not a 0% fill rate.** It is a boot spin loop. The video CPU never
+leaves the first 16 KB of ROM, so it never executes the code at 0x54000 that the
+39%/70% claim is about. Consistent with the SDRAM agent's own note that
+`tb_escape_core` never releases the extra CPU in the captured window - the loop
+is very likely the boot handshake waiting on exactly that.
+
+Three consequences:
+
+1. **The 70% figure is not merely unmeasured, it is unmeasurable on this bench**,
+   and so is the 39%. Neither should be cited as a measurement, and the load
+   model resting on them is an assumption, not a finding.
+2. **Any measurement taken from `tb_escape_core`'s window is characterising a
+   7-page boot loop**, not gameplay. That is a property worth checking before
+   trusting any future number sourced from it.
+3. The bench's guards did their job in the useful direction: `c_r1 > 0` and
+   `c_elig > 0` both passed, so the run is provably counting real cycles - which
+   is what makes "r3 = 0" readable as evidence rather than as a dead classifier.
+   A bench that had only asserted "fills > 0" would have failed and taught
+   nothing; the range guards are what turn an empty bin into information.
+
+**To actually get the number**, the extra CPU has to be released and the video CPU
+driven past boot - i.e. a bench that reaches attract mode, not one that reaches
+the reset PC. That is the highest-value simulation follow-up on this branch, and
+it is a prerequisite for treating the SDRAM starvation case as measured.
+
