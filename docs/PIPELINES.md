@@ -510,10 +510,27 @@ reverting it.
 
 ### 4.1 Who they are
 
-Both are `entity work.TG68K generic map (CPU => "00")` — **68000 mode**. The schematic
-labels them U68010 (sheets 4 and 5) but production boards carry MC68000s, verified from
-a real board; this is the one recorded case where MAME beats the schematic
-(`DEVIATIONS.md` §C5). Exception frames differ, so it matters.
+Both are `entity work.TG68K`, with the mode set by the `CPU_TYPE` generic —
+`localparam CPU_TYPE` in `core_top.v`, **defaulting to 1 (68010)**.
+
+> **This paragraph used to say** *"production boards carry MC68000s, verified
+> from a real board; this is the one recorded case where MAME beats the
+> schematic"*, and that the generic was hard-wired `CPU => "00"`. **Both halves
+> are retracted.** The "verified from a real board" wording traced to a single
+> unphotographed inspection and no photo ever existed. The current position:
+> **both** schematic packages — SP-332 (rev D of `A046145-01`) and the JAMMA
+> manual TM-336 (rev E of the same drawing) — draw `U68010` at 45J and 20P, and
+> the assembly drawing calls out Atari house number `137414-002` at both CPU
+> positions rather than a Motorola part, so one BOM line covers either chip.
+> Production shipped **both parts across both cabinet types** (all four
+> combinations photographed); the distribution is unknown and this project
+> states no pattern. MAME instantiates `M68000`, so MAME matches a
+> 68000-stuffed board. See `DEVIATIONS.md` §C5 and `CPU_AND_ARBITER.md` — and
+> if either still describes a *cabinet* distinction, that is the stale copy,
+> not this one.
+
+Exception frames differ between the two parts, which is why the generic exists
+— but nothing reachable in this ROM depends on it (see `CPU_AND_ARBITER.md`).
 
 | | video / main CPU | world / extra CPU |
 |---|---|---|
