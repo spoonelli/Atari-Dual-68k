@@ -21,21 +21,36 @@ Development continues on visual polish and final timing feel.
 | Native simulation (GHDL + iverilog) | ✅ boot, march, JSA, speech-chip and sprite-scene replay benches |
 | ROM loading (data slot → SDRAM + CRAM + BRAM shadows) | ✅ verified, self-checked |
 | Dual 68000s + shared RAM + mailbox handshake | ✅ genuinely concurrent on hardware |
-| Hot-code BRAM shadows + speculative prefetch | ✅ ~98% of profiled gameplay execution at zero-wait |
-| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay |
-| Sound (JSA-I: 6502 + YM2151 + **TMS5220 speech**) | ✅ full pipeline, MAME-bus-trace verified |
+| Hot-code BRAM shadows + speculative prefetch | ✅ shipped — shadow hit rate 61% video / 37% extra CPU |
+| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ components pixel-verified vs MAME scene replay (compositor itself has no bench) |
+| Sound (JSA-I: 6502 + YM2151 + **TMS5220 speech**) | ✅ full pipeline, bench-verified; no audio bus-trace diff vs MAME |
 | Inputs (buttons, hall-stick via ADC0809, dock analog) | ✅ incl. in-game calibration screens |
-| Watchdog, freeze-rescue, on-device forensics HUD | ✅ (debug pages behind L/R, dev builds) |
-| EEPROM (2804) | ✅ in-session; persistence via Pocket save: planned |
+| Watchdog, freeze-rescue, on-device forensics HUD | ✅ 6 debug pages behind L / R — **off by default**, all builds |
+| EEPROM (2804) | ✅ high scores and settings persist across a power cycle |
 
 **Known issues:** dense sprite crowds can drop scanlines (bandwidth work in
-progress); occasional small sprite artifacts; speech phrase tails clip slightly;
-some scenes run marginally under arcade speed. See the issue tracker.
+progress); speech phrase tails clip slightly; some scenes run marginally under
+arcade speed (video-CPU cadence median 0.973 vs MAME 0.9977 — the gap is in
+the tail, not the median). A non-integer 240→1080 scale draws every 1-pixel
+feature 4 or 5 pixels thick, causing visible shimmer on this game's diagonals:
+that is in the Pocket's scaler and **no RTL change can fix it**. Hold-timing
+margin is at a structural floor (~+0.10 ns) and any edit re-rolls it. The
+measured gap list is [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md) §D, not the
+issue tracker.
 
-**Core identities:** dev builds install as `spoonelli.ataridual68k`; the
-release core will ship as `spoonelli.eprom` (platform `eprom`, ROM goes in
-`Assets/eprom/common/`). Platform art is user-supplied (not distributed),
-like the ROMs.
+> Previously listed here: "occasional small sprite artifacts". Three
+> independent detectors failed to reproduce it (enclosed-black: 0 ours vs 11
+> MAME; hole rate indistinguishable across builds). It may still be real — a
+> sprite fetching wrong-but-plausible data defeats every statistical shape
+> test — but it is an unreproduced observation, not a measured defect. See
+> §D3.
+
+**Core identity:** the core currently installs as `spoonelli.ataridual68k`.
+Renaming it to `spoonelli.eprom` is proposed but **not done** — see
+[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md). The platform id is `eprom`
+either way, so the ROM goes in `Assets/eprom/common/` and saves in
+`Saves/eprom/common/`. Platform art is an original text placeholder; real
+marquee art is user-supplied and not distributed, like the ROMs.
 
 Full hardware map, roadmap, and schematic findings: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -71,9 +86,12 @@ autovectored interrupt scheme.
 **Approximate:** per-instruction CPU cycle counts (TG68K is instruction-accurate, not
 cycle-exact to a 68000); bus-cycle timing (the
 original used zero-wait parallel EPROM buses per subsystem; this core splits memory
-across SDRAM, a dedicated CRAM chip for graphics, and BRAM shadows holding the
-profiled hot code — ~98% of gameplay execution runs zero-wait, the rest via
-speculative prefetch);
+across SDRAM, a dedicated CRAM chip for graphics, and BRAM shadows holding hot code,
+with a speculative prefetch fastpath for everything else. **These are not zero-wait**:
+measured, a shadow fetch costs **5.015 CPU clocks** per bus cycle and a fastpath hit
+**4.015** — so on its hottest code a shadow costs the CPU a clock rather than saving
+one. Net throughput is ~0.87 of MAME's bus rate on the video CPU and ~0.92 on the
+world CPU. See [`docs/VSHAD3.md`](docs/VSHAD3.md));
 video internals (same VRAM in, same pixels out on the same raster grid, but the
 scanout is a re-architected line engine, not a gate-level MOHLB/SLAGS clone).
 
@@ -99,7 +117,8 @@ docs/RETROSPECTIVE.md                    how it was debugged, incl. the false tu
 docs/ARCHITECTURE.md                     hardware map, roadmap, schematic findings
 docs/DEVIATIONS.md                       where this core is not the board, measured
 docs/ROMS.md, docs/POCKET_TEST.md        ROM building; on-device test guide
-third_party/                             Arcade-Atari-system1_MiSTer submodule (RTL base)
+third_party/                             Arcade-Atari-system1_MiSTer submodule (RTL base),
+                                         jt51 submodule, analogue-pocket-utils (vendored)
 ```
 
 ## Get it
@@ -107,9 +126,10 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
 **Recommended:** grab the latest package from the
 [**Releases page**](https://github.com/spoonelli/Atari-Dual-68k/releases) —
 unzip onto your Pocket SD, add your own ROM per
-[`docs/ROMS.md`](docs/ROMS.md), play. (Alpha pre-releases are dev builds:
-build number + diagnostic HUD on screen, see
-[`docs/POCKET_TEST.md`](docs/POCKET_TEST.md).)
+[`docs/ROMS.md`](docs/ROMS.md), play. The core boots to a clean picture; the
+diagnostic HUD is off until you press **L1**. What works, what is
+known-imperfect and what is missing:
+[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md).
 
 ## Build it yourself (contributors)
 
@@ -132,8 +152,11 @@ No local FPGA toolchain needed — GitHub Actions compiles the bitstream for you
    [`docs/ROMS.md`](docs/ROMS.md) and place it at `Assets/eprom/common/` on the SD.
 7. Unzip the package onto the SD, launch **Atari Dual 68k** on the Pocket.
 
-Dev builds show a build number bottom-right and diagnostic HUD pages on
-L / R / R2 — that is expected; the clean-screen release core comes later.
+Every build shows a small cyan build number in the bottom-right corner — check it
+matches the zip you flashed. The diagnostic HUD is **off by default**; press **L1**
+to bring it up, **R1** to cycle its 6 pages (0-5), **L2** to toggle the trace view.
+While the HUD is up, **R1/L2/R2 held** are layer-isolation and video-kill probes;
+they do nothing with the HUD off.
 
 ## Building & testing
 
@@ -155,15 +178,22 @@ Thanks: LMSS, DJS, LCS, TBPL, EG
   `license:BSD-3-Clause`, `copyright-holders: Aaron Giles`) and the supporting device
   models (`atarijsa`, `atarimo`, `slapstic`). This project used the MAME driver purely as a
   **behavioral reference** for understanding the hardware (memory map, video/motion-object
-  format, the two-CPU mailbox handshake). **No MAME source code is copied into this
-  repository**; the RTL is an independent re-implementation from the driver's documented
-  behavior cross-checked against the original schematics, which take precedence where they
+  format, the two-CPU mailbox handshake). **No MAME source code is compiled into the
+  core**: the RTL is an independent re-implementation from the driver's documented
+  behavior. Nine unmodified MAME source files *are* checked in under `reference/` as
+  reading material, under their own BSD-3-Clause terms — see
+  [`reference/NOTICE.md`](reference/NOTICE.md), which reproduces the full licence.
+  The schematics take precedence where the two references
   disagree (autovectored IRQs, SLAPSTIC, serial SCOM). On CPU type the two references
   appeared to differ for weeks, and **both turned out to be right about different
   boards**: Escape shipped in two cabinet variants, and the dedicated cabinet is a
   **68010** (`MC68010P8`, Motorola, date code `A71R8813`, photographed — matching the
-  schematic's `U68010` at 45J and 20P, since SP-332 *is* the dedicated-cabinet package)
-  while the **JAMMA** version is a **68000**, which is what MAME models. This core
+  schematic's `U68010` at 45J and 20P, since SP-332 is inferred to be the
+  dedicated-cabinet package, from the absence of a JAMMA edge connector on sheet 1;
+  the package carries no BOM or revision page) while the **JAMMA** version is
+  reported to be a **68000**, which is what MAME models. *That second half rests on
+  an unphotographed inspection with no part number or date code recorded, and by this
+  project's own standard does not yet clear the bar — treat it as unconfirmed.* This core
   supports both, and it is safe rather than lucky either way — the ROM contains no
   68010-only instruction, no handler reads an exception-frame format word or does
   pointer arithmetic around the frame, and 68010 loop mode is never entered (measured:
@@ -181,21 +211,47 @@ Thanks: LMSS, DJS, LCS, TBPL, EG
 - **Tobias Gubener (TobiFlex)** for the **TG68K.C** 68000 soft-CPU core (LGPL-3.0,
   with patches by MikeJ, Till Harbaum, Rok Krajnc and others) — both of this core's
   68000s are TG68K instances, via the System 1 tree.
-- **Daniel Wallner** for the **T65** 6502 core (BSD-style license, via OpenCores /
-  the System 1 tree), reused for the JSA-I sound board's 6502.
+- **Daniel Wallner**, **Mike Johnson (fpgaarcade)**, **Wolfgang Scherr** and
+  **Morten Leikvoll** for the **T65** 6502 core (BSD-style licence, via OpenCores /
+  the System 1 tree), reused for the JSA-I sound board's 6502. T65's licence carries
+  the OpenCores *"redistributions in synthesized form"* clause, which covers an FPGA
+  bitstream: this section is the accompanying documentation that clause requires.
+- **Adam Gastineau (agg23)** for
+  [`analogue-pocket-utils`](https://github.com/agg23/analogue-pocket-utils) — the
+  `psram.sv` controller driving the Pocket's CRAM, vendored at
+  `third_party/analogue-pocket-utils/psram.sv` and compiled into the bitstream
+  (MIT, © 2022 Adam Gastineau; the licence text is preserved in the file header,
+  and MIT requires it accompany all copies including binary releases).
 - **Jose Tejada (jotego)** for [`jt51`](https://github.com/jotego/jt51), the
-  YM2151 FM synthesis core used by the JSA-I audio subsystem (GPL-3.0, included
-  as a git submodule with license and history intact). Jotego's FPGA arcade
+  YM2151 FM synthesis core used by the JSA-I audio subsystem (GPL-3.0). Most of it
+  builds from the git submodule with licence and history intact; **two files are
+  modified vendored copies** — `src/fpga/core/rtl/jt51v/jt51.v` and `jt51_acc.v`,
+  carrying this project's per-channel user-gain change (MIX-100) — and the build
+  compiles those in place of the submodule's. Jotego's FPGA arcade
   work is foundational to this whole scene — support it at
   [Patreon](https://www.patreon.com/jotego).
 
+Speech: `src/fpga/core/rtl/TMS5220.vhd` is © 2020 d18c7db under GPL-3.0-or-later and
+states in its header that it is based primarily on MAME's `tms5220.cpp`. If its
+coefficient tables derive from that file, the BSD-3 notice for MAME's speech-chip
+authors (Frank Palazzolo, Jarek Burczynski, Jonathan Gevaryahu, Aaron Giles) is
+owed alongside it. This is inherited from upstream rather than introduced here, and
+**has not been resolved** — flagged rather than fixed.
+
 ## License
 
-**GPL-3.0** — see [`LICENSE`](LICENSE). The RTL base is
-[`MiSTer-devel/Arcade-Atari-system1_MiSTer`](https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer)
-(GPL-3.0); the YM2151 core is [`jotego/jt51`](https://github.com/jotego/jt51)
-(GPL-3.0, submodule); the openFPGA APF framework is from
-[`open-fpga/core-template`](https://github.com/open-fpga/core-template).
+**GPL-3.0** for this project's own RTL and tooling — see [`LICENSE`](LICENSE).
+The tree is not uniformly GPL-3.0, and downstream users keep the weaker terms on
+these files:
+
+| Component | Licence |
+|---|---|
+| [`MiSTer-devel/Arcade-Atari-system1_MiSTer`](https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer) (RTL base) | GPL-3.0 |
+| [`jotego/jt51`](https://github.com/jotego/jt51) (submodule + 2 modified files) | GPL-3.0 |
+| **TG68K** (`rtl/tg68kv/`, plus 2 files from the submodule) | **LGPL-3.0**-or-later |
+| **T65** (`third_party/.../lib/T65/`) | **BSD-3**-style (OpenCores) |
+| **`psram.sv`** (`third_party/analogue-pocket-utils/`) | **MIT** |
+| **APF framework** (`src/fpga/apf/*`, from [`open-fpga/core-template`](https://github.com/open-fpga/core-template)) | **Proprietary** — Analogue Software License Agreement, see the header of `src/fpga/apf/apf_top.v`. Not an OSI licence. Unavoidable for a Pocket core, and explicitly carved out of the GPL-3.0 claim above. |
 
 ## Legal
 
