@@ -518,6 +518,42 @@ repo** — that is a real gap in the record.
 
 ---
 
+## 7a. Do the two branches compose?
+
+Yes, and they compose multiplicatively in the useful direction — but one
+parameter has to move, and the reason it currently gets away without moving is
+worth knowing.
+
+Service latency for a row hit is 4 SDRAM clocks. In CPU-clock terms, which is
+what the 4-clock bus cycle actually cares about:
+
+| | 35.795455 MHz (5:1) | 50.113637 MHz (7:1) |
+|---|---|---|
+| `sdram_simple`, every access (15 clk) | 3.00 CPU clocks | 2.14 |
+| `sdram_openrow`, mean (6.15 clk) | 1.23 CPU clocks | **0.88** |
+| `sdram_openrow`, row hit (4 clk) | 0.80 CPU clocks | **0.57** |
+
+Combined, the mean access drops inside a single CPU clock.
+
+`sdram_openrow` was run against the JEDEC checker at 19.954662 ns: **0
+violations** across modes 0, 6 and 7 (clean, cross-bank write/read, same-row
+read-after-write), with the tighter requirements the higher clock imposes
+(tRCD 2, tRP 2, tRAS(min) 3, tRC 4, tRFC 4).
+
+**The caveat.** `T_RAS_CLK` defaults to **2**, which is correct at 35.795455 MHz
+and **below the 3 clocks tRAS(min) needs at 50.113637 MHz**. No violation
+appears anyway, because the FSM cannot structurally precharge sooner than about
+five clocks after an ACTIVE — every path to a precharge goes through a
+completed access or an S_IDLE refresh decision. So the guard is not what is
+keeping it legal; the state machine's shape is.
+
+That is a latent fragility, not a safety margin. A combined build should pass
+`T_RAS_CLK(3)` explicitly so correctness comes from the parameter rather than
+from an emergent property nobody is checking. The parameters exist precisely so
+this is a one-line change rather than a rediscovery.
+
+---
+
 ## 8. What is NOT proven
 
 Listed so nobody mistakes this for a finished result.
