@@ -3,9 +3,23 @@
 // Instantiates the REAL third_party psram.sv controller against a behavioral
 // 70ns ADmux PSRAM chip model, and replicates core_top's pixel-domain PF
 // pipeline (queue -> A/B ping-pong channels -> slot ring -> extraction) plus
-// the sdram-domain unified CRAM service chain, at the real 12:1 clock ratio
-// (85.909MHz service / 7.159MHz pixel). MO interference is injected at game
-// cadence (one 2-read fetch per 8-pixel slot) to model sprite traffic.
+// the sdram-domain unified CRAM service chain, at the real 5:1 clock ratio
+// (35.795455MHz service / 7.159091MHz pixel). MO interference is injected at
+// game cadence (one 2-read fetch per 8-pixel slot) to model sprite traffic.
+//
+// CLKFIX-106/PFCLK-111: this bench used to run a 85.909MHz service clock at a
+// 12:1 ratio and pass CLOCK_SPEED(85.909) to psram.sv. Both were wrong. The
+// PLL IP (src/fpga/core/mf_pllbase/mf_pllbase_0002.v) declares
+// output_clock_frequency2 = "35.795455 MHz" for clk_sdram and
+// output_clock_frequency0 = "7.159091 MHz" for the pixel clock - an exact 5:1
+// ratio. The shipped RTL was corrected in BUILD 106; this bench was missed.
+//
+// Note that BOTH had to change together. psram.sv derives every wait state as
+// CEIL(min_ns / (1000/CLOCK_SPEED)), so fixing only the parameter while
+// leaving the simulated clock at 85.909MHz would have reproduced exactly the
+// lying configuration that sim/run_psram_tb.sh uses as its NEGATIVE CONTROL
+// (declared 35.795455 while the PLL runs 85.909) - a bench that reads data
+// before t_AA. The clock, the ratio and the parameter are one change.
 //
 // The CRAM model is preloaded with a synthetic pattern where word[a] is a
 // function of the address, and the map holds a distinct tile in every cell -
@@ -15,6 +29,34 @@
 // mismatches PER COLUMN - the accumulating-rightward signature that convicted
 // the one-in-flight design on hardware (build 39) shows up directly here.
 //
+// ===================================================================
+// PFCLK-111 WARNING: THIS BENCH HAS NEVER PASSED. DO NOT CITE IT.
+// ===================================================================
+// `./sim/run_pf_tb.sh` exits 1 with "cells checked 9600, mismatches 9600
+// (100.000%)", and did so at every commit since the rig was born. Two defects,
+// BOTH independent of the clock constant fixed above:
+//
+//  1. The golden checker and this bench never used the same test pattern.
+//     sim/tools/check_pf_frame.py has exactly one commit in its history
+//     (3d03b63, LANE3i) and computes
+//         cram_word(a) = (a * 2654435761) & 0xFFFF
+//     under a comment claiming "matches tb". It does not. This file has always
+//     filled the chip model with the IDENTITY pattern (see cmem[k] = k[15:0]
+//     below), at 3d03b63 and every commit since. So every cell mismatches
+//     unconditionally, whatever the RTL does. Making the checker use the
+//     identity pattern takes mismatches 100% -> 95.4% (and the offset search
+//     from "sample hits 0" to "sample hits 8"), so the pattern divergence is
+//     real but is NOT the only fault.
+//
+//  2. Channel B never issues. Every run reports "issueB=0 doneB=0" - the A/B
+//     ping-pong that this rig exists to validate is not being exercised at
+//     all, so the two-in-flight claim it was built to support is untested.
+//
+// Consequence: the LANE3i/LANE3k conclusions attributed to this rig are
+// UNSUPPORTED by it. The wrong CLOCK_SPEED was never the binding problem -
+// it was a second fault sitting behind a bench that could not report anything.
+// Fix (1) and (2) before trusting any number from here.
+//
 // Run:  ./sim/run_pf_tb.sh          (docker iverilog wrapper)
 `timescale 1ns/1ps
 
@@ -22,15 +64,16 @@ module tb_pf_cram;
     parameter SINGLE_CH = 0;   // 1 = old one-in-flight design (control run)
     parameter REAL_DATA = 0;   // 1 = load real gfx (cram_words.hex) + real map (pf_map.hex)
     parameter MO_BURST  = 2;   // MO fetches per 8px slot (attract worst case)
-    // ---------------- clocks: 85.909MHz service, /12 pixel (real PLL ratio)
-    reg clk85 = 0;
-    always #5.82 clk85 = ~clk85;            // 11.64ns period
-    reg [3:0] div = 0;
+    // ---------------- clocks: 35.795455MHz service, 7.159091MHz pixel (5:1)
+    // Both are PLL outputs in hardware (mf_pllbase outclk_2 and outclk_0), so
+    // both are generated directly here rather than divided in fabric. A 5:1
+    // ratio cannot be made by toggling on posedge anyway - it needs a
+    // half-cycle - which is itself a hint that the old /12 divider was
+    // modelling something the PLL does not do.
+    reg clk_sd = 0;
+    always #13.968254 clk_sd = ~clk_sd;     // 27.936508ns period (35.795455MHz)
     reg clk_px = 0;
-    always @(posedge clk85) begin
-        if(div == 4'd5) begin div <= 0; clk_px <= ~clk_px; end
-        else div <= div + 4'd1;
-    end
+    always #69.841270 clk_px = ~clk_px;     // 139.68254ns period (7.159091MHz)
 
     // ---------------- video counters (copied semantics from core_top)
     localparam VID_V_BPORCH = 'd12;
@@ -98,8 +141,8 @@ module tb_pf_cram;
     reg         cram_write_en = 0;
     reg  [15:0] cram_din = 0;
 
-    psram #(.CLOCK_SPEED(85.909)) cram0 (
-        .clk        ( clk85 ),
+    psram #(.CLOCK_SPEED(35.795455)) cram0 (
+        .clk        ( clk_sd ),
         .bank_sel   ( 1'b0 ),
         .addr       ( cram_addr ),
         .write_en   ( cram_write_en ),
@@ -277,9 +320,9 @@ module tb_pf_cram;
     // ---------------- CDC (real synch_3) + sdram-domain service chain
     wire vg_reqA_s, vg_reqB_s, mg_req_s;
     reg  vg_doneA_85 = 0, vg_doneB_85 = 0, mg_done_85 = 0;
-    synch_3 s_vgA(vg_reqA_px, vg_reqA_s, clk85);
-    synch_3 s_vgB(vg_reqB_px, vg_reqB_s, clk85);
-    synch_3 s_mg (mo_gfx_req, mg_req_s,  clk85);
+    synch_3 s_vgA(vg_reqA_px, vg_reqA_s, clk_sd);
+    synch_3 s_vgB(vg_reqB_px, vg_reqB_s, clk_sd);
+    synch_3 s_mg (mo_gfx_req, mg_req_s,  clk_sd);
     synch_3 s_vgdA(vg_doneA_85, vg_doneA_s, clk_px);
     synch_3 s_vgdB(vg_doneB_85, vg_doneB_s, clk_px);
     synch_3 s_mgd (mg_done_85,  mg_done_s,  clk_px);
@@ -289,7 +332,7 @@ module tb_pf_cram;
     reg [15:0] cvg_hi, cmg_hi;
     reg cvg_ch = 0;
 
-    always @(posedge clk85) begin
+    always @(posedge clk_sd) begin
         // unified CRAM read-start chain (drain/cst omitted: mem preloaded)
         if(cvg_ph==2'd0 && cmg_ph==2'd0
            && !cram_busy && !cram_read_en && !cram_write_en) begin
@@ -366,9 +409,9 @@ module tb_pf_cram;
         if(n_doneA < 4) $display("DBG doneA #%0d data=%h t=%0t", n_doneA, vg_dataA, $time);
     end
     always @(vg_doneB_85) n_doneB = n_doneB + 1;
-    always @(posedge clk85) if(cram_avail === 1'b1) n_avail = n_avail + 1;
-    always @(posedge clk85) if(cvg_ph==2'd3 && cram_avail===1'b1) n_cvg = n_cvg + 1;
-    always @(posedge clk85) if(cmg_ph==2'd3 && cram_avail===1'b1) n_cmg = n_cmg + 1;
+    always @(posedge clk_sd) if(cram_avail === 1'b1) n_avail = n_avail + 1;
+    always @(posedge clk_sd) if(cvg_ph==2'd3 && cram_avail===1'b1) n_cvg = n_cvg + 1;
+    always @(posedge clk_sd) if(cmg_ph==2'd3 && cram_avail===1'b1) n_cmg = n_cmg + 1;
     initial begin
         #2000000;  // 2ms in
         $display("DBG @2ms: issueA=%0d issueB=%0d doneA=%0d doneB=%0d avail=%0d cvg=%0d cmg=%0d cvg_ph=%0d cmg_ph=%0d busy=%b pfq=%0d inflA=%b inflB=%b",

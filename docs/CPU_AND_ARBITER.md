@@ -687,7 +687,7 @@ on the constraint that actually binds this design. The only saving is ALM-scale:
 the ~36 collision-bypass flops in `dpram_bytelane_syn` plus ~29 interlock flops.
 
 **Setup timing: free.** The CPU domain is 7.159 MHz — a 139.7 ns period — and the
-recorded worst-case setup slack (+4.9 to +5.2 ns) belongs to the 85.909 MHz SDRAM
+recorded worst-case setup slack (+4.9 to +5.2 ns) belongs to the 35.795455 MHz SDRAM
 domain. There is roughly 120 ns of headroom in front of the shared RAM. An
 arbiter, a mux and a stall path cost nothing there.
 
