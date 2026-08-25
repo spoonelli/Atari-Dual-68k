@@ -2288,7 +2288,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3115;   // + build stamp follows the HUD gate (no plate on a clean screen) - screen shows '15'
+    localparam [15:0] BUILD_ID = 16'h3116;   // PFLINE: prime pf_show/pf_next at line start (left-edge strip) - screen shows '16'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2478,6 +2478,41 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         if(x_count == 10'd0) begin
             pf_rp <= pf_wp;
             pfq_count <= 3'd0; pfq_rd <= pfq_wr;
+            // PFLINE-116: PRIME the show registers here too.
+            //
+            // The bug: pf_show/pf_next were loaded ONLY in the vis_x[2:0]==7
+            // branch, so from line start until the first phase-7 they still
+            // held whatever was staged at the PREVIOUS line's last cell - and
+            // worse, staged off the pre-resync pf_rp, i.e. a slot that is not
+            // this line's first cell at all. The first pixels of every line
+            // were therefore served from a stale, unrelated ring slot.
+            //
+            // Measured on device (build 113 capture, transition screen at
+            // t=17.0): native columns 0-1 carried the PREVIOUS SCENE's
+            // playfield - red wall and grey floor over a flat navy map screen
+            // - 100% non-navy in cols 0-1 against 0% in cols 2-9. Scene-level
+            // staleness, not one line's residue, which is exactly what an
+            // unprimed register that only reloads mid-cell produces.
+            //
+            // It also ate sprites: anything drawn in those columns was painted
+            // over by the stale playfield, which reads as a motion object
+            // "cut off before the draw window" while the floor still renders
+            // to its left.
+            //
+            // The load mirrors the phase-7 case exactly, but off the value
+            // pf_rp is being resynced TO (pf_wp), not the old pf_rp - reading
+            // the register here would give the pre-assignment value.
+            case(pf_wp)
+                2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
+                2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
+            endcase
+            case(pf_wp + 2'd1)
+                2'd0: pf_next <= pfring0;  2'd1: pf_next <= pfring1;
+                2'd2: pf_next <= pfring2;  default: pf_next <= pfring3;
+            endcase
+            pfcol_show <= pfcol_q3;
+            pfcol_next <= pfcol_q2;
+            pfcode_show<= pfcode_q3;
         end
 
         // ---- PFRESET-111: the playfield fetch channel MUST reset with the
