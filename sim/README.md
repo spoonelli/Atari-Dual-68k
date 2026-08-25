@@ -44,6 +44,28 @@ Escape's raster (456×262), confirming the System 1 video base matches Escape's 
 a restore, an autosave and an exit-time snapshot, which is ~1.4 ms of core
 clock. See [`../docs/EEPROM_SAVE.md`](../docs/EEPROM_SAVE.md).
 
+## `run_pf_reset_tb.sh` — the playfield fetch channel vs. a core reset (PFRESET-111)
+
+```bash
+./sim/run_pf_reset_tb.sh                 # the gate: six runs, three scenarios x fix/no-fix
+PFRESET_SWEEP=1 ./sim/run_pf_reset_tb.sh # + the drain-rate characterisation
+PFRESET_KEEP=1  ./sim/run_pf_reset_tb.sh # keep sim/build/pfslice* for inspection
+```
+
+Unlike every other bench here, `tb_pf_reset.v` **does not contain a copy of the RTL it
+tests**. `sim/tools/mk_pf_reset_slice.py` cuts the four relevant blocks verbatim out of
+`src/fpga/core/core_top.v` on every run and includes them, so the bench cannot drift from
+what ships — and `--defeat-fix` builds the *failing* case by excising the `PFRESET-111`
+reset block from that slice and nothing else. If the fix is ever deleted from
+`core_top.v`, the extractor aborts rather than silently grading nothing.
+
+The negative controls are load-bearing in both directions: PHASE 1 and PHASE 2 with the
+fix excised **must** wedge (and must have actually lost a request while reset was held),
+and PHASE 0 — a reset taken with the CRAM controller idle — **must not**, because a bench
+that wedges on any reset is not measuring the mechanism. Full results and the
+"how much contention does this take" table are in
+[`../docs/PIPELINES.md`](../docs/PIPELINES.md), under *The reset rig*.
+
 ## Benches that report "fail" by construction
 
 **`tb_escape_handshake` always reports HANDSHAKE INCOMPLETE at its default
