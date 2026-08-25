@@ -540,6 +540,8 @@ module tb_mob_perf;
     // loading, so mo_vaddr[11:2] IS that sprite's link - true of every revision
     // of this engine, which is what makes the dump comparable across them.
     // One line per sprite load: "<ly> <link>", in load order, per built line.
+    integer gfd; integer gclk; reg [1023:0] gtracepath;
+    initial begin gfd = 0; gclk = 0; end
     reg [3:0] ostate_d = 0;
     always @(posedge clk) begin
         if(measuring && ofd && dut.state == 4'd10 && ostate_d != 4'd10)
@@ -551,8 +553,19 @@ module tb_mob_perf;
     always @(posedge clk) begin
         if(measuring)
             for(k = 0; k < NCH; k = k + 1)
-                if(gfx_req[k] != req_cnt_d[k]) n_reqs = n_reqs + 1;
+                if(gfx_req[k] != req_cnt_d[k]) begin
+                    n_reqs = n_reqs + 1;
+                    // SDRAM-ARCH: +gtrace=<path> writes the real MO graphics
+                    // fetch address stream - "<pixel_clk> <channel> <byte_addr>"
+                    // - one line per ISSUED request, from real sprite data in
+                    // sim/work/game_mo.hex against real image_bytes.hex. This
+                    // is the only realistic MO address sequence available, and
+                    // sdram_simple sees exactly this sequence on hardware.
+                    if(gfd) $fwrite(gfd, "%0d %0d %06h\n",
+                                    gclk, k, gfx_addr[k*24 +: 24]);
+                end
         req_cnt_d <= gfx_req;
+        if(measuring) gclk = gclk + 1;
     end
 
     // ---------------- fetch-pairing check (MO-ARTIFACT-RESEARCH.md root cause B)
@@ -655,6 +668,8 @@ module tb_mob_perf;
         // deeper queue did not reorder anything - see that file.
         ofd = 0;
         if($value$plusargs("ord=%s", ordpath)) ofd = $fopen(ordpath, "w");
+        gfd = 0;
+        if($value$plusargs("gtrace=%s", gtracepath)) gfd = $fopen(gtracepath, "w");
         @(posedge rstn);
         repeat (2 * VID_V_TOTAL * VID_H_TOTAL) @(posedge clk);
         @(negedge clk);
@@ -664,6 +679,7 @@ module tb_mob_perf;
         measuring = 0; dumping = 0;
         $fclose(fd);
         if(ofd) $fclose(ofd);
+        if(gfd) $fclose(gfd);
         $display("PERF pixels=%0d gfx_reqs=%0d wren=%0d entries=%0d max_entries_line=%0d",
                  px_seen, n_reqs, n_wren, n_entries, max_entries);
         $display("PERF lines=%0d complete=%0d aborted=%0d budget_exhausted=%0d",

@@ -75,7 +75,11 @@ module tb_sdram_model;
     wire [31:0] rd_data;
     wire        init_done;
 
+`ifdef DUT_OPENROW
+    sdram_openrow dut (
+`else
     sdram_simple dut (
+`endif
         .clk(clk), .reset_n(reset_n),
         .dram_a(c_a), .dram_ba(c_ba), .dram_dq(dq),
         .dram_dqm(c_dqm), .dram_cas_n(c_cas_n), .dram_ras_n(c_ras_n),
