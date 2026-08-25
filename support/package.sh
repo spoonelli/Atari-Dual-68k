@@ -32,8 +32,11 @@ trap 'rm -rf "$STAGE"' EXIT
 
 mkdir -p "$STAGE/$CORE_DIR" "$STAGE/Platforms/_images" "$STAGE/Assets/$PLATFORM/common"
 
-# core definition files (repo root, per the official core template)
-for f in core.json audio.json data.json input.json interact.json variants.json video.json info.txt; do
+# core definition files (repo root, per the official core template).
+# CORE_FILES is the single source of truth: it drives both the copy loop and
+# guard 4 below, so the two can never drift apart.
+CORE_FILES="core.json audio.json data.json input.json interact.json variants.json video.json info.txt"
+for f in $CORE_FILES; do
     cp "$REPO/$f" "$STAGE/$CORE_DIR/"
 done
 cp "$REPO/dist/icon.bin" "$STAGE/$CORE_DIR/"
@@ -45,10 +48,19 @@ cp "$REPO/dist/platforms/_images/$PLATFORM.bin" "$STAGE/Platforms/_images/"
 
 # Assets dir ships EMPTY (plus a note) -- ROMs are user-supplied, never distributed
 cat > "$STAGE/Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" <<'EOF'
-Put your self-built atari_escape.rom in this folder.
-Build it from your own verified dumps:
-  python3 support/build_rom.py /path/to/eprom ./atari_escape.rom
-This project does not distribute ROMs.
+Put your self-built atari_escape.rom in this folder, under exactly that name --
+data.json declares it as a required slot and the Pocket asks for that filename.
+
+Build it from your own verified dumps of the MAME 'eprom' set. The tool lives in
+this project's source, not in this package:
+
+  git clone https://github.com/spoonelli/Atari-Dual-68k
+  cd Atari-Dual-68k
+  python3 support/build_rom.py /path/to/eprom.zip ./atari_escape.rom
+
+Python 3 is the only requirement. Every chip is CRC32-checked against MAME's
+known-good values; a wrong or incomplete set is refused rather than half-built.
+See docs/ROMS.md. This project does not distribute ROMs.
 
 High scores and operator settings are saved automatically to
   /Saves/eprom/common/atari_escape.sav
@@ -56,9 +68,62 @@ The Pocket creates that file on its own -- nothing to install. Delete it to
 reset the machine to a factory-fresh EEPROM.
 EOF
 
-# guard: refuse to package any ROM data
+# ---------------------------------------------------------------- ROM guards
+# The project rule is absolute: no ROM data in any package, ever. These four
+# checks were each provoked deliberately (support/test_package_guards.sh runs
+# the same provocations on demand) -- a guard nobody has tried is not a guard.
+#
+# Guard 1 is a REGRESSION TRIPWIRE, not an active check: no path in this script
+# stages a .rom, so on an unmodified script it can never fire. It catches the
+# specific regression of someone re-adding a `cp dist/assets/... -> Assets/`
+# line. It is blind to ROM data under any other name -- and that blindness was
+# not theoretical: with only guard 1 present, staging the real 2,228,224-byte
+# atari_escape.rom as `gfxdata.bin` produced a release zip containing the whole
+# ROM, byte-identical. Guards 2-4 exist because of that measurement. They
+# constrain the ACTUAL output by content rather than by filename.
+#
+# Guard 1: no file named like a ROM, anywhere in the tree.
 if find "$STAGE" -iname '*.rom' | grep -q .; then
     echo "!! REFUSING to package: ROM file found in staging tree" >&2
+    exit 1
+fi
+
+# Guard 2: the Assets tree ships EXACTLY the placeholder, whatever it is called.
+# This is where a ROM would land, and it is asserted by content, not by name.
+ASSET_FILES="$(cd "$STAGE" && find "Assets" -type f | sort)"
+if [ "$ASSET_FILES" != "Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" ]; then
+    echo "!! REFUSING to package: Assets/ must contain only the ROM placeholder." >&2
+    echo "   found:" >&2
+    echo "$ASSET_FILES" | sed 's/^/     /' >&2
+    exit 1
+fi
+
+# Guard 3: nothing but the bitstream may be big. Catches ROM data smuggled in
+# under a non-.rom name (the platform image is the largest legitimate asset).
+MAXK=600
+while IFS= read -r f; do
+    case "$f" in "$STAGE/$CORE_DIR/bitstream.rbf_r") continue;; esac
+    sz=$(( $(wc -c < "$f") / 1024 ))
+    if [ "$sz" -gt "$MAXK" ]; then
+        echo "!! REFUSING to package: ${f#$STAGE/} is ${sz} KB (limit ${MAXK} KB)." >&2
+        echo "   Only the bitstream may exceed this. Is this ROM data?" >&2
+        exit 1
+    fi
+done < <(find "$STAGE" -type f)
+
+# Guard 4: Cores/ and Platforms/ ship EXACTLY the expected manifest. Guards 2
+# and 3 together still leave a gap -- a small ROM region (the 16 KB chars chip,
+# say) dropped into Cores/ is neither in Assets/ nor over the size limit. The
+# expected list is derived from CORE_FILES above, so adding a core definition
+# file needs no change here.
+EXPECTED="$( { for f in $CORE_FILES icon.bin bitstream.rbf_r; do echo "$CORE_DIR/$f"; done
+               echo "Platforms/$PLATFORM.json"
+               echo "Platforms/_images/$PLATFORM.bin"; } | sort )"
+ACTUAL="$(cd "$STAGE" && find Cores Platforms -type f | sort)"
+if [ "$EXPECTED" != "$ACTUAL" ]; then
+    echo "!! REFUSING to package: Cores//Platforms/ do not match the expected manifest." >&2
+    echo "   unexpected or missing:" >&2
+    diff <(printf '%s\n' "$EXPECTED") <(printf '%s\n' "$ACTUAL") | sed 's/^/     /' >&2
     exit 1
 fi
 

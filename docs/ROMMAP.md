@@ -29,11 +29,26 @@ Chips are 27512-class 64 KB (0x10000) unless noted. `.50x` = even byte (D15–D8
 `136069-1040.7b` @ `0x00000`. Holds 6502 program **and** TMS5220 speech LPC data
 (JSA-I: YM2151 + TMS5220; no OKI6295, no separate sample ROM).
 
-## spr_tiles — motion-object graphics (region 0x100000, ROMREGION_INVERT)
+## spr_tiles — playfield tiles AND motion objects (region 0x100000, ROMREGION_INVERT)
 
 In order @ 0x10000 stride: 1020.47s, 1013.43s, 1018.38s, 1023.32s, 1016.76s, 1011.70s,
 1017.64s, 1022.57s, 1012.47u, 1010.43u, 1015.38u, 1021.32u, 1008.76u, 1009.70u,
 1014.64u, 1019.57u. **Note the INVERT** — bytes are bit-inverted vs file contents.
+
+**One region serves both layers.** MAME decodes it with a layout named
+`pfmolayout` and `GFXDECODE_ENTRY("spr_tiles", 0, pfmolayout, 256, 32)` is gfx
+index 0 — which is what `eprom_state::get_playfield_tile_info` sets
+(`tileinfo.set(0, ...)`) *and* what the motion-object device is handed. There is
+no separate playfield tile ROM on this board. (The `guts` sibling driver does
+split them into `sprites`/`tiles`; `eprom` does not.)
+
+Layout: 8×8, 4bpp, `RGN_FRAC(1,4)` — four 256 KB bit-planes, `planeoffset[0]` =
+`RGN_FRAC(0,4)` = the MSB of the pixel value. `xoffset = STEP8(0,1)` (bit 7 is
+the leftmost pixel), `yoffset = STEP8(0,8)`, 8 bytes per tile per plane, so
+32768 tiles.
+
+`support/build_rom.py` does **not** copy this region verbatim: it applies the
+INVERT and then repacks the planes into chunky 4bpp. See [`ROMS.md`](ROMS.md).
 
 ## chars — alphanumerics (region 0x04000)
 
@@ -44,14 +59,23 @@ In order @ 0x10000 stride: 1020.47s, 1013.43s, 1018.38s, 1023.32s, 1016.76s, 101
 `100t, 100v, 50f, 50p, 55p, 70j` — these are the address-decode/logic PALs; we
 reimplement their equations in RTL rather than load them.
 
-## eprom2 (clone)
+## eprom2 (clone) — **not** the same layout
 
-Same layout, all-rev-1 program ROMs: 1025.50a/1024.40a, 1027.50b/1026.40b,
-1029.50d/1028.40d, 1033.40k/1032.50k (main); 1035.10s/1034.10u (extra);
-1037.50e/1036.40e present. Graphics/sound shared with parent.
+All-rev-1 program ROMs: 1025.50a/1024.40a, 1027.50b/1026.40b, 1029.50d/1028.40d,
+1033.40k/1032.50k (main); 1035.10s/1034.10u (extra). Graphics/sound shared with
+the parent.
 
-## openFPGA loading plan
+It is **not** a drop-in layout swap: `eprom2` loads a *tenth* maincpu chip pair,
+1037.50e @ `0x80000` / 1036.40e @ `0x80001`, that the parent set does not have,
+filling maincpu `0x80000–0x9FFFF`. The parent's maincpu data ends at `0x7FFFF`.
+`support/build_rom.py` supports the parent `eprom` set only — its combined image
+has the extra CPU at `0x080000`, where `eprom2`'s tenth chip pair would land.
 
-Concatenate regions into data-slot payload(s) in the order the RTL expects (an
-`.mra`-style manifest builds this from the individual chips). Sprite region must apply
-the INVERT. Final mapping finalized alongside the memory-decode RTL (see ARCHITECTURE.md).
+## openFPGA image layout
+
+Implemented, not planned. `support/build_rom.py` concatenates the regions into
+one data-slot payload at the offsets in [`ROMS.md`](ROMS.md), applying the
+sprite INVERT **and** a planar→chunky 4bpp repack. The MiSTer front end reaches
+the same SDRAM contents from an `.mra` manifest plus an RTL-side repack, since
+MRA can express neither transform (see `docs/MISTER.md` on the `mister-port`
+branch).

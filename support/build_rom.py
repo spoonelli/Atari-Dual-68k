@@ -12,12 +12,17 @@ the user runs it against their own verified dumps.
 
 Combined image layout (SDRAM byte offsets):
   0x000000  maincpu   512 KB  Video CPU program (16-bit, big-endian interleaved)
-  0x080000  extra     512 KB  Extra CPU program (own + shared copy)
+  0x080000  extra     512 KB  Extra CPU program (own at +0, ROM_COPY at +0x60000,
+                              0x0A0000-0x0DFFFF zero-filled as MAME leaves it)
   0x100000  jsa6502    64 KB  JSA sound 6502 program + TMS5220 speech
-  0x110000  chars      16 KB  alphanumerics tiles
-  0x120000  sprites  1024 KB  motion-object graphics (bit-inverted, per ROMREGION_INVERT)
+  0x110000  chars      16 KB  alphanumerics tiles (padded to 0x10000)
+  0x120000  spr_tiles 1024 KB playfield AND motion-object tiles -- MAME's
+                              "spr_tiles" region, decoded by pfmolayout for both
+                              layers. TWO transforms vs the raw chips: bit-invert
+                              (ROMREGION_INVERT) then repack 4 bit-planes into
+                              chunky 4bpp. This is NOT a raw MAME region dump.
 
-Usage: build_rom.py [romset_dir] [out_file]
+Usage: build_rom.py [romset_dir_or_zip] [out_file]
   defaults: romset_dir = ../eprom (next to project), out_file = dist/assets/.../atari_escape.rom
 """
 import os, sys, zipfile, zlib
@@ -80,8 +85,16 @@ def main() -> int:
     repo = os.path.abspath(os.path.join(here, ".."))
     romdir = sys.argv[1] if len(sys.argv) > 1 else os.path.abspath(os.path.join(repo, "..", "eprom"))
     global _zip
-    if romdir.lower().endswith(".zip") and os.path.isfile(romdir):
-        _zip = zipfile.ZipFile(romdir)
+    if romdir.lower().endswith(".zip"):
+        if not os.path.isfile(romdir):
+            raise SystemExit(f"no such file: {romdir}")
+        try:
+            _zip = zipfile.ZipFile(romdir)
+        except zipfile.BadZipFile:
+            raise SystemExit(f"not a zip file: {romdir}")
+    elif not os.path.isdir(romdir):
+        raise SystemExit(f"no such romset directory: {romdir}\n"
+                         f"pass a folder of 136069-* chip dumps, or a MAME eprom.zip")
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
         repo, "dist", "assets", "atari_escape", "common", "atari_escape.rom")
     os.makedirs(os.path.dirname(out), exist_ok=True)
