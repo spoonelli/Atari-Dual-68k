@@ -194,3 +194,177 @@ BASE=0x050000 VS3=0 FP=3 ./sim/run_busrate.sh     # fastpath-> 6.015
 # the cadence meter's own gate
 ./sim/run_cadence_tb.sh
 ```
+
+---
+
+# 8. VSHAD3-112: the partial shadow, and re-deriving which half to keep
+
+BUILD 110's capture settled the argument section 4 could not. Un-shadowing is
+**not** free: two independent detectors at different scopes put BUILD 110 at
+**1.25e-3 sprite dropouts per robot-object-frame** against BUILD 108's
+**3.22e-4**, a 3.6-3.9x regression (p=8.1e-5, replicated across two separate
+BUILD 108 captures). The real board's 95% upper bound is 1.2e-3 from zero
+events in ~7,150 object-frames, so BUILD 110 sits *on* the bound and BUILD 108
+sits comfortably inside it. Section 4's unmeasurable risk was the real one: the
+extra fill traffic lands on the motion-object engine, the lowest-priority SDRAM
+client.
+
+BUILD 108 costs 25 M10K for that (283/308 -> 308/308, completely full). This
+build takes the middle: **half the shadow, and a runtime toggle.**
+
+## 8.1 Which half? Measured, and the intuitive answer is wrong
+
+The obvious guess is the low half, and the obvious guess is wrong by 18:1.
+
+The original sizing commit (`aca5510`) profiled "pages 0x53000 14% + 0x56000
+17%", one page in each half, which is where the 32 KB span came from. Re-derived
+against MAME 0.289 under *gameplay* (not attract), with a **wide** read tap on
+`:maincpu` — a narrow tap is blind to opcode fetches in 0.289 and this project
+has been bitten by that before — the split inside 0x50000-0x57FFF is:
+
+| page | run 1 (60 s) | run 2 (90 s) | run 3 (90 s, alt input style) |
+|---|---|---|---|
+| 0x50000 | 0 | 0 | 0 |
+| 0x51000 | 0 | 0 | 0 |
+| 0x52000 | 0 | 0 | 0 |
+| 0x53000 | 247,584 | 401,156 | 483,733 |
+| 0x54000 | 24,288 | 37,211 | 96,096 |
+| 0x55000 | 0 | 0 | 0 |
+| **0x56000** | **4,420,879** | **6,964,578** | **8,016,857** |
+| 0x57000 | 0 | 0 | 0 |
+
+| | LOW 0x50000-0x53FFF | HIGH 0x54000-0x57FFF |
+|---|---|---|
+| run 1 | 5.28% | **94.72%** |
+| run 2 | 5.42% | **94.58%** |
+| run 3 | 5.63% | **94.37%** |
+| independent re-check (see 8.2) | 5.53% | **94.47%** |
+| attract-mode control | 38.24% | 61.76% |
+
+**The HIGH half wins ~18:1, so vshad3 is now 16 KB at 0x54000-0x57FFF.**
+
+This is not a marginal call and it is not a single-window artifact: three
+gameplay windows, two input styles, plus an attract-mode control all put HIGH
+ahead. Three of the four LOW pages are read *exactly zero* times during
+gameplay — and the same buckets are non-zero in the attract control (91,506 and
+34,049), which proves the buckets work and gameplay simply never goes there.
+
+It also agrees with the disassembly already in this repo. `logic_cadence.lua`
+records the video CPU's per-frame body at `$4052E` as `jsr $5673E / jsr $56120`
+— **both in page 0x56000**, which is essentially the whole of the HIGH half's
+traffic. The measurement and the listing are two independent sources and they
+say the same thing.
+
+## 8.2 Proving the measurement could have come out the other way
+
+A profile that can only report one answer is worthless, so:
+
+* **The tap is not blind.** ~23,200-25,400 main-CPU accesses per video frame.
+  A narrow tap that misses opcode fetches reads a few hundred. Page 0x000000
+  reads 204,486 in the re-check, so the low buckets are live.
+* **It reads different things in different states.** The attract-mode control
+  gives 38/62, not 5/95, off the same code — a bucket set that always returned
+  95% regardless of what the machine was doing would show it here.
+* **It was reproduced independently.** A second script, written from scratch
+  with 1 KB buckets instead of 4 KB, a different gameplay window and different
+  input phasing, returns LOW 5.53% / HIGH 94.47% against the first script's
+  5.28-5.63%.
+* **Gameplay was confirmed, not assumed.** The alpha tilemap at `$3F4000` reads
+  `SECTOR: M / LEVEL: 01 / JAKE / DUKE` with live scores; `$16C990` ticks once
+  per video frame and the `$16CCD4=$50` body runs every frame. The attract
+  control instead reads `INSERT COIN(S)`.
+
+**Caveats, stated rather than buried.** A Lua tap cannot separate opcode
+fetches from table reads inside a ROM region, so these are "bus cycles touching
+this page" — which is exactly the right quantity for deciding what to shadow,
+but it is not a pure instruction profile. And the scripted player never got
+past LEVEL 01 / SECTOR M; a later level could in principle exercise other code,
+though it would have to overturn an 18:1 ratio to change the answer.
+
+**A correction to the comment at `escape_core.vhd:528`.** That comment claims
+85% of main-CPU time in 0x40000-0x57FFF with "page 0x4E000 alone = 51%".
+Neither half reproduces under gameplay: 66.8-67.8% for the region, and 0x4E000
+is 20.4-22.2%. The real hot page is **0x4D000** (25-27%). The old figures do
+not reproduce under the attract control either (61.6% / 16.1%), so their
+provenance is unclear. The comment is left in place — correcting it would touch
+code this change has no other reason to touch — but do not build on it.
+
+## 8.3 What shipped
+
+* **`vshad3` is 16 KB at 0x54000-0x57FFF**, `awidth => 13`. The decode is
+  `v_addr(23 downto 14) = "0000010101"` in **three** places that must agree —
+  `v_shad_rng`, `v_sel_shad3`, `vshad3_we` — and the first two are both keyed
+  on the single signal `v_s3_en` precisely so they cannot drift apart. Section
+  4's failure mode is real: `v_shad_rng='1'` with `v_sel_shad3='0'` suppresses
+  the fastpath *and* never reads the BRAM, so every fetch falls through to the
+  16-clock never-wedge watchdog.
+* **A runtime toggle**: Interact id 37, `0xA0000150`, "ROM Shadow 0x54000",
+  default **ON**. It gates the decode, not the BRAM and not the fill, so the
+  M10K is spent either way and the owner can A/B dropouts against cadence on
+  the device without a reflash. Inside `escape_core` it is resampled only while
+  `v_as_n='1'`, so flipping it cannot change which memory answers a bus cycle
+  already in flight.
+* **`sim/run_vshad3_tb.sh`** is the gate. See section 8.4.
+
+## 8.4 The gate, and how it was proven able to fail
+
+`sim/run_vshad3_tb.sh` runs the shipped `escape_core` in four configurations
+and requires three *different* specific answers, so no single wrong behaviour
+passes it:
+
+| BASE | VS3 | VS3ON | expect | what a wrong answer would mean |
+|---|---|---|---|---|
+| 0x054000 | 1 | 1 | 5.015 clk/cycle | the shadow is not serving the range it claims |
+| 0x054000 | 1 | 0 | 4.015 | the runtime toggle does nothing |
+| 0x050000 | 1 | 1 | 4.015 | the range was never actually halved |
+| 0x054000 | 0 | 1 | 4.015 | the compile-time generic no longer removes it |
+
+Any configuration reading **>= 6 clk/cycle** is failed outright as the
+"served by neither" signature — that is what the 16-clock watchdog fallback
+looks like from here, and it is the specific bug the file warns about.
+
+**Mutation-tested — the gate was proven able to fail, not assumed to be.** In a
+throwaway worktree off the shipped commit, `v_shad_rng`'s third term was
+reverted to the old 9-bit `"000001010"` (the full 32 KB) while `v_sel_shad3`
+kept the new 10-bit 16 KB compare. That one-line change — the entire diff
+against the shipped commit — is exactly the divergence 8.3 describes:
+0x50000-0x53FFF gets the fastpath suppressed *and* is never read from BRAM.
+
+| row | clean | mutant |
+|---|---|---|
+| 0x054000 VS3=1 VS3ON=1 | 5.015 ok | 5.015 ok |
+| 0x054000 VS3=1 VS3ON=0 | 4.015 ok | 4.015 ok |
+| **0x050000 VS3=1 VS3ON=1** | **4.015 ok** | **25.015 FAIL** |
+| 0x054000 VS3=0 VS3ON=1 | 4.015 ok | — |
+
+**25.015 clocks per bus cycle against 4.015** — a 6.2x slowdown on the video
+CPU, from a single wrong bit in an address compare, with nothing asserting and
+nothing mismatching. That is what "served by neither" costs, and it is why the
+gate trips on `>= 6.000` by name. Rows 1 and 2 still passed under the mutation,
+which matters: the gate is not simply failing everything it is shown.
+
+## 8.5 Fit and timing (CI run 32807811821, branch `vshad3-partial-112`)
+
+| | M10K | ALMs | worst setup | worst hold |
+|---|---|---|---|---|
+| BUILD 108, full 32 KB shadow | **308 / 308** (full) | — | — | — |
+| BUILD 110, no shadow (`tas-atomic`) | **283 / 308** | — | +5.698 | +0.103 |
+| **this build, 16 KB partial** | **299 / 308** (97%) | 13,562 / 18,480 (73%) | **+5.604** | **+0.087** |
+
+The partial shadow costs **16 M10K** where the full one cost 25, and leaves
+**9 blocks free** where the full one left zero. The `vshad3` instance itself
+reads `depth 8192, M10K=16` in the fit report's RAM summary — half the old
+`depth 16384, M10K=32` — so the halved decode and the halved instance did move
+together, which was the thing worth checking. **This is the number that decides
+whether the change was worth making, and at 299/308 it was: had it come back
+at 308/308 the change would have failed its purpose.**
+
+Timing: all **64** analysed clock/corner rows non-negative; the bitstream is
+publishable. Hold moved from +0.103 to +0.087, i.e. **-0.016 ns**, against this
+design's documented **±0.157 ns** perturbation sensitivity — a `BUILD_ID`
+constant alone has moved it 0.088 ns — so that movement is noise and **must not
+be read as caused by this change**. The sub-0.150 ns margin warning is not new
+and is not a failure: the baseline's +0.103 was already under the floor, and
+the tightest hold path is inside the PLL output counter
+(`altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk`), not in the shadow
+or decode path this change touches.

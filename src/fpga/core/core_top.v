@@ -777,6 +777,22 @@ end
                                       // noise = the game writes garbage (extra CPU)
     reg        tone_74      = 1'b0;   // 0xA0000040: 'Audio Test Tone' - splits
                                       // i2s-path faults from JSA-side silence
+    // VSHAD3-112: 0xA0000150 'ROM Shadow 0x54000' (interact.json id 37).
+    // Address/id chosen after a collision sweep of interact.json and of every
+    // bridge_addr decode in this file: 0x140 is the EEPROM autosave bit,
+    // 0x120-0x13C are claimed by the MIX-100 RANGE decode below
+    // (bridge_addr[31:8]==A00001 && [7:0] in 0x20..0x3C && [1:0]==0), and
+    // 0x150 is matched by nothing else. A range decode is exactly how a
+    // "free-looking" address silently double-decodes, so the sweep checked
+    // ranges, not just equalities.
+    // ON  = the 16 KB partial shadow serves 0x54000-0x57FFF from BRAM
+    //       (5 CPU clocks/fetch, no SDRAM fill) - fewer motion-object
+    //       starvations, which is the sprite-dropout axis
+    // OFF = those fetches take the 4-clock fastpath instead - faster CPU,
+    //       more fill pressure on the lowest-priority SDRAM client
+    // Default ON. The BRAM is instantiated and filled either way, so this
+    // costs no M10K and can be flipped on device without a reflash.
+    reg        vshad3_on_74 = 1'b1;   // 0xA0000150: 'ROM Shadow 0x54000'
     reg        ee_autoen_74 = 1'b1;   // 0xA0000140: 'EEPROM Autosave' (default ON)
                                       // (0x120-0x13C belong to the MIX-100
                                       //  per-FM-channel mixer)
@@ -789,6 +805,7 @@ end
     reg [22:0] soft_rst_ctr = 23'd0;
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000140) ee_autoen_74 <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000150) vshad3_on_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
@@ -833,6 +850,11 @@ synch_3 s_pfmap(pfmap_74, pfmap_s, clk_sys_7159);
     wire [2:0] prefd_s;
 synch_3 s_armor(armor_74, armor_s, clk_sdram);
 synch_3 s_irqst(irqstrict_74, irqstrict_s, clk_sys_7159);
+    // VSHAD3-112 partial-shadow runtime toggle, into the CPU domain. Inside
+    // escape_core it is resampled only while the video CPU's AS is high, so
+    // it cannot change which memory answers a bus cycle already in flight.
+    wire vshad3_on_s;
+synch_3 s_vshad3(vshad3_on_74, vshad3_on_s, clk_sys_7159);
 synch_3 s_inpb(inprobe_74, inprobe_s, clk_sys_7159);
 synch_3 #(.WIDTH(3)) s_prefd(prefd_74, prefd_s, clk_sys_7159);
 synch_3 s_pfprobe(pfprobe_74, pfprobe_s, clk_sys_7159);
@@ -2731,17 +2753,23 @@ hall_stick hall_p2 (
 // the hardware does not have - they are kept only for A/B. The entity's own
 // default is still 2 and is overridden here; read THIS line, not the default.
 // (The previous comment here claimed mode 2 while the line passed 0.)
-// VSHAD3-107 EVALUATION BUILD: vshad3 (32 KB at 0x50000-0x57FFF, 32 M10K) is
-// OFF here, so those addresses take the 4-clock fastpath instead of the
-// 5-clock shadow BRAM path. Measured basis, predicted gain and the one risk
-// I could not measure: docs/VSHAD3.md. This branch exists to be built and
-// A/B'd on hardware against HUD page 5; the shipping branch leaves VSHAD3_EN
-// at its default of 1 and is bit-identical to BUILD 107 in this respect.
+// VSHAD3-112 PARTIAL SHADOW. History: BUILD 108 shipped the full 32 KB
+// shadow at 0x50000-0x57FFF (308/308 M10K, dropouts 3.22e-4); BUILD 109
+// turned it off for the CPU clock (283/308, never below 0.652 cadence);
+// BUILD 110's capture then measured dropouts at 1.25e-3, 3.6-3.9x worse and
+// sitting ON the real board's 95% upper bound. Mechanism in docs/VSHAD3.md:
+// un-shadowing moves the video CPU from issuing SDRAM fills on ~39% of its
+// bus cycles to ~70%, and motion objects are the lowest-priority client.
+// This build takes the middle: VSHAD3_EN=1 instantiates HALF the shadow -
+// 16 KB at 0x54000-0x57FFF, the busier half by the re-derived MAME execution
+// profile - for roughly half the BRAM, and vshad3_on makes it a runtime
+// toggle so the two behaviours can be A/B'd on the device without a reflash.
+// The BRAM is filled either way, so the toggle costs no M10K.
 // CPU-110: CPU_TYPE is overridden here as well. The entity's own default is
 // also 1 (68010 / dedicated cabinet), but read THIS line, not the default --
 // and the localparam above is where the JAMMA/68000 setting lives.
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
-              .VSHAD3_EN(0),
+              .VSHAD3_EN(1),
               .CPU_TYPE(CPU_TYPE),
               .TASLOCK_EN(TASLOCK_EN)) ecore (
     .clk        ( clk_sys_7159 ),
@@ -2793,6 +2821,7 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .step_btn   ( step_s ),
     .skip_test  ( skip_test_s ),
     .irq_strict ( irqstrict_s ),
+    .vshad3_on  ( vshad3_on_s ),
     .audio_l    ( core_audio_l ),
     .audio_r    ( core_audio_r ),
     .p2_buttons ( {cont2_key[4]|cont2_key[8], 1'b0, cont2_key[5]|cont2_key[8], cont2_key[7]|cont2_key[8]} ),

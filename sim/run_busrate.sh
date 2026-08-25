@@ -6,13 +6,24 @@
 #   BASE=0x050000 VS3=1 ./sim/run_busrate.sh   # loop inside vshad3 -> BRAM
 #   BASE=0x050000 VS3=0 ./sim/run_busrate.sh   # same code, fastpath
 #
-# Env: FPEN FP SHAD VS3 LAT WARM CLKS BASE TAG
+# VSHAD3-112: VS3 is the COMPILE-TIME generic (is the BRAM there at all);
+# VS3ON drives the runtime vshad3_on port (is the decode enabled). The shadow
+# is now 16 KB at 0x54000-0x57FFF, so BASE=0x050000 is OUTSIDE it:
+#
+#   BASE=0x054000 VS3=1 VS3ON=1 ./sim/run_busrate.sh   # shadow      -> ~5.015
+#   BASE=0x054000 VS3=1 VS3ON=0 ./sim/run_busrate.sh   # toggled off -> ~4.015
+#   BASE=0x050000 VS3=1 VS3ON=1 ./sim/run_busrate.sh   # low half    -> ~4.015
+#
+# sim/run_vshad3_tb.sh runs exactly those as a pass/fail gate.
+#
+# Env: FPEN FP SHAD VS3 VS3ON LAT WARM CLKS BASE TAG
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="ghdl/ghdl:ubuntu20-mcode"
 FPEN="${FPEN:-1}"; FP="${FP:-1}"; SHAD="${SHAD:-1}"; VS3="${VS3:-1}"
+VS3ON="${VS3ON:-1}"
 LAT="${LAT:-2}"; WARM="${WARM:-20000}"; CLKS="${CLKS:-200000}"
-BASE="${BASE:-0x050000}"; TAG="${TAG:-b$BASE-v$VS3-fp$FP}"
+BASE="${BASE:-0x050000}"; TAG="${TAG:-b$BASE-v$VS3-on$VS3ON-fp$FP}"
 
 python3 "$REPO_ROOT/sim/tools/make_busrate_hex.py" "$BASE"
 
@@ -34,6 +45,6 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work ${TPMOUNT[@]+"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W tb_escape_busrate >/dev/null
   ghdl -r \$STD --workdir=\$W tb_escape_busrate --ieee-asserts=disable --stop-time=60ms \
-    -gG_FPEN=$FPEN -gG_FP=$FP -gG_SHAD=$SHAD -gG_VS3=$VS3 -gG_LAT=$LAT \
+    -gG_FPEN=$FPEN -gG_FP=$FP -gG_SHAD=$SHAD -gG_VS3=$VS3 -gG_VS3ON=$VS3ON -gG_LAT=$LAT \
     -gG_WARM=$WARM -gG_CLKS=$CLKS -gG_HEX=sim/work/busrate_words.hex
 "
