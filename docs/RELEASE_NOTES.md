@@ -67,6 +67,7 @@ sound board delivers music, effects and speech in real time.
 | **Controls** | Emulated hall-effect stick via the ADC0809, including the game's own in-game calibration screens. Dock analog stick takes priority when deflected; invert/swap/deadzone options in the menu. |
 | **High scores** | **Persist across a power cycle.** The emulated 2804 EEPROM is snapshotted to the SD card ~1.17 s after the game stops writing it, so a score survives an unclean power-off, not just a clean exit. |
 | **Boot** | Clean picture. The diagnostic HUD is off by default and, from build 114, is gated behind **Developer HUD** in the core menu -- L1 does nothing until that is ticked. |
+| **Build ID** | From build 115 the on-screen build stamp follows the HUD gate, so a clean screen carries no plate. Tick **Developer HUD** to see it. |
 
 ### Verified exactly against the reference
 
