@@ -276,6 +276,36 @@ visible artefacts while a mistimed read returns plausible-looking wrong data.
   still the right trade: losing ~2% of sprite bandwidth beats corrupting the
   memory the sprites are stored in.
 
+  **What the bandwidth cost actually cost, measured (REFRESH-112).** The +1.94
+  pp is occupancy, not lost work, so both affected clients were measured rather
+  than argued about:
+
+  * **Playfield: zero.** `sim/run_mister_pf_tb.sh` drives the real
+    `escape_mister.v` + `sdram_simple.v` through one frame. At `224/48` and at
+    `160/48` it grants **and completes 13,794 fetches** — byte-identical. The
+    playfield prefetches and tolerates sharing, and it has enough slack to
+    absorb the extra refreshes outright.
+  * **Sprites: not directly measurable on this branch, but bounded.** No bench
+    here puts the MO client on the real arbiter — `tb_mister_pf.v`'s stub drives
+    no MO (it reports `motion-object fetches: 0`), and `sim/run_mob_perf.sh`
+    never instantiates `sdram_simple` at all; it takes fetch latency as a free
+    parameter `GFX_LAT`. So the sprite cost of this change is **not measured**,
+    and this document does not claim it is. What `run_mob_perf.sh` does give is
+    a sensitivity curve for how much added latency the MO engine can absorb
+    (`XSCROLL=50 YSCROLL=157`):
+
+    ```
+    GFX_LAT=8    coverage 99.71%   (12078 px dumped, 2 missing)
+    GFX_LAT=16   coverage 99.71%   (12078 px dumped, 2 missing)   <- identical
+    GFX_LAT=31   coverage 93.51%   (11329 px dumped, 751 missing)
+    ```
+
+    Doubling MO fetch latency from 8 to 16 clocks costs **nothing** — the two
+    runs agree pixel for pixel — and starvation only appears somewhere between
+    16 and 31. Adding ~1.94 pp of bus occupancy is far short of doubling MO
+    fetch latency, so the risk is small; it is bounded, not eliminated. The
+    honest next step is a bench that puts MO on the real MiSTer arbiter.
+
   **Gate:** `sim/run_sdram_refresh_tb.sh` measures worst-case row interval
   against the real FSM and carries both out-of-spec policies (250/48 and this
   branch's own 224/48) as negative controls that must be reported FAIL.
