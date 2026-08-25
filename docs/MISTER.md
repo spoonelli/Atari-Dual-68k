@@ -574,7 +574,7 @@ change at all.
 | **CADENCE-107** `dbg_cadv` / `dbg_cadw` meters | `escape_core.vhd` | Compiled, outputs left open (no HUD here) |
 | **`support/check_slack.py`** multi-corner slack gate | `support/` | CI change; replaces `src/mister/check_slack.py`, which is deleted |
 | **`support/report_hold_paths.tcl`** | `support/` | CI change, plus a fix: it hardcoded `project_open ap_core` and so had never run for MiSTer |
-| Benches `run_stain_tb.sh`, `run_sdram_refresh_tb.sh`, `run_vshad3_tb.sh`, `run_cadence_tb.sh`, `run_busrate.sh`, `run_pf_reset_tb.sh` | `sim/` | Three of them are now CI steps; see below |
+| Benches `run_stain_tb.sh`, `run_sdram_refresh_tb.sh`, `run_vshad3_tb.sh`, `run_cadence_tb.sh`, `run_busrate.sh`, `run_pf_reset_tb.sh` | `sim/` | Three are cheap pre-Quartus steps, one is a parallel job; see below |
 
 ### The stain substitution is equivalence-checked, not eyeballed
 
@@ -688,8 +688,21 @@ where someone would go to change them.
 
 ### CI: what the MiSTer workflow now gates on
 
-`.github/workflows/build-mister.yml` runs three shared-RTL benches ahead of
-Quartus, each driving a file this workflow actually compiles:
+`.github/workflows/build-mister.yml` has **two jobs**. `build` runs the cheap
+shared-RTL benches ahead of Quartus; `vshad3` runs the slow one alongside it.
+
+**Why the split, because it is a mistake worth not repeating.** `tb_vshad3`
+was briefly a step in `build`, between the cheap gates and the compile. The
+other three cost **0 s, 47 s and 11 s** on the hosted runner; `tb_vshad3` cost
+**20+ minutes** (measured, run `32815564898`), because it is a GHDL elaboration
+of the whole dual-68000 machine four configurations deep, not a boundary check.
+Sitting in the *"fast fail before spending 30 minutes in Quartus"* slot it
+roughly doubled the time to a bitstream and contributed nothing to that slot's
+purpose. As a parallel job it still blocks the workflow's overall conclusion,
+so it gates exactly as hard. **Keep anything over ~2 minutes out of the
+pre-Quartus list.**
+
+Each bench drives a file this workflow actually compiles:
 
 | Step | Gates | Proven able to fail by |
 |---|---|---|
@@ -697,7 +710,7 @@ Quartus, each driving a file this workflow actually compiles:
 | `run_mister_pf_tb.sh` | playfield channel is serviced | the BUILD 105 A/B table above (0/0 vs 13 794/13 794) |
 | `run_stain_tb.sh` | line-buffer ghost + stain automaton | reverting the self-clearing readout → 226 mismatching px, all in cases D and E |
 | `run_sdram_refresh_tb.sh` | refresh interval vs JEDEC | its own in-run negative controls report 250/48 at 8.7721 µs and 224/48 at 8.0457 µs as FAIL |
-| `run_vshad3_tb.sh` | partial shadow decode + runtime toggle | the toggle changes measured fetch cost 5.015 → 4.015 clk; a still-32 KB range would score 5.015 at `0x50000` |
+| `run_vshad3_tb.sh` (parallel job) | partial shadow decode + runtime toggle | the toggle changes measured fetch cost 5.015 → 4.015 clk; a still-32 KB range would score 5.015 at `0x50000` |
 | `support/check_slack.py` | negative slack, any corner | a fixture whose only negative row is at the third corner |
 
 **Known CI gap, stated rather than hidden:** `sim/run_pf_reset_tb.sh` — the

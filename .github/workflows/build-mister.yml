@@ -16,6 +16,37 @@ on:
   workflow_dispatch:
 
 jobs:
+  # VSHAD3-112, in its OWN job so it runs alongside Quartus instead of in front
+  # of it.
+  #
+  # It was briefly a step in `build`, sitting between the cheap gates and the
+  # compile, and that was a mistake worth recording: the other three
+  # pre-Quartus gates cost 0s, 47s and 11s, and this one cost TWENTY-PLUS
+  # MINUTES on the hosted runner (measured, run 32815564898). Putting it in the
+  # "fast fail before spending 30 minutes in Quartus" slot roughly doubled the
+  # time to a bitstream while adding nothing to that slot's purpose - it is a
+  # GHDL elaboration of the whole dual-68000 machine, four configurations deep,
+  # not a boundary check.
+  #
+  # As a parallel job it still blocks the workflow's overall conclusion, so it
+  # gates exactly as hard, and the bitstream is ready when Quartus says so.
+  vshad3:
+    name: Partial ROM shadow + runtime toggle (tb_vshad3)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      # The 16 KB partial shadow decode and its runtime toggle both live in
+      # escape_core.vhd, which the MiSTer build compiles, and the MiSTer top
+      # now drives vshad3_on from CONF_STR bit 8. Each of the four rows
+      # measures CPU clocks per fetch, so each is a behavioural discriminator
+      # rather than an assertion: 5.015 on the BRAM path, 4.015 on the
+      # fastpath.
+      - name: Partial ROM shadow + runtime toggle
+        run: ./sim/run_vshad3_tb.sh
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -39,9 +70,14 @@ jobs:
         run: ./sim/run_mister_pf_tb.sh
 
       # ---------------------------------------------------------------------
-      # BUILD 112: the shared-RTL gates. Every bench below drives a file this
+      # BUILD 112: the CHEAP shared-RTL gates. Each drives a file this
       # workflow actually compiles into the DE10-Nano bitstream, which is the
-      # only reason they belong in THIS workflow rather than the Pocket one.
+      # only reason they belong in THIS workflow rather than the Pocket one,
+      # and each finishes in seconds, which is the only reason they belong
+      # AHEAD of Quartus. Measured on the hosted runner: check_ports 0s,
+      # tb_mister_pf 47s, tb_stain 11s, tb_sdram_refresh 8s. The slow one
+      # (tb_vshad3, 20+ min) is a parallel job above - keep it that way, and
+      # keep anything else over ~2 minutes out of this list.
       #
       # Deliberately NOT added: sim/run_pf_reset_tb.sh. It slices blocks out
       # of src/fpga/core/core_top.v, which files.qip does not compile - it is
@@ -65,12 +101,6 @@ jobs:
       # shipping 160/48, so it cannot silently match nothing.
       - name: SDRAM refresh interval vs JEDEC (tb_sdram_refresh)
         run: ./sim/run_sdram_refresh_tb.sh
-
-      # VSHAD3-112. The 16 KB partial shadow decode and its runtime toggle
-      # both live in escape_core.vhd, which this build compiles, and the
-      # MiSTer top now drives vshad3_on from CONF_STR bit 8.
-      - name: Partial ROM shadow + runtime toggle (tb_vshad3)
-        run: ./sim/run_vshad3_tb.sh
 
       - name: Compile Arcade-Escape
         run: |
