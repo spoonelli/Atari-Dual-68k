@@ -141,7 +141,7 @@
         "id": 38,
         "type": "check",
         "enabled": true,
-        "address": "0xA0000154",
+        "address": "0xA0000160",
         "persist": false,
         "writeonly": true,
         "defaultval": 0,
