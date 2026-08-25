@@ -32,8 +32,9 @@ module sdram_simple #(
     //
     // Worst-case row interval is NOT interval+DEFER_CAP: the FSM must also
     // finish whatever transaction is in flight when the cap expires, and clear
-    // the read ack. Measured by sim/tb/tb_sdram_refresh.v, which is the only
-    // thing that should be used to justify a value here.
+    // the read ack. It is interval+DEFER_CAP+16, measured by
+    // sim/tb/tb_sdram_refresh.v, which is the only thing that should be used to
+    // justify a value here.
     parameter REFRESH_INTERVAL = 160,
     parameter DEFER_CAP        = 48
 ) (
@@ -146,7 +147,7 @@ module sdram_simple #(
             // When the deferral cap expires the FSM may be part-way through a
             // transaction, and a precharge-armored CPU read (rd_pre) takes 15
             // clocks; the read-ack cleanup in S_IDLE costs one more. So the
-            // true worst case is REFRESH_INTERVAL + DEFER_CAP + 15, measured
+            // true worst case is REFRESH_INTERVAL + DEFER_CAP + 16, measured
             // by sim/tb/tb_sdram_refresh.v against the real FSM rather than
             // computed on paper. Do not re-derive it by hand; run the bench.
             if (refresh_ctr == REFRESH_INTERVAL[9:0]) begin
