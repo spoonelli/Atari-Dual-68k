@@ -3,9 +3,10 @@
 // Instantiates the REAL third_party psram.sv controller against a behavioral
 // 70ns ADmux PSRAM chip model, and replicates core_top's pixel-domain PF
 // pipeline (queue -> A/B ping-pong channels -> slot ring -> extraction) plus
-// the sdram-domain unified CRAM service chain, at the real 12:1 clock ratio
-// (85.909MHz service / 7.159MHz pixel). MO interference is injected at game
-// cadence (one 2-read fetch per 8-pixel slot) to model sprite traffic.
+// the sdram-domain unified CRAM service chain, at the real 5:1 clock ratio
+// (35.795455MHz service / 7.159091MHz pixel). A competing CRAM client is
+// injected at MO_BURST 2-read fetches per 8-pixel slot, modelling the
+// drain/fill and forensics traffic the playfield shares that controller with.
 //
 // The CRAM model is preloaded with a synthetic pattern where word[a] is a
 // function of the address, and the map holds a distinct tile in every cell -
@@ -16,20 +17,84 @@
 // the one-in-flight design on hardware (build 39) shows up directly here.
 //
 // Run:  ./sim/run_pf_tb.sh          (docker iverilog wrapper)
+//
+// ---------------------------------------------------------------------------
+// PFSIM-113: this rig had NEVER passed since it was created in 3d03b63. Three
+// independent faults, all of them in the RIG, none in the shipped RTL:
+//
+//   (1) CHECKER PATTERN. check_pf_frame.py modelled the CRAM contents as
+//       low16(a * 2654435761) while the chip model here filled cmem[k]=k[15:0].
+//       Resolved in favour of the hash - see CRAM FILL PATTERN below.
+//   (2) CHECKER MAP LAYOUT. check_pf_frame.py computed the map index
+//       row-major, (ycell<<6)|xcell. The RTL has been COLUMN-major,
+//       (xcell<<6)|ycell, since LANE3j - i.e. the checker was written against
+//       the pre-LANE3j convention that LANE3j's own comment calls out as the
+//       bug that "transposed every map lookup since v13".
+//   (3) CLOCK RATIO (this file). The service clock was 85.909MHz with a /12
+//       divider. The real core runs psram on clk_sdram = 35.795455MHz against
+//       clk_sys_7159 = 7.159091MHz - a 5:1 same-PLL ratio (see CLKFIX-106 at
+//       core_top.v:1080 and psram #(.CLOCK_SPEED(35.795455)) at :1088).
+//       The rig therefore handed the PF path ~2.4x the service bandwidth the
+//       hardware has. Channel A alone always retired before the next cell's
+//       request arrived, so channel B was NEVER armed and the entire
+//       two-in-flight A/B ping-pong - the only thing this rig exists to
+//       validate - went unexercised (issueB=0 in every run ever recorded).
+//
+// (2) is why the offset search found nothing; (3) plus the arbiter/stimulus
+// faults noted at the interference generator and the read-start chain below
+// are why issueB stayed 0.
+//
+// inflA=1 in the end-of-run debug line was NEVER a stuck flag, and this rig is
+// not an instance of the PFRESET-107 no-reset failure. doneA is counted in the
+// sdram domain while inflA is cleared in the pixel domain a CDC stage later,
+// so inflA=1 alongside issueA==doneA is the expected skew at an arbitrary
+// sampling instant. It is also just a snapshot: with the rig fixed, inflA is
+// observed both set and clear across the run and the queue keeps draining.
+// ---------------------------------------------------------------------------
 `timescale 1ns/1ps
 
 module tb_pf_cram;
     parameter SINGLE_CH = 0;   // 1 = old one-in-flight design (control run)
     parameter REAL_DATA = 0;   // 1 = load real gfx (cram_words.hex) + real map (pf_map.hex)
-    parameter MO_BURST  = 2;   // MO fetches per 8px slot (attract worst case)
-    // ---------------- clocks: 85.909MHz service, /12 pixel (real PLL ratio)
-    reg clk85 = 0;
-    always #5.82 clk85 = ~clk85;            // 11.64ns period
-    reg [3:0] div = 0;
-    reg clk_px = 0;
-    always @(posedge clk85) begin
-        if(div == 4'd5) begin div <= 0; clk_px <= ~clk_px; end
-        else div <= div + 4'd1;
+    // Competing-CRAM-client burst length: EXTRA 2-word pairs the competitor
+    // keeps the controller for after the first, once granted (so 1 = two
+    // pairs = four reads per grant).
+    //
+    // PFSIM-113 - how this value was chosen, since "the number that makes the
+    // gate pass" is exactly the wrong way to pick it. The operating point is
+    // the HIGHEST contention at which the design's own flow control is not
+    // overrun, i.e. at which every enqueued cell still gets issued and none is
+    // dropped at the queue. That is an objective criterion, and the checker
+    // enforces it directly (issueA+issueB must equal the enqueued-cell count),
+    // so it cannot be quietly detuned later. Measured, dumped-frame counts:
+    //
+    //     MO_BURST   issueA   issueB   issueA+issueB   (13794 enqueued)
+    //        1        9773     4021       13794   <- no drops, B armed 29%
+    //        2        9579     2432       12011   <- queue overflowing
+    //        3        7749     2546       10295   <- queue overflowing
+    //        4        6954        3        6957   <- queue overflowing
+    //        6        4675     4558        9233   <- queue overflowing
+    //
+    // At 2 and above the PF queue drops fetches, and the mismatches that
+    // follow are raw starvation rather than anything about the A/B pair, so
+    // they would not be attributable evidence either way. 1 is the strongest
+    // legitimate stress: it delays enough PF fetches past their 8-pixel cell
+    // deadline to route 29% of them through channel B.
+    parameter MO_BURST  = 1;
+    // ---------------- clocks: 35.795455MHz service, 7.159091MHz pixel (5:1)
+    // These are mf_pllbase siblings on hardware (outclk_2 and the 7.159 core
+    // clock), so their edges are phase-locked. Both are derived here from one
+    // 2x master so the two derived clocks always update in the same NBA region
+    // and downstream sampling is deterministic - no same-timestep clock race.
+    reg clk2x = 0;
+    always #6.984127 clk2x = ~clk2x;        // 71.590909MHz, 13.968254ns period
+    reg [2:0] pdiv = 0;
+    reg clk_sd = 0;                          // 35.795455MHz  (was clk85)
+    reg clk_px = 0;                          //  7.159091MHz
+    always @(posedge clk2x) begin
+        clk_sd <= ~clk_sd;                   // /2
+        if(pdiv == 3'd4) begin pdiv <= 0; clk_px <= ~clk_px; end
+        else pdiv <= pdiv + 3'd1;            // /10  => clk_sd/clk_px = 5
     end
 
     // ---------------- video counters (copied semantics from core_top)
@@ -70,9 +135,33 @@ module tb_pf_cram;
         if (REAL_DATA) begin
             $readmemh("sim/build/cram_words.hex", cmem);
         end else begin
-            // word[a] = low 16 bits of address - address-unique pattern
+            // CRAM FILL PATTERN (PFSIM-113) - MUST stay in lockstep with
+            // cram_word() in sim/tools/check_pf_frame.py. Knuth's 32-bit
+            // multiplicative hash, truncated to 16 bits:
+            //
+            //     word[a] = low16(a * 2654435761)
+            //
+            // The rig previously filled cmem[k]=k[15:0] while the checker
+            // already modelled the hash. Resolved toward the hash, not the
+            // identity, because the identity pattern is STRUCTURED: adjacent
+            // addresses give adjacent words, so a wrong-address bug returns a
+            // near-correct value that still lines up with a neighbouring
+            // cell's expected word under a shifted column offset. Measured on
+            // the identity dump: the global-offset search scored 128/296 at a
+            // 16-cell shift and 56/296 at 12, purely from that structure -
+            // i.e. a real 1-cell addressing error had a plausible chance of
+            // being absorbed by the offset search instead of reported. The
+            // multiplier is odd, so a -> low16(a*K) is a bijection mod 2^16
+            // and every distinct address in a 64K window gets an unrelated
+            // word; spurious partial matches collapse to noise.
+            //
+            // COST of this choice: you can no longer read the fetch address
+            // straight off cram_dq in a waveform dump, which was genuinely
+            // handy when debugging the address arithmetic. Flip both this
+            // loop and cram_word() back to the identity together if you need
+            // that for a debug session - never one without the other.
             for(k = 0; k < (1<<21); k = k + 1)
-                cmem[k] = k[15:0];
+                cmem[k] = (k * 32'd2654435761) & 32'h0000FFFF;
         end
     end
     reg [15:0] mapmem [0:4095];
@@ -98,8 +187,8 @@ module tb_pf_cram;
     reg         cram_write_en = 0;
     reg  [15:0] cram_din = 0;
 
-    psram #(.CLOCK_SPEED(85.909)) cram0 (
-        .clk        ( clk85 ),
+    psram #(.CLOCK_SPEED(35.795455)) cram0 (
+        .clk        ( clk_sd ),
         .bank_sel   ( 1'b0 ),
         .addr       ( cram_addr ),
         .write_en   ( cram_write_en ),
@@ -124,27 +213,55 @@ module tb_pf_cram;
         .cram_lb_n  ( cram0_lb_n )
     );
 
-    // ---------------- MO interference generator (pixel domain)
-    // one MO fetch per 8-pixel slot on every active line - worst-case cadence
+    // ---------------- competing-CRAM-client interference generator (pixel dom)
+    //
+    // PFSIM-113. This was written as an "MO interference" model, back when MO
+    // gfx was fetched from CRAM. On the shipped mo-sdram branch it is not:
+    // core_top.v:1561 says "MO gfx CRAM FSM removed - MO is served from SDRAM
+    // ...; CRAM belongs to PF + forensics". So this generator no longer models
+    // MO. What it DOES still model, and what CRAM genuinely still has to share
+    // with the playfield today, is the other read/write traffic on that
+    // controller: the cq_n drain/fill queue and the cst forensics reader
+    // (core_top.v:1386, :1498, :1520). Those hold strict priority over PF
+    // reads - a PF read cannot start unless cq_n==0 - so competing traffic can
+    // and does push a PF fetch past its cell deadline. Covering that push is
+    // the ENTIRE purpose of the A/B pair, so the rig has to generate it.
+    //
+    // Two bugs fixed here:
+    //   * LIVELOCK. The old generator re-armed only when mo_burst_left==0 and
+    //     decremented only on a completion. Once the arbiter starved this
+    //     client (see the round-robin fix in the service chain below), no
+    //     completion ever arrived, mo_burst_left stuck non-zero, and the
+    //     generator went permanently silent - measured: cmg fell from 1842 to
+    //     3 for the whole run once the clock ratio was corrected. A rig whose
+    //     stimulus can switch itself off is a rig that reports a clean frame
+    //     for a path it never drove.
+    //   * PROTOCOL. It could toggle mo_gfx_req again while a request was still
+    //     outstanding, which the toggle-handshake CDC cannot represent.
+    // The generator now keeps exactly ONE request outstanding, refreshes its
+    // per-slot allowance unconditionally, and therefore cannot wedge.
     reg mo_gfx_req = 0;
     reg [23:0] mo_gfx_addr = 24'h130000;
     wire mg_done_s;
     reg  mg_done_px_d = 0;
     wire mg_done_px_d_issue = mg_done_s;  // old gate: block issue while MO pending
-    reg  [1:0] mo_burst_left = 0;
+    reg  [3:0] mo_left = 0;
+    reg        mo_busy = 0;
     always @(posedge clk_px) begin
         mg_done_px_d <= mg_done_s;
-        if(mg_done_s != mg_done_px_d && mo_burst_left != 0) begin
-            mo_gfx_addr <= mo_gfx_addr + 24'd4;
+        if(mo_busy) begin
+            if(mg_done_s != mg_done_px_d) mo_busy <= 1'b0;
+        end else if(mo_left != 4'd0) begin
+            mo_gfx_addr <= 24'h130000 + {visible_y[7:0], 2'd0} + {mo_left, 2'd0};
             mo_gfx_req  <= ~mo_gfx_req;
-            mo_burst_left <= mo_burst_left - 2'd1;
+            mo_busy     <= 1'b1;
+            mo_left     <= mo_left - 4'd1;
         end
-        if(vis_x[2:0]==3'd5 && mo_burst_left == 0
-           && y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE) begin
-            mo_gfx_addr <= 24'h130000 + {visible_y[7:0], 2'd0};
-            mo_gfx_req  <= ~mo_gfx_req;
-            mo_burst_left <= MO_BURST[1:0];
-        end
+        // allowance refresh LAST so it wins a same-cycle collision with the
+        // decrement above - the allowance must never be silently swallowed.
+        if(vis_x[2:0]==3'd5
+           && y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE)
+            mo_left <= MO_BURST[3:0];
     end
 
     // ---------------- pixel-domain PF pipeline (replicated from core_top)
@@ -274,26 +391,78 @@ module tb_pf_cram;
         endcase
     end
 
-    // ---------------- CDC (real synch_3) + sdram-domain service chain
+    // ---------------- CDC + sdram-domain service chain
+    // PFSIM-113: the rig used synch_3 (three stages) in BOTH directions. The
+    // shipped RTL does not: clk_sys_7159 and clk_sdram are same-PLL siblings
+    // and SDSCHED-74 (core_top.v:1277) crosses them on SINGLE capture FFs -
+    // see vg_reqA_s_q/vg_reqB_s_q at core_top.v:1341 and vg_doneA_s_q/
+    // vg_doneB_s_q at :1348. Three stages added ~280ns of phantom return
+    // latency per PF fetch (2 extra clk_px) that the hardware does not have,
+    // i.e. the rig was modelling a SLOWER path than the one that ships. Now
+    // matched to the RTL.
     wire vg_reqA_s, vg_reqB_s, mg_req_s;
     reg  vg_doneA_85 = 0, vg_doneB_85 = 0, mg_done_85 = 0;
-    synch_3 s_vgA(vg_reqA_px, vg_reqA_s, clk85);
-    synch_3 s_vgB(vg_reqB_px, vg_reqB_s, clk85);
-    synch_3 s_mg (mo_gfx_req, mg_req_s,  clk85);
-    synch_3 s_vgdA(vg_doneA_85, vg_doneA_s, clk_px);
-    synch_3 s_vgdB(vg_doneB_85, vg_doneB_s, clk_px);
-    synch_3 s_mgd (mg_done_85,  mg_done_s,  clk_px);
+    reg  vg_reqA_s_q = 0, vg_reqB_s_q = 0, mg_req_s_q = 0;
+    always @(posedge clk_sd) begin
+        vg_reqA_s_q <= vg_reqA_px;
+        vg_reqB_s_q <= vg_reqB_px;
+        mg_req_s_q  <= mo_gfx_req;
+    end
+    assign vg_reqA_s = vg_reqA_s_q;
+    assign vg_reqB_s = vg_reqB_s_q;
+    assign mg_req_s  = mg_req_s_q;
+    reg  vg_doneA_s_q = 0, vg_doneB_s_q = 0, mg_done_s_q = 0;
+    always @(posedge clk_px) begin
+        vg_doneA_s_q <= vg_doneA_85;
+        vg_doneB_s_q <= vg_doneB_85;
+        mg_done_s_q  <= mg_done_85;
+    end
+    assign vg_doneA_s = vg_doneA_s_q;
+    assign vg_doneB_s = vg_doneB_s_q;
+    assign mg_done_s  = mg_done_s_q;
 
     reg vg_reqA_last = 0, vg_reqB_last = 0, mg_req_last = 0;
     reg [1:0] cvg_ph = 0, cmg_ph = 0;
     reg [15:0] cvg_hi, cmg_hi;
     reg cvg_ch = 0;
+    reg [3:0] cmg_burst = 0;               // competitor's remaining burst pairs
+    reg vgmg_last_mo = 0;                  // round-robin state (see below)
 
-    always @(posedge clk85) begin
-        // unified CRAM read-start chain (drain/cst omitted: mem preloaded)
+    always @(posedge clk_sd) begin
+        // Unified CRAM read-start chain (drain/cst omitted: mem preloaded).
+        //
+        // PFSIM-113 ARBITER FIX. This chain gave PF absolute priority: the
+        // competing client was looked at only in the else-arm, i.e. only when
+        // no PF request happened to be pending at an idle instant. At the
+        // corrected 5:1 clock ratio PF is dense enough that this NEVER
+        // happened - the competing client was served 3 times in a 50ms run and
+        // starved thereafter (measured). Two consequences, both fatal to the
+        // rig: there was no contention left to delay a PF fetch, so channel B
+        // was never armed; and the starved client wedged the stimulus
+        // generator (see the livelock note above).
+        //
+        // The shipped chain does NOT behave this way. Drain/fill traffic holds
+        // strict priority over PF reads there (a PF read requires cq_n==0,
+        // core_top.v:1498), and core_top even carries the vgmg_last_mo
+        // round-robin flag from the mo-fair branch (:1519) whose comment
+        // records that PF-always-wins was proven to starve the other client.
+        // Round-robin is used here rather than strict competitor priority
+        // because it is the weaker, more conservative of the two: if the A/B
+        // pair holds under round-robin it is not because the rig went easy on
+        // the competitor's side, and PF keeps a guaranteed share so a failure
+        // is attributable to the ping-pong rather than to raw starvation.
         if(cvg_ph==2'd0 && cmg_ph==2'd0
            && !cram_busy && !cram_read_en && !cram_write_en) begin
-            if(vg_reqA_s != vg_reqA_last || vg_reqB_s != vg_reqB_last) begin
+            if((mg_req_s != mg_req_last)
+               && !(vgmg_last_mo && (vg_reqA_s != vg_reqA_last
+                                     || vg_reqB_s != vg_reqB_last))) begin
+                mg_req_last  <= mg_req_s;
+                cram_addr    <= mo_gfx_addr[22:1] - 22'h88000;
+                cram_read_en <= 1'b1;
+                cmg_ph       <= 2'd1;
+                cmg_burst    <= MO_BURST[3:0];
+                vgmg_last_mo <= 1'b1;
+            end else if(vg_reqA_s != vg_reqA_last || vg_reqB_s != vg_reqB_last) begin
                 if(vg_reqA_s != vg_reqA_last) begin
                     vg_reqA_last <= vg_reqA_s;
                     cram_addr    <= vg_addrA_px[22:1] - 22'h88000;
@@ -305,11 +474,7 @@ module tb_pf_cram;
                 end
                 cram_read_en <= 1'b1;
                 cvg_ph       <= 2'd1;
-            end else if(mg_req_s != mg_req_last) begin
-                mg_req_last  <= mg_req_s;
-                cram_addr    <= mo_gfx_addr[22:1] - 22'h88000;
-                cram_read_en <= 1'b1;
-                cmg_ph       <= 2'd1;
+                vgmg_last_mo <= 1'b0;
             end
         end
         if(cvg_ph==2'd1) begin
@@ -346,9 +511,27 @@ module tb_pf_cram;
         if(cmg_ph==2'd3) begin
             cram_read_en <= 1'b0;
             if(cram_avail) begin
-                mg_data    <= {cmg_hi, cram_dout};
-                mg_done_85 <= ~mg_done_85;
-                cmg_ph     <= 2'd0;
+                mg_data <= {cmg_hi, cram_dout};
+                // PFSIM-113: the competing client holds the controller for a
+                // BURST once granted, instead of handing it straight back
+                // after a single 2-word pair. This is what the shipped
+                // competitor actually does: the cq_n drain queue keeps PF
+                // reads blocked for as long as cq_n != 0 (core_top.v:1386 and
+                // the cq_n==4'd0 term in the read-start gate at :1498), so a
+                // burst of fills occupies CRAM for many consecutive accesses.
+                // A single-pair competitor can delay a PF fetch by at most one
+                // pair, which is never enough to push it past its 8-pixel cell
+                // deadline - measured: with the one-pair competitor, channel B
+                // stayed at issueB=0 for every MO_BURST from 2 to 8.
+                if(cmg_burst != 4'd0) begin
+                    cmg_burst    <= cmg_burst - 4'd1;
+                    cram_addr    <= (cram_addr & ~22'd1) + 22'd2;
+                    cram_read_en <= 1'b1;
+                    cmg_ph       <= 2'd1;
+                end else begin
+                    mg_done_85 <= ~mg_done_85;
+                    cmg_ph     <= 2'd0;
+                end
             end
         end
     end
@@ -366,9 +549,9 @@ module tb_pf_cram;
         if(n_doneA < 4) $display("DBG doneA #%0d data=%h t=%0t", n_doneA, vg_dataA, $time);
     end
     always @(vg_doneB_85) n_doneB = n_doneB + 1;
-    always @(posedge clk85) if(cram_avail === 1'b1) n_avail = n_avail + 1;
-    always @(posedge clk85) if(cvg_ph==2'd3 && cram_avail===1'b1) n_cvg = n_cvg + 1;
-    always @(posedge clk85) if(cmg_ph==2'd3 && cram_avail===1'b1) n_cmg = n_cmg + 1;
+    always @(posedge clk_sd) if(cram_avail === 1'b1) n_avail = n_avail + 1;
+    always @(posedge clk_sd) if(cvg_ph==2'd3 && cram_avail===1'b1) n_cvg = n_cvg + 1;
+    always @(posedge clk_sd) if(cmg_ph==2'd3 && cram_avail===1'b1) n_cmg = n_cmg + 1;
     initial begin
         #2000000;  // 2ms in
         $display("DBG @2ms: issueA=%0d issueB=%0d doneA=%0d doneB=%0d avail=%0d cvg=%0d cmg=%0d cvg_ph=%0d cmg_ph=%0d busy=%b pfq=%0d inflA=%b inflB=%b",
@@ -376,7 +559,8 @@ module tb_pf_cram;
     end
 
     // ---------------- frame dump + finish
-    integer fd, px_seen;
+    integer fd, sfd, px_seen;
+    integer f0_issueA, f0_issueB, f0_doneA, f0_doneB;
     reg dumping = 0;
     initial begin
         fd = $fopen("sim/build/pf_pixels.txt", "w");
@@ -384,10 +568,28 @@ module tb_pf_cram;
         // let two full frames elapse (first frame fills pipes), dump the third
         @(posedge clk_px);
         repeat (2 * VID_V_TOTAL * VID_H_TOTAL) @(posedge clk_px);
+        f0_issueA = n_issueA; f0_issueB = n_issueB;
+        f0_doneA  = n_doneA;  f0_doneB  = n_doneB;
         dumping = 1;
         repeat (VID_V_TOTAL * VID_H_TOTAL + 10) @(posedge clk_px);
         $fclose(fd);
+        // PFSIM-113: the checker refuses to pass a run in which channel B was
+        // never armed, so a rig that silently stops exercising the A/B
+        // ping-pong (the ONLY thing this rig validates) fails loudly instead
+        // of reporting a clean frame. Counters are deltas over the dumped
+        // frame, not since power-on.
+        sfd = $fopen("sim/build/pf_stats.txt", "w");
+        $fwrite(sfd, "single_ch %0d\n", SINGLE_CH);
+        $fwrite(sfd, "pixels %0d\n",    px_seen);
+        $fwrite(sfd, "issueA %0d\n",    n_issueA - f0_issueA);
+        $fwrite(sfd, "issueB %0d\n",    n_issueB - f0_issueB);
+        $fwrite(sfd, "doneA %0d\n",     n_doneA  - f0_doneA);
+        $fwrite(sfd, "doneB %0d\n",     n_doneB  - f0_doneB);
+        $fclose(sfd);
         $display("TB_PF_CRAM DONE: %0d pixels dumped", px_seen);
+        $display("TB_PF_CRAM FRAME: issueA=%0d issueB=%0d doneA=%0d doneB=%0d (single_ch=%0d)",
+                 n_issueA - f0_issueA, n_issueB - f0_issueB,
+                 n_doneA - f0_doneA,   n_doneB - f0_doneB, SINGLE_CH);
         $finish;
     end
     always @(posedge clk_px) begin
@@ -400,16 +602,7 @@ module tb_pf_cram;
     end
 endmodule
 
-// 3-stage synchronizer (copy of the project's synch_3 semantics)
-module synch_3 #(parameter WIDTH = 1) (
-    input  wire [WIDTH-1:0] i,
-    output reg  [WIDTH-1:0] o,
-    input  wire clk
-);
-    reg [WIDTH-1:0] stage_1, stage_2;
-    always @(posedge clk) begin
-        stage_1 <= i;
-        stage_2 <= stage_1;
-        o       <= stage_2;
-    end
-endmodule
+// PFSIM-113: the synch_3 model that used to live here is gone. Both CDC
+// crossings in this rig are single capture FFs now, matching SDSCHED-74 in
+// core_top.v - keeping an unused 3-stage synchroniser in a bench whose whole
+// subject is fetch latency was an invitation to re-introduce it.
