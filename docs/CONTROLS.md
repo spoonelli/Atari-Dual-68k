@@ -52,14 +52,43 @@ axis values, one instance per player:
 
 ### Button map
 
-| Pocket        | Game  |
-|---------------|-------|
-| A (right)     | Fire  |
-| B (bottom)    | Jump  |
-| Y (left)      | Duck  |
-| Select        | Coin  |
+Read off `core_top.v` `.p1_buttons` and cross-checked against `input.json`:
 
-P2 maps identically from controller 2.
+| Pocket        | Game            | `cont1_key` bit |
+|---------------|-----------------|-----------------|
+| Y             | Jump / Start    | 7               |
+| B             | Fire            | 5               |
+| A             | Duck            | 4               |
+| X             | Bomb — asserts Jump+Fire+Duck together | 6 |
+| Select        | Coin            | 14              |
+| Start         | Self-test step / continue | 15    |
+
+> **Known defect, P2 bomb.** `.p2_buttons` ORs in `cont2_key[8]` (**L1**) where
+> `.p1_buttons` uses `cont1_key[6]` (**X**). `input.json` declares P2's bomb as
+> `pad_btn_x`, identically to P1 — so as built, **player 2's X does nothing and
+> L1 fires the bomb instead**. The declared mapping and the RTL disagree. A
+> one-bit change (`cont2_key[8]` → `cont2_key[6]`) would align them; it is
+> **not** applied here because it changes player-facing behaviour and has not
+> been tested on hardware. `core_top.v:2941`.
+
+### Debug controls
+
+Not game controls — development tooling, and none of it is on by default.
+
+| Pocket | Effect |
+|---|---|
+| **L1** | Show / hide the diagnostic HUD. **Starts hidden.** |
+| **R1** | Cycle HUD page 0-5 (works with the HUD hidden; the page shows next time you press L1) |
+| **L2** | Toggle the trace view |
+| **R1 (hold)** | Hide motion objects |
+| **L2 (hold)** | Hide the alpha layer |
+| **R2 (hold)** | Video-fetch kill probe (screen garbles) |
+
+The three hold-to-act probes are gated on the HUD being visible, so a player
+cannot blank the sprites or the picture by accident. The cyan build number in
+the bottom-right corner is drawn in both states and is not part of the HUD.
+
+Per-page contents are in [`POCKET_TEST.md`](POCKET_TEST.md).
 
 ## Simulation
 
