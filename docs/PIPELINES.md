@@ -803,7 +803,82 @@ dx = 0,0,…,+8 against MAME's smooth ±1..3.
   objects, which zero their own toggles under reset; fatal here. Commit `dcd1196`
   (`PFRESET-107`), and `RETROSPECTIVE.md` §8. **A toggle-handshake channel with no
   reset is a latent wedge on every platform**; it only surfaced where the reset
-  sequence differed.
+  sequence differed. **Backported to the Pocket as `PFRESET-111`** — see below for
+  what that changed and, more usefully, for the measurement of exactly when the
+  Pocket is and is not exposed.
+
+#### The reset rig (`sim/tb/tb_pf_reset.v`) — PFRESET-111
+
+`./sim/run_pf_reset_tb.sh` is the gate for the paragraph above. It answers one
+question — *does the playfield fetch channel survive a core reset?* — and it does not
+grade pixels; `run_pf_tb.sh` is still the gate for those.
+
+**It does not re-implement the RTL it tests.** `sim/tools/mk_pf_reset_slice.py` cuts
+four blocks verbatim out of `core_top.v` on every run and drops them in as `` `include ``
+fragments: the pixel-domain PF pipeline (`:2254`), the sdram-domain CRAM read-start
+chain and `cvg_ph` FSM (`:1477`), the CRAM download-mirror drain (`:1370`), and the
+`SDSCHED-75` reset resync (`:1708`). Their order inside the one `clk_sdram` block is
+preserved, because it decides who wins a same-cycle write to `vg_reqA_last`. The
+`psram.sv` controller is the real one. The 68000s, the SDRAM side and the map contents
+are modelled. The extractor asserts every anchor and fails loudly rather than emitting a
+partial fragment, and `--defeat-fix` produces the *failing* case by excising the
+`PFRESET-111` reset block from the extracted slice and nothing else — so the negative
+control is the shipped block with exactly the fix removed, not an imitation of it.
+
+Three scenarios, each run with the fix present and excised:
+
+| | reset taken with | fix excised | fix present |
+|---|---|---|---|
+| PHASE 0 | `chk_state 4'd10`, CRAM controller idle | **ALIVE**, 0 lost | ALIVE |
+| PHASE 1 | `chk_state 4'd0` (boot download): chain unreachable | **WEDGED_BOTH**, `inflA=inflB=1`, 0 fetches after release | ALIVE, 3420/3420 |
+| PHASE 2 | `chk_state 4'd10` + the real download-mirror drain running | **WEDGED_BOTH**, `inflA=inflB=1`, 0 fetches after release | ALIVE, 3420/3420 |
+
+3420 is 57 cells × 60 measured scanlines — the pipeline's full enqueue rate, the same
+structural number as the MiSTer bench's 57 × 242, not a threshold tuned to pass.
+
+**PHASE 0 is the important one, and it passes without the fix.** With the CRAM
+controller idle the read-start chain catches every request edge in the single cycle it
+has before the resync retires it, and 456 fetches issued across an 8-line reset all
+completed. That is why the Pocket has never visibly failed, and it is also the control
+that keeps the other two rows meaningful: a bench that wedged on *any* reset would not
+be measuring the mechanism. The gate fails if PHASE 0 ever starts wedging.
+
+The exposure is therefore about **contention at the instant of the request**, and the
+drain-rate sweep (`PFRESET_SWEEP=1`) measures where it begins. `WR_PERIOD` is
+`clk_sdram` cycles between 32-bit gfx-region SDRAM writes feeding the CRAM mirror queue:
+
+| `WR_PERIOD` | ≈ write rate | result, fix excised |
+|---|---|---|
+| 24 … 1536 | 6 MB/s … 93 KB/s | **WEDGED_BOTH** — 2 lost, playfield dead |
+| 4096 | ~35 KB/s | **WEDGED_ONE** — 1 lost; channel A dead, B carries the frame at full rate |
+| 9216 | ~15 KB/s | ALIVE — 0 lost |
+
+Two things to take from that. First, the bar is low: **two lost requests kill the
+layer**, and any download slow enough to be plausible still clears it. Second, the
+`WEDGED_ONE` row is the *silent* failure — throughput is unchanged, every pixel is
+still correct, and all that is gone is the A/B ping-pong, i.e. the design silently
+reverts to the one-in-flight arrangement that `PF_SINGLE_CH` exists to reject.
+
+**Synthesis cost, measured** (Quartus CI on `pfreset-111`, run `32807078145`): **M10K
+283 / 308 — delta 0**, as expected for a change that adds a reset arm to nine existing
+registers and no storage. Worst-case setup **+5.488 ns** (was +5.698), worst-case hold
+**+0.087 ns** (was +0.103); all 64 analysed clock/corner rows non-negative. The hold row
+trips the gate's 0.150 ns margin warning — so did the +0.103 baseline — and the named
+worst-hold path is `escape_jsa|jt51_sh` feeding an `altshift_taps` M10K, i.e. inside the
+FM synth, nowhere near the fetch channel or the SDRAM grant path. A −0.016 ns hold move
+is well inside this design's documented ±0.157 ns perturbation sensitivity; do not read
+it as causation.
+
+**What this does not establish.** PHASE 1 models the Pocket boot download as
+`chk_state == 4'd0` with the core held in reset, and in that model the pre-fix RTL
+wedges deterministically — which would mean a flat playfield from power-on. The Pocket
+has shipped ~35 builds since `SDSCHED-75` added the resync (`be6e21c`, BUILD 75) with a
+live playfield, so the real boot sequence evidently does not present that condition, and
+reading the RTL did not reveal what prevents it. Do not read PHASE 1 as "the Pocket
+boots wedged". Read it as: the mechanism is real on the shipped blocks, PHASE 2 shows a
+reachable steady-state path to it (any dataslot re-download drops `dataslot_allcomplete`
+and therefore `core_reset_n` while `chk_state` is already `4'd10` and the mirror queue
+is busy), and the fix removes the dependence on an unexplained margin.
 
 #### The PF-CRAM rig (`sim/tb/tb_pf_cram.v`) — PFSIM-113
 
