@@ -1,20 +1,19 @@
 // escape_pf: the playfield pipeline, lifted VERBATIM out of core_top.v.
 //
-// WHY THIS EXISTS. This pipeline used to live inside core_top.v, and core_top.v
-// is compiled by NO simulation - it is mixed with VHDL and APF-specific ports,
-// so no bench can reach it. That blind spot is not academic: the left-edge
-// strip (docs/MO_TILE_HOLES.md) took TWO shipped fixes that were reasoned from
-// the source and could not be contradicted by anything, and the second one
-// provably cannot work - VID_H_BPORCH = 60 puts the line-start prime sixty
-// clocks and EIGHT phase-7 reloads before visible pixel 0.
+// WHY. core_top.v is compiled by NO simulation - it is mixed with VHDL and
+// APF-specific ports, so nothing can reach this code. That blind spot is not
+// academic: the left-edge strip absorbed TWO shipped fixes reasoned from the
+// source with nothing able to contradict them, and the second provably cannot
+// work (VID_H_BPORCH = 60 puts the line-start prime sixty clocks and eight
+// phase-7 reloads before visible pixel 0). Same treatment escape_stain.v got:
+// move the code unchanged so a bench drives the SHIPPED instance.
 //
-// Same pattern as escape_stain.v: the code is moved unchanged so a bench drives
-// the SHIPPED instance rather than a copy that can drift.
-//
-// THE EXTRACTION ITSELF CHANGES NO BEHAVIOUR. The boundary was derived
-// mechanically, not by eye: of everything declared in the region, only pf_att,
-// pf_pix and pf_vaddr are referenced outside it, plus the vg_* fetch request
-// registers. Verify with CI - M10K delta and timing should be unchanged.
+// THE EXTRACTION CHANGES NO BEHAVIOUR. The boundary was derived mechanically:
+// of everything declared in the region, only pf_att, pf_pix and pf_vaddr are
+// referenced outside it, plus the vg_* fetch registers. Region bounds were
+// taken by ANCHOR - from the section comment to the `end` closing the
+// `always @(*)` - after a first attempt cut mid-block and lost that `end`.
+// Verify with CI: M10K delta 0 and timing unchanged.
 `default_nettype none
 
 module escape_pf #(
@@ -23,26 +22,18 @@ module escape_pf #(
 ) (
     input  wire        clk,
     input  wire        core_reset_n,
-
-    // raster
     input  wire [9:0]  vis_x,
     input  wire [9:0]  visible_x,
     input  wire [9:0]  visible_y,
     input  wire [9:0]  x_count,
     input  wire [9:0]  y_count,
-
-    // scroll / options
     input  wire [8:0]  xscroll,
     input  wire [8:0]  yscroll,
     input  wire [4:0]  vpshift_s,
     input  wire        m_pfmap,
-
-    // playfield map RAM
     output reg  [11:0] pf_vaddr,
     input  wire [15:0] pf_vdata,
     input  wire [15:0] pfx_vdata,
-
-    // SDRAM video fetch channels A/B (pixel domain)
     output reg  [23:0] vg_addrA_px,
     output reg  [23:0] vg_addrB_px,
     output reg         vg_reqA_px,
@@ -51,23 +42,21 @@ module escape_pf #(
     input  wire [31:0] vg_dataB,
     input  wire        vg_doneA_s,
     input  wire        vg_doneB_s,
-
-    // to the compositor
     output wire [3:0]  pf_pix_o,
     output wire [4:0]  pf_att_o
 );
     reg  [3:0] pf_pix;
-    // The body is a VERBATIM lift, so it still says clk_sys_7159. Alias rather
-    // than rename, so a diff against core_top's old region stays readable.
+    // The body is a verbatim lift and still says clk_sys_7159; alias rather
+    // than rename so a diff against the old core_top region stays readable.
     wire clk_sys_7159 = clk;
 
     // ---------------- playfield pipeline (pixel domain)
     // Prefetch 2 cells ahead: map lookup at phase 0, SDRAM gfx request at phase 3
     // (chunky 4bpp row = 2 words via the priority video channel), show via
     // fetch->show buffering at cell boundaries.
-    // (port) reg  [11:0] pf_vaddr;
-    // (port) wire [15:0] pf_vdata, pfx_vdata;
-    // (port) wire [8:0]  xscroll, yscroll;
+    // (now a port) reg  [11:0] pf_vaddr;
+    // (now a port) wire [15:0] pf_vdata, pfx_vdata;
+    // (now a port) wire [8:0]  xscroll, yscroll;
 
     wire [8:0] pf_y   = visible_y[8:0] + yscroll;           // scrolled row (mod 512)
     // LANE3p: world X alignment - sim-proven correct at +32 (map col lookup
@@ -238,26 +227,23 @@ module escape_pf #(
             // The load mirrors the phase-7 case exactly, but off the value
             // pf_rp is being resynced TO (pf_wp), not the old pf_rp - reading
             // the register here would give the pre-assignment value.
-            // PFLINE reverted (was 116/117). Two attempts primed pf_show/pf_next
-            // here and neither is proven; the second provably CANNOT work, and
-            // the arithmetic is worth keeping so nobody tries it a third time:
+            // PFLINE reverted (was 116 and 117). Two attempts primed
+            // pf_show/pf_next here; neither was verified and the second
+            // provably cannot work:
             //
-            //   VID_H_BPORCH = 60, so x_count==0 is SIXTY clocks before visible
-            //   pixel 0, and vis_x[2:0] hits 7 EIGHT times in that gap
-            //   (x_count = 3,11,19,27,35,43,51,59). Every one re-runs the
-            //   phase-7 load and advances pf_rp, so anything primed here is
+            //   VID_H_BPORCH = 60, so x_count==0 is SIXTY clocks before
+            //   visible pixel 0, and vis_x[2:0] hits 7 EIGHT times in that gap
+            //   (x_count = 3,11,19,27,35,43,51,59). Each re-runs the phase-7
+            //   load and advances pf_rp, so anything primed here is
             //   overwritten eight times before pixel 0 is drawn.
             //
-            // Yet build 116 measurably CHANGED the artifact on device (cols 0-1
-            // went from 62-69 distinct colours to exactly one, sd 0.0). Model
-            // and evidence disagree, which means the model is wrong - and both
-            // fixes were derived from it, with no bench able to contradict
-            // them, because nothing compiles this file.
-            //
-            // What IS confirmed is the shape: the strip is 8 - (fine scroll & 7)
-            // native pixels, so 1..8 varying with horizontal scroll. Measured 2
-            // on a map screen and 3 in gameplay. See docs/MO_TILE_HOLES.md.
-
+            // Build 116 nevertheless CHANGED the artifact measurably on device
+            // (cols 0-1: 62-69 distinct colours -> exactly one, sd 0.0), so the
+            // model both fixes came from is wrong. What IS confirmed is the
+            // shape: the strip is 8 - (fine scroll & 7) native pixels, 1..8
+            // varying with horizontal scroll - measured 2 on a map screen and
+            // 3 in gameplay. See docs/MO_TILE_HOLES.md.
+        end
 
         // ---- PFRESET-111: the playfield fetch channel MUST reset with the
         // core. Backport of PFRESET-107 (dcd1196) from the MiSTer port, where
@@ -347,7 +333,7 @@ module escape_pf #(
     wire [31:0] pf_word  = pf_cross ? pf_next    : pf_show;
     wire [4:0]  pf_att   = pf_cross ? pfcol_next : pfcol_show;
     wire [2:0] pf_n   = pf_att[4] ? (3'd7 - pf_x2[2:0]) : pf_x2[2:0];
-    // (port) reg  [3:0] pf_pix;
+    // (now a port) reg  [3:0] pf_pix;
     always @(*) begin
         if(m_pfmap) begin
             pf_pix = pfcode_show;    // v66 map-debug: flat color per tile code
@@ -360,7 +346,7 @@ module escape_pf #(
         endcase
     end
 
-    // Outputs assigned at the end: pf_att is declared partway down and
+    // Assigned at the end: pf_att is declared partway down the body and
     // `default_nettype none` rejects a forward reference to it.
     assign pf_pix_o = pf_pix;
     assign pf_att_o = pf_att;
