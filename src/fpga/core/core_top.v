@@ -799,7 +799,13 @@ end
     // Default ON. The BRAM is instantiated and filled either way, so this
     // costs no M10K and can be flipped on device without a reflash.
     reg        vshad3_on_74 = 1'b1;   // 0xA0000150: 'ROM Shadow 0x54000'
-    // HUD-113: 0xA0000154 'Developer HUD' (interact.json id 38). Defaults OFF
+    // HUD-118: 0xA0000160 'Developer HUD' (interact.json id 38). Defaults OFF.
+    // ADDRESS: 0x160, NOT 0x154. Every working interact address in this core is
+    // 0x10-ALIGNED (0x000,0x010,...,0x110,0x140,0x150). Build 117 shipped this
+    // at 0x154 - the only unaligned one - and the toggle did nothing on device:
+    // the bridge write never landed, so hud_en_s stayed low and L1 was
+    // correctly ignored. The convention was there to be read and I did not
+    // read it.
     // so a player never meets the diagnostic overlay: with this clear, L1 and
     // R1 do nothing and are free for game use. The HUD RTL is still compiled
     // in, so a user helping debug a report can enable it from the menu with no
@@ -807,7 +813,7 @@ end
     // docs/RELEASE_CHECKLIST.md section F for why it is a runtime gate rather
     // than a compile-time-only flag: a repo default that differs from the
     // shipped build means what people build is not what people tested.
-    reg        hud_en_74    = 1'b0;   // 0xA0000154: 'Developer HUD'
+    reg        hud_en_74    = 1'b0;   // 0xA0000160: 'Developer HUD'
     reg        ee_autoen_74 = 1'b1;   // 0xA0000140: 'EEPROM Autosave' (default ON)
                                       // (0x120-0x13C belong to the MIX-100
                                       //  per-FM-channel mixer)
@@ -821,7 +827,7 @@ end
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000140) ee_autoen_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000150) vshad3_on_74 <= bridge_wr_data[0];
-    if(bridge_wr && bridge_addr == 32'hA0000154) hud_en_74    <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000160) hud_en_74    <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
@@ -1125,11 +1131,6 @@ end
 // so believing cycles are 11.64ns when they are really 27.94ns made it wait 7
 // cycles for the 70ns read access where 3 suffice: ~279ns per playfield fetch
 // instead of ~168ns. CRAM serves the playfield, so this taxed every tile fetch.
-//
-// This file is NOT compiled by the MiSTer build (src/mister/Arcade-Escape.qsf
-// -> files.qip, top sys_top), but it IS compiled by the Pocket build on this
-// same branch (src/fpga/ap_core.qsf:741, :813). A Pocket .rbf built from here
-// therefore shipped the BUILD 106 bug until this fix. Gate: sim/run_psram_tb.sh.
 psram #(.CLOCK_SPEED(35.795455)) cram0 (
     .clk        ( clk_sdram ),
     .bank_sel   ( 1'b0 ),
@@ -1194,7 +1195,7 @@ psram #(.CLOCK_SPEED(35.795455)) cram0 (
     reg  [24:0] rd_addr_q;   // per-grant latched read address (v39)
     reg         rd_pre_q;    // v42: armor CPU reads only
     wire        sd_rd_ack;
-    // sdram-sched: 7.159 and 35.795455 are same-PLL siblings (5:1) and the
+    // sdram-sched: 7.159 and 35.795 are same-PLL siblings (5:1) and the
     // SDC now groups them synchronous, so a single capture FF is a TIMED
     // path - not a metastability risk. The 3-stage ack-return chain alone
     // cost ~2 CPU clocks on every SDRAM access; this is the tier-2 fast
@@ -1319,7 +1320,47 @@ psram #(.CLOCK_SPEED(35.795455)) cram0 (
     wire [3:0] mg_req_s;
     wire [3:0]  mo_gfx_req;
     wire [95:0] mo_gfx_addr;              // 4 x 24
-    // SDSCHED-74: same-family crossings (7.159 -> 35.795455, timed since the
+
+    // MOCACHE-119: shared tile-row cache in front of the MO fetch channels.
+    //
+    // The tile-hole artifact peaks where sprite density peaks - an explosion,
+    // a crowd - and on this game dense means MANY COPIES OF THE SAME SPRITE,
+    // so the identical tile row is fetched many times per line, each a
+    // separate transaction on a bus where MO is the lowest-priority client.
+    // Demand peaks exactly where supply is worst, and a cache is the only
+    // lever whose benefit GROWS with density.
+    //
+    // It sits between escape_mob and the SDRAM fetcher with the same interface
+    // on both sides, so the MO state machine is untouched and cannot tell a
+    // hit from a very fast miss. Same clock domain as escape_mob (pixel), and
+    // mg_done_s is already synchronised into it, so the CDC structure at the
+    // clk_sdram boundary is exactly what it was.
+    //
+    // Storage is ramstyle=MLAB: the fit is at 299/308 M10K and this must not
+    // take a block.
+    //
+    // HONEST STATUS: correct and transparent in simulation (pixel-identical to
+    // the reference with jitter off). Its BENEFIT is not proven to this
+    // project's standard - across four jitter seeds the missing-pixel totals
+    // were 51 without and 19 with, but one seed went 0 -> 10, i.e. worse, and
+    // single-run comparisons are dominated by timing perturbation because
+    // changing the hit/miss pattern re-rolls which request draws which jitter
+    // value. Device evidence is what will settle it.
+    wire [3:0]   moc_req;
+    wire [95:0]  moc_addr;
+    wire [3:0]   moc_done;
+    wire [127:0] moc_data;
+    wire [15:0]  moc_hit, moc_miss;
+
+    escape_mo_cache #(.ENTRIES(32), .IDXBITS(5)) u_mo_cache (
+        .clk(clk_sys_7159), .reset_n(core_reset_n),
+        .mo_req(moc_req),   .mo_addr(moc_addr),
+        .mo_done(moc_done), .mo_data(moc_data),
+        .mem_req(mo_gfx_req), .mem_addr(mo_gfx_addr),
+        .mem_done(mg_done_s), .mem_data(mg_data),
+        .hit_cnt(moc_hit),  .miss_cnt(moc_miss)
+    );
+    // SDSCHED-74: same-family crossings (7.159 -> 35.795, timed since the
     // '73 SDC grouping) - single capture FFs. The 3-stage done-return
     // chains cost ~400ns per fetched sprite row (~1/3 of the row budget).
     integer   mci;                        // MOCHAN-4 per-channel loop index
@@ -1705,12 +1746,8 @@ always @(posedge clk_sdram) begin
         // SDRAM byte address; one burst-of-2 = the {even,odd} word pair the
         // CRAM path used to deliver. CPUs always outrank MO: an MO grant
         // requires no pending/in-flight CPU work, and one MO read (~10 clks
-        // @35.8MHz = ~279ns) is far shorter than a CPU BUS CYCLE (48 clks,
-        // ~1.34us), so MO can never hold the bus long enough to stall a CPU
-        // access. CLKFIX-106: this used to say the delay was "well under one
-        // 7.16MHz cycle", which was only true under the 85.909 misreading -
-        // at the real 35.795455 those 10 clks are exactly 2 CPU clocks. The
-        // bus-cycle comparison is the one that actually bounds the latency.
+        // @35.8MHz) is far shorter than a CPU bus cycle, so worst-case CPU
+        // latency grows by well under one 7.16MHz cycle.
         // (SDSCHED-88: MO stays the LOWEST-priority SDRAM read client, now
         // also below both CPU fastpath fills. A fill is ~13 clks and each
         // CPU issues at most one per 48-clk bus cycle, so MO keeps >=40% of
@@ -2297,7 +2334,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3117;   // PFLINE-b: line-start prime slot is wp-1 + MO tile-hole gate - screen shows '17'
+    localparam [15:0] BUILD_ID = 16'h3119;   // MO tile-row cache (32 entries, MLAB) - screen shows '19'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2671,10 +2708,10 @@ escape_mob umob (
     .mo_vdata ( mo_vdata ),
     .cfg_vaddr( cfg_vaddr ),
     .cfg_vdata( cfg_vdata ),
-    .gfx_req  ( mo_gfx_req ),
-    .gfx_addr ( mo_gfx_addr ),
-    .gfx_done ( mg_done_s ),
-    .gfx_data ( mg_data ),
+    .gfx_req  ( moc_req ),
+    .gfx_addr ( moc_addr ),
+    .gfx_done ( moc_done ),
+    .gfx_data ( moc_data ),
     .disp_x   ( visible_x[8:0] ),
     .disp_pen ( mo_pen ),
     .disp_prio( mo_prio ),

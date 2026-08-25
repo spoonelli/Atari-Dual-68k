@@ -419,6 +419,36 @@ reg  [3:0] mg_done_s_q;
 always @(posedge clk_sys) mg_done_s_q <= mg_done_85;
 wire [3:0] mg_done_s = mg_done_s_q;
 
+// MOCACHE-119 (ported from Pocket): shared tile-row cache in front of the MO
+// fetch channels. Same module, same reasoning - the tile-hole artifact peaks
+// where sprite density peaks, and dense on this game means many copies of the
+// SAME sprite, so the identical tile row is fetched repeatedly per line on a
+// bus where MO is the lowest-priority client.
+//
+// Sits between escape_mob and the fetcher with the same interface on both
+// sides, so the MO state machine is untouched. Pixel domain, like escape_mob,
+// and mg_done_s is already synchronised into it, so the clk_sdram CDC boundary
+// is unchanged. ramstyle=MLAB inside, so it takes no block RAM.
+//
+// STATUS: correct and transparent in simulation; its BENEFIT is not proven -
+// see the Pocket-side note and docs/MO_TILE_HOLES.md. Shipped so the MiSTer
+// build stays in step with Pocket rather than silently diverging.
+wire [3:0]   moc_req;
+wire [95:0]  moc_addr;
+wire [3:0]   moc_done;
+wire [127:0] moc_data;
+wire [15:0]  moc_hit, moc_miss;
+
+escape_mo_cache #(.ENTRIES(32), .IDXBITS(5)) u_mo_cache (
+    .clk(clk_sys), .reset_n(core_reset_n),
+    .mo_req(moc_req),   .mo_addr(moc_addr),
+    .mo_done(moc_done), .mo_data(moc_data),
+    .mem_req(mo_gfx_req), .mem_addr(mo_gfx_addr),
+    .mem_done(mg_done_s), .mem_data(mg_data),
+    .hit_cnt(moc_hit),  .miss_cnt(moc_miss)
+);
+
+
 // Registered MO pre-decode. Safety of looking one cycle back is the same
 // argument core_top makes: mg_req_last only ever CLEARS a pending bit, and
 // only in the grant arm, which also sets mo_owner - and the grant requires
@@ -918,10 +948,10 @@ escape_mob umob (
     .mo_vdata  ( mo_vdata ),
     .cfg_vaddr ( cfg_vaddr ),
     .cfg_vdata ( cfg_vdata ),
-    .gfx_req   ( mo_gfx_req ),
-    .gfx_addr  ( mo_gfx_addr ),
-    .gfx_done  ( mg_done_s ),
-    .gfx_data  ( mg_data ),
+    .gfx_req   ( moc_req ),
+    .gfx_addr  ( moc_addr ),
+    .gfx_done  ( moc_done ),
+    .gfx_data  ( moc_data ),
     .disp_x    ( visible_x[8:0] ),
     .disp_pen  ( mo_pen ),
     .disp_prio ( mo_prio ),
