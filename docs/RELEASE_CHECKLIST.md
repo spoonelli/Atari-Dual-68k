@@ -29,6 +29,7 @@ Two sequencing facts drive the order:
 | A5 | Debug HUD gated behind a menu toggle, default off | **DONE (build 114)** | `interact.json` id 38 'Developer HUD', default unchecked. With it clear, `diag_on` is forced low, so L1/R1/R/L2 do nothing and no debug path reaches video. RTL still compiled in -- see **section F**; the `DIAG_EN` compile-time half remains open. |
 | A6 | Save-path device test on real hardware | TODO | Gates the alpha/RC tag. |
 | A7 | Clean-boot look on real hardware | TODO | Gates the alpha/RC tag. |
+| A8 | **Tile-shaped holes in motion objects** | TODO | **The one consistent blocker to alpha.** Sprites drawn correctly but with a rectangular chunk missing. Field evidence, ruled-out causes and the diagnostic plan: [`MO_TILE_HOLES.md`](MO_TILE_HOLES.md). Frame 5629 vs 5636 (same sprite, wrong then right) is the key pair. |
 
 ## B. Identity, metadata, and store presence
 
