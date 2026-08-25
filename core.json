@@ -4,7 +4,7 @@
         "metadata": {
             "platform_ids": ["eprom"],
             "shortname": "ataridual68k",
-            "description": "Atari 'Escape' hardware (dual 68000). Escape from the Planet of the Robot Monsters, Klax (proto), Guts n' Glory (proto).",
+            "description": "Atari 'Escape' hardware (dual 68000, JSA-I audio). Escape from the Planet of the Robot Monsters.",
             "author": "spoonelli",
             "url": "https://github.com/spoonelli/Atari-Dual-68k",
             "version": "0.0.1",

@@ -1,8 +1,13 @@
 # Atari Dual 68k — openFPGA core (Analogue Pocket)
 
 An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68000 board
-whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**). The same board also ran the *Klax* prototype and *Guts n' Glory*
-prototype, so the core covers all three.
+whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**).
+
+The core implements the **`eprom` configuration only**: two 68000s and JSA-I
+audio. The same board family also ran the *Klax* and *Guts n' Glory*
+prototypes, but those are **not supported** — they are single-CPU and use
+JSA-II with an OKI6295, and no OKI6295 exists in this RTL. `build_rom.py`
+accepts the MAME `eprom` set and refuses chips whose CRCs do not match it.
 
 > Built for the [Analogue Pocket](https://www.analogue.co/pocket) via the openFPGA framework.
 > This project ships **no ROMs**. You must supply your own dumps.
