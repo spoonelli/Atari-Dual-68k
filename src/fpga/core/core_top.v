@@ -2365,6 +2365,81 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
             pf_rp <= pf_wp;
             pfq_count <= 3'd0; pfq_rd <= pfq_wr;
         end
+
+        // ---- PFRESET-111: the playfield fetch channel MUST reset with the
+        // core. Backport of PFRESET-107 (dcd1196) from the MiSTer port, where
+        // this exact omission rendered the playfield as a flat fill on real
+        // DE10-Nano hardware while sprites and alphanumerics stayed perfect.
+        //
+        // The mechanism, which is platform-independent:
+        //
+        //   * x_count/y_count and therefore this whole block free-run from
+        //     power-on - they are held only by the Pocket-level reset_n
+        //     (:538), never by core_reset_n. So this block keeps enqueueing
+        //     cells and issuing fetches while the core is held in reset.
+        //   * a fetch issued here sets inflA (or inflB) and toggles
+        //     vg_reqA_px. inflA is cleared in exactly ONE place - the
+        //     completion edge at :2325 - and nowhere else.
+        //   * meanwhile the SDSCHED-75 reset resync at :1708-1716 runs on
+        //     EVERY clk_sdram edge that core_rstn_sd is low and does
+        //     "vg_reqA_last <= vg_reqA_s", which RETIRES that pending request
+        //     edge without ever completing it. It is the last writer of
+        //     vg_reqA_last in that always block, so it also overrides the CRAM
+        //     read-start chain at :1508 in a same-cycle collision - but only
+        //     the resync's value is written, and the chain's cram_read_en /
+        //     cvg_ph side effects still happen, so a fetch the chain DID pick
+        //     up still completes. The lost ones are the fetches the chain
+        //     could not start that cycle (cq_n != 0, cram_busy, cvg_ph != 0,
+        //     or chk_state != 4'd10) - the chain gets exactly one cycle to
+        //     catch each edge before the resync eats it.
+        //   * reset releases with inflA (and/or inflB) stuck at 1 and
+        //     vg_reqA_last == vg_reqA_s. The issue side above requires
+        //     !inflA / !inflB, so that channel never toggles a request again
+        //     and the arbiter never sees a pending edge again. The channel is
+        //     wedged for the rest of the session: one channel wedged silently
+        //     degrades the A/B ping-pong to the one-in-flight design that
+        //     PF_SINGLE_CH exists to reject; both wedged leaves pfring0..3 at
+        //     their power-on zeros and every tile decodes to pixel index 0.
+        //
+        // The resync is CORRECT for the motion objects: escape_mob zeroes its
+        // own request toggles and in-flight state under reset (:646-658), so
+        // the tracker there is following a real reset, not eating a real
+        // request. The playfield was the one client with no reset at all.
+        //
+        // Why this has not visibly failed on Pocket, MEASURED rather than
+        // assumed (sim/run_pf_reset_tb.sh, three scenarios):
+        //
+        //   * reset with the CRAM controller IDLE: no loss. 456 fetches
+        //     issued across an 8-line reset, all 456 completed. The
+        //     read-start chain is not gated by core_rstn_sd the way the
+        //     MiSTer port's pf_pend_q is, so it catches every edge in the one
+        //     cycle it has. This is the case a bare menu soft reset hits, and
+        //     it is why the playfield has survived 35+ builds.
+        //   * reset with chk_state != 4'd10: wedges both channels every time.
+        //   * reset with chk_state == 4'd10 AND the download-mirror drain
+        //     running (cq_n != 0 blocks a PF read start): wedges both channels
+        //     - i.e. any dataslot re-download, which drops
+        //     dataslot_allcomplete and therefore core_reset_n while chk_state
+        //     is already 4'd10 and the mirror queue is busy.
+        //
+        // So the exposure is narrow, not absent, and its narrow edge is sharp:
+        // TWO lost requests kill the layer, and losing only one silently
+        // reverts the design to the one-in-flight arrangement that
+        // PF_SINGLE_CH exists to reject. docs/PIPELINES.md already flags a
+        // toggle-handshake channel with no reset as "a latent wedge on every
+        // platform"; this removes the dependence on that margin.
+        //
+        // The fix is to give this channel the same reset escape_mob gives its
+        // own: while reset is held the request toggles sit at 0, the resync
+        // tracks 0, and release starts both sides in agreement with nothing in
+        // flight. Registers only - no new storage, no change to the SDRAM
+        // grant path. Demonstrated failing-then-fixed in sim/tb/tb_pf_reset.v.
+        if(!core_reset_n) begin
+            vg_reqA_px <= 1'b0;  vg_reqB_px <= 1'b0;
+            inflA      <= 1'b0;  inflB      <= 1'b0;
+            pfq_count  <= 3'd0;  pfq_wr     <= 2'd0;  pfq_rd <= 2'd0;
+            pf_wp      <= 2'd0;  pf_rp      <= 2'd0;
+        end
     end
 
     // pixel extraction: chunky nibbles px0..px7 across the 32-bit row.
