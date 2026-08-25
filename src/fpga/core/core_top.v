@@ -1204,11 +1204,18 @@ psram #(.CLOCK_SPEED(35.795455)) cram0 (
     // machine. That was never a bug. 110 switches to the dedicated board.
     //
     // BUILD 110 IS AN A/B AGAINST 109 AND THE PASS CONDITION IS "NO VISIBLE
-    // DIFFERENCE". Only two kernel features change (SR_Read, VBR_Stackframe)
-    // and both are measured inert on this ROM. Do NOT expect a speed change:
-    // TG68K implements no 68010 loop mode, and loop mode measures 0.0000% of
-    // the video CPU's frame work here regardless. Anything you can actually
-    // see on 110 is a finding to chase, not a win.
+    // DIFFERENCE". Behaviour is identical -- measured over 400 frames, every
+    // correctness and liveness metric matches 109 exactly. Timing is NOT
+    // quite identical: interrupt entry costs ~5 clocks more, because the
+    // 68010 stacks an 8-byte exception frame instead of 6 (one extra word
+    // write on entry, one extra word read on RTE). That is authentic 68010
+    // cost -- a real MC68010P8 pays it -- and it is ~0.004% of a frame, so it
+    // is measurable in a bench and not perceptible on screen.
+    //
+    // Do NOT expect a SPEED-UP: TG68K implements no 68010 loop mode, and loop
+    // mode measures 0.0000% of the video CPU's frame work here regardless. If
+    // anything 110 is a hair slower on interrupt entry. Anything you can
+    // actually SEE on 110 is a finding to chase, not a win.
     localparam CPU_TYPE    = 1;
     wire [23:0] fpv_addr_w, fpe_addr_w;      // escape_core exports (7.159 dom)
     wire        fpv_spec_w, fpe_spec_w;

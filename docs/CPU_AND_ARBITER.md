@@ -470,6 +470,50 @@ variant is **not** inferable from the ROM set the player loads — which is
 precisely why `CPU_TYPE` is a configuration choice rather than something the
 core could auto-detect.
 
+#### 1.6.2 The A/B, measured — behaviour identical, interrupt entry ~5 clocks slower
+
+Everything above argues the two parts are indistinguishable *to this ROM*. That
+is a claim about correctness, and it is worth separating from a claim about
+timing, because the second one is **false** and the docs should not pretend
+otherwise.
+
+`sim/run_worldwake.sh` run twice over 400 frames of dual-CPU IRQ traffic, once
+at `CPU_TYPE=0` and once at `CPU_TYPE=1`, everything else identical:
+
+| Metric | `CPU_TYPE=0` (68000) | `CPU_TYPE=1` (68010) |
+|---|---|---|
+| frames / `ready_frame` | 400 / 6 | 400 / 6 |
+| `wakes` / `iacks` | 388 / 388 | 388 / 388 |
+| `premature` / `restarts` / `failpark` | 0 / 0 / 0 | 0 / 0 / 0 |
+| `reldrops` / `storm_max` | 1 / 1 | 1 / 1 |
+| **`ackdly_avg`** | **73 clocks** | **78 clocks** |
+| verdict | ALIVE | ALIVE |
+
+**Every correctness and liveness metric is identical. One timing metric is
+not.** `ackdly` is the measured vblank→`$360000` ack delay, and it moves +5
+clocks.
+
+That number is not noise, and it is not a defect — it is the extended frame
+doing exactly what a 68010 does. Stacking 8 bytes instead of 6 is one extra
+word written on exception entry and one extra word read on `RTE`: about two
+extra bus cycles, ~4-8 clocks depending on arbitration. +5 on a 388-sample
+average is what that predicts.
+
+So `CPU_TYPE=1` is, very slightly, **slower on interrupt entry** — and that is
+the authentic behaviour for a dedicated-cabinet board, whose MC68010P8 pays the
+same cost. For scale: 5 clocks against a 119,318-clock frame is **0.004%**, with
+roughly one vblank interrupt per CPU per frame. Measurable in a bench,
+imperceptible on screen, and in the opposite direction to the loop-mode
+speed-up that §1.4 refuted.
+
+Two smaller shifts move with it and have the same cause: the extra CPU reaches
+runtime-ready 50 ns earlier, and its one release-drop lands at frame 194 instead
+of 193.
+
+> **Verdict.** "No observable difference" is right about *behaviour* and wrong
+> about *timing*. The honest form is: identical results, ~5 clocks more per
+> interrupt, which is the 68010 being a 68010.
+
 ### 1.7 Could `CPU_TYPE` be a runtime switch in the interact menu? — assessed, and the recommendation is NOT YET
 
 Since both cabinet variants are authentic and a single ROM image serves both, an
