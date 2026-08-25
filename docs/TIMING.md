@@ -256,12 +256,13 @@ identically; it has simply not lost a lottery yet.
 
 ## 10. Proposal — scoped hold multicycle. NOT SHIPPED, AND RE-SCOPED BY §11.
 
-> **Read §11 first.** Measurement after this section was written showed BUILD
-> 110's *binding* hold path is jt51 FM audio on a same-domain `gpll[0]` path,
-> not the CDC family this proposal targets. The proposal below is still correct
-> about the CDC family and still removes ~4,200 paths from the placement
-> lottery — but it would not have widened BUILD 110's margin. Treat it as one
-> candidate among several, not the answer.
+> **Read §11 and then §12 before acting on this.** §11 measured BUILD 110's
+> *binding* path as jt51 FM on a same-domain `gpll[0]` path — so this proposal
+> would not have widened BUILD 110's margin. §12 then measured the *failing*
+> build and found **all 8 negative paths are exactly the family this proposal
+> exempts**. Both are true, of different builds. Net: this will not improve the
+> reported worst-case number, but it would have prevented the gate failure.
+> See §12b.
 
 
 ```tcl
@@ -345,7 +346,9 @@ mechanism muddies both; it wants its own decision.
 
 *Added after the restored reporter ran on BUILD 110's own RTL (run 32793948178).
 It contradicts an inference in §9 and §10, so it is recorded as a correction
-rather than folded silently into them.*
+rather than folded silently into them. **§12a later refines this correction:
+§9's inference was wrong about the *passing* build and right about the *failing*
+one.** Read §11 and §12a together.*
 
 The restored diagnostic did the job it exists for, immediately: **it proved a
 guess wrong.** §9 inferred that the failing endpoints were the
@@ -429,6 +432,86 @@ multicycle landed and BUILD 111 still sat at +0.103.
 
 The false turn is the useful artefact. Keep it.
 
+## 12. GAP CLOSED: the failing build's paths, named — and §9 was right after all
+
+*`hold-repro110` (BUILD 110 RTL, `BUILD_ID` back to 3109, reporter present),
+run 32794844892. It reproduced the gate failure at **exactly -0.054**, a fourth
+determinism control, and named the registers.*
+
+**Every failing path is the `vg_data -> pfring` CDC family.** Not one jt51 path
+is negative.
+
+**Fast 1100mV 0C — 8 negative paths, 4 failing endpoints:**
+
+| slack | from | to | launch -> latch |
+|---|---|---|---|
+| **-0.054** | `vg_dataA[19]` | `pfring3[19]` | gpll[2] -> gpll[0] |
+| -0.053 | `vg_dataA[19]` | `pfring1[19]` | gpll[2] -> gpll[0] |
+| -0.047 | `vg_dataA[19]` | `pfring2[19]` | gpll[2] -> gpll[0] |
+| -0.047 | `vg_dataA[19]` | `pfring0[19]` | gpll[2] -> gpll[0] |
+| -0.007 | `vg_dataB[19]` | `pfring2[19]` | gpll[2] -> gpll[0] |
+| -0.007 | `vg_dataB[19]` | `pfring0[19]` | gpll[2] -> gpll[0] |
+| -0.003 | `vg_dataB[19]` | `pfring3[19]` | gpll[2] -> gpll[0] |
+| -0.002 | `vg_dataB[19]` | `pfring1[19]` | gpll[2] -> gpll[0] |
+
+Top-20 composition: **16 playfield CDC, 3 jt51 FM, 1 TMS5220 speech.**
+
+**Fast 85C — 4 negative, all `vg_dataA[19] -> pfring*[19]`**, worst -0.033;
+top-10 is **10/10 playfield CDC**.
+
+**The TNS arithmetic closes exactly, both corners.** TNS sums the *worst slack
+per endpoint*. The four endpoints are `pfring0..3[19]`; each has two failing
+paths (from `vg_dataA` and `vg_dataB`) and the `vg_dataA` one is worse:
+
+```
+Fast 0C   -0.054 + -0.053 + -0.047 + -0.047  =  -0.201   == reported TNS
+Fast 85C  -0.033 + -0.033 + -0.026 + -0.026  =  -0.118   == reported TNS
+```
+
+§3's rigorous lower bound of "at least 4 failing endpoints" was exactly right:
+it is 4 endpoints, carrying 8 failing paths.
+
+### 12a. So which was it — §9 or §11?
+
+**Both, and they are not in conflict — they are different builds.**
+
+- **§9 inferred the CDC family was the failing set. For the build that actually
+  failed the gate, that inference was CORRECT.** All 8 negative paths, at both
+  corners, are `vg_data -> pfring`.
+- **§11 measured jt51 FM as BUILD 110's *binding* path. That is also correct.**
+  In a build where nothing fails, the tightest path happens to be jt51.
+
+§11's phrasing that "§9 narrowed it too far" stands as a statement about the
+*design* — the hold-critical set really is {playfield CDC, speech, FM audio} and
+rotates with placement (bit 27 in BUILD 108, bit 19 in the failing build, bit 25
+in BUILD 110 — different bits every time, which is what a placement lottery
+looks like). But it was wrong to let that reframing imply §9 had misidentified
+the *failure*. It had not.
+
+The correction §11 makes is still the valuable one, and §11a still stands: an
+inference was labelled, tested, and partially overturned. The refinement is that
+it was overturned **for the passing build and not for the failing one**, which
+is a distinction only the measurement could have drawn — and neither reasoning
+nor a single build would have produced it.
+
+### 12b. This materially upgrades §10
+
+§13.3 argues no lever raises the cluster, and that remains true. But §10 was
+being judged on the wrong criterion. The question is not "would it raise BUILD
+110's +0.103" (it would not — jt51 binds there). The question is **"would it
+have prevented the gate failure"**, and the answer is now measured:
+
+> **Yes. All 8 failing paths are in exactly the family §10 exempts.**
+
+That family has now lost twice — it was BUILD 108's worst path at +0.005 and it
+is the entire failing set at -0.054. §10 is therefore not merely "~4,200 fewer
+tickets in the lottery"; it removes **the family that demonstrably keeps drawing
+the losing ticket**, and it is justified by §8's proof rather than by a desire
+for a bigger number.
+
+It still will not move the reported worst-case slack, and it must not be sold as
+if it would. §8a's control-path caveat is unchanged.
+
 ## 13. Costing the global levers — and why none of them raise the cluster
 
 *Requested: cost clock regioning, `set_max_skew` and anything else that
@@ -499,9 +582,10 @@ So the levers that actually change *risk* are the ones that reduce the
 population of paths needing hold-fixing at all, or that make a bad re-roll
 loud:
 
-- **§10's CDC multicycle** — removes ~4,200 paths from the pool entirely. Worth
-  doing on its own merits, but as *fewer tickets in the lottery*, **not** as a
-  margin play. It will not move the worst number.
+- **§10's CDC multicycle** — removes ~4,200 paths from the pool entirely, and
+  §12 shows that pool contained **every one of the failing build's 8 negative
+  paths**. Worth doing as *removing the family that keeps drawing the losing
+  ticket*, **not** as a margin play: it will not move the worst reported number.
 - **The margin floor and the reporter** — already restored, and the floor raised
   to 0.150. These convert a silent re-roll into a loud one, which given §13.3 is
   the most useful thing available.
@@ -560,21 +644,22 @@ untouched by this work and unchanged by it.
 ## 15. Suggested sequencing
 
 1. **Done:** the per-path reporter, its CI step and the margin warning are
-   restored, and the hold floor is raised to 0.150. Their first run corrected a
-   wrong inference (§11) — which is the argument for having them.
+   restored, the hold floor is raised to 0.150, and the reporter has now both
+   corrected an inference (§11) and closed the failing-build gap (§12).
 2. **Ship alpha on BUILD 110.** §14: it passes every corner, hold is signed off
-   at the corners where hold is worst, and the bitstream is deterministic. Treat
-   +0.10 as this design's structural floor.
+   at the corners where hold is worst, and the bitstream is deterministic.
+   Treat +0.10 as this design's structural floor.
 3. **Do not pursue the global levers** (§13). gpll[0] is already on a global
-   network, `set_max_skew` cannot move a fixed GCLK spine, and §13.3 shows the
+   network, `set_max_skew` cannot move a fixed GCLK spine, and §13.3 argues the
    cluster's position is Quartus's stopping criterion rather than a design
-   property — so improving skew just means the fitter pads less.
-4. **Optionally apply §10's CDC multicycle later**, framed correctly: ~4,200
-   fewer paths needing hold-fixing, i.e. fewer tickets in the lottery. It will
-   **not** move the worst number, and should not be sold as if it would.
-5. **Revisit only if a future build fails the gate repeatedly**, rather than
-   once. A single re-roll to negative is the system working; a pattern would
-   mean the population has grown and §10 becomes worth its risk.
+   property.
+4. **§10's CDC multicycle is now the one worthwhile change**, on §12b's
+   evidence: the family it exempts is the entire failing set at -0.054 and was
+   BUILD 108's worst path. Apply it *after* alpha, framed honestly — it removes
+   the family that keeps losing, it will **not** raise the reported worst-case
+   slack, and §8a's control paths stay timed. Verify with `report_exceptions`.
+5. **Revisit the rest only if a future build fails repeatedly.** One re-roll to
+   negative is the system working.
 
 ## What is measured, what is inferred
 
@@ -610,8 +695,9 @@ inference about tool behaviour and is labelled as one. It could be tested by
 refitting with an artificially relaxed hold requirement and seeing whether the
 cluster moves up or simply thins.
 
-**Still inferred:** which registers actually failed in the `cpu-68010` build at
--0.054. That build predates the restored reporter, so its per-path detail does
-not exist. `hold-repro110` (throwaway, never merge) is in flight to produce it.
-Given §11, the earlier assumption that it was the CDC family should be treated
-as unproven — jt51 FM is at least as likely.
+**Now measured, no longer inferred (§12):** the failing build's registers.
+`hold-repro110` reproduced -0.054 exactly (a fourth determinism control) and
+named them — 8 negative paths over 4 endpoints, **all `vg_dataA/B[19] ->
+pfring0..3[19]`**, with the per-endpoint TNS arithmetic closing exactly at both
+corners (-0.201 and -0.118). §3's "at least 4 failing endpoints" bound was
+exactly right.
