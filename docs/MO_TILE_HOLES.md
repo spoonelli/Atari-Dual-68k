@@ -180,3 +180,40 @@ line-start preload during early hblank.
 
 `sim/run_pfline_tb.sh` now judges it, and the mutation above is the control
 that keeps the judge honest.
+
+## The fix attempt: three hypotheses eliminated, none of them the cause
+
+All measured with `sim/run_pfline_tb.sh`, which is proven to fail on a mutant.
+
+| change | knee (pass/fail latency) | verdict |
+|---|---|---|
+| baseline, lead = 16 px (2 cells) | **13 / 14** | reference |
+| lead = 24 px (3 cells) | **13 / 14** | **no effect** |
+| ring 4 -> 8 slots | broke the pipeline at every read offset | rejected |
+| `pf_rp <= pf_wp - N`, N = 0..3 | identical at every N | **no effect** |
+
+**More lead buys nothing.** That kills the obvious reading of the 13-clock
+coincidence. The likely reason: the enqueue is not the binding step. Requests
+go into a 4-deep queue that drains to two channels (A/B) as they free up, so a
+longer lead makes the QUEUE longer without making the LAST fetch before pixel 0
+any earlier. The constraint is the drain rate and channel count - bandwidth -
+not how early the request is formed.
+
+**Deepening the ring is not a free knob.** At 8 slots the pipeline failed at
+every `RP_OFFSET`, so the existing alignment depends on the mod-4 wrap rather
+than merely on there being enough slots. Anyone widening it has to re-derive
+that alignment, not just add registers.
+
+**A limit of the ramp test, stated so nobody over-reads it.** `pix(x) ==
+pix(x-8) + 1` detects a BROKEN ramp but is blind to a UNIFORM cell shift, since
+shifting every cell preserves the property. That is why `RP_OFFSET` shows no
+effect here and it is not evidence that the offset is harmless. The test is
+valid for the strip - which breaks the ramp at x=8 - and not valid for judging
+absolute cell alignment.
+
+**Where this points.** The strip and the tile holes look like the same defect
+seen by two consumers: the playfield and the MO engine both starve on a fetch
+path that cannot deliver under contention. That is consistent with the SDRAM
+work improving both without curing either, and it means the next thing to try
+is fetch BANDWIDTH for the playfield - more channels, or a faster drain - not
+more lead.
