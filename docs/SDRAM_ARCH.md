@@ -26,6 +26,48 @@ unreachable, and **every read pays the 15-clock precharge-all armored path.**
 
 ---
 
+## 0a. The finding to carry forward: a gate whose controls stop being controls
+
+Ahead of everything else, because it generalises beyond this work and would
+have bitten silently.
+
+`sim/run_sdram_refresh_tb.sh` proves it can fail by running two policies that
+are **out of JEDEC spec** and requiring both to be reported FAIL. That is the
+right design. But the thing being bounded is a **time** — 7.8125 µs per row —
+while the policies are expressed in **clocks**. So the verdict on every cell,
+including the negative controls, is a function of the clock:
+
+| | 35.795455 MHz | 50.113637 MHz |
+|---|---|---|
+| the 7.8125 µs limit, in clocks | 279.7 | **391.5** |
+| control "250 / 48" (worst ≈ 314 clk) | **8.77 µs → FAIL** ✓ | **6.27 µs → PASS** ✗ |
+| control "224 / 48" (worst ≈ 288 clk) | **8.05 µs → FAIL** ✓ | **5.75 µs → PASS** ✗ |
+
+**Raise the clock and both negative controls start passing.** The script's own
+logic then reports every cell green and prints its success banner, while
+measuring nothing at all — and it would do so at the exact moment someone was
+relying on it most, having just changed the clock. Nothing in the script warns;
+its `report ... FAIL` expectations are literals chosen for one clock.
+
+Fixed on `sdram-clock-EXPERIMENTAL` by making `CLK_NS` a knob and re-basing the
+controls to policies that are genuinely out of spec **at the new clock**
+(350/70 → 8.700 µs, 320/60 → 7.902 µs, both correctly rejected).
+
+The general shape, worth stating because this project has now hit this class
+repeatedly: **a proof-it-can-fail control is itself calibrated, and its
+calibration can go stale exactly like the constant it is guarding.** The same
+audit applied to the neighbouring gates found `run_psram_tb.sh` in the same
+condition — its negative control was "declared 35.795455 while the PLL runs
+85.909", a clock this design does not have.
+
+A related, smaller instance found the same way: `sim/tb/tb_mob_perf.v` declares
+`reg [6:0] lat [0:3]` and assigns `lat[k] <= GFX_LAT[6:0]`, so **any
+`GFX_LAT ≥ 128` silently truncates mod 128**. `GFX_LAT=134` behaves as 6 and
+reports a perfectly clean frame. Neither the default 8 nor the 31 in that
+file's own header trips it, so nothing in the gate set exposes it.
+
+---
+
 ## 1. What the shipping controller actually does
 
 `src/fpga/core/rtl/sdram_simple.v`, clock `clk_sdram` = **35.795455 MHz**
@@ -750,11 +792,19 @@ the baseline; it is a warning, not a failure.
 
 Two notes on gates that did not simply pass:
 
-- **`run_mob_order_check.sh` fails out of the box for everyone.** Its default
-  is `BASE_REF=origin/mo-chan4`, and that ref does not exist on the remote —
-  `mo-chan4` is a local-only branch that was never pushed. `git show` exits 128
-  and the gate dies in 0 s. Nothing to do with this work; run it with
-  `BASE_REF=mo-chan4`. Worth fixing at source.
+- **`run_mob_order_check.sh` failed on its default ref — since FIXED at
+  source, and my diagnosis of the cause was wrong.** Its default is
+  `BASE_REF=origin/mo-chan4`; `git show` exited 128 and the gate died in 0 s. I
+  inferred the branch "was never pushed". It was — it was later **deleted in a
+  branch prune**, so this was not a latent defect in the script but a ref that
+  went away underneath it. Run here with `BASE_REF=mo-chan4`: **PASS**, 9 cells,
+  `b_shorter=0` in every one.
+  Fixed at source since, along with a **second and worse bug found in the same
+  file**: its docker step piped stdout *and stderr* to `/dev/null` with no error
+  handling, so under `set -e` any docker failure aborted the whole script with
+  docker's exit code and **zero output** — a gate that dies silently and blames
+  nothing. A guard now also refuses a base whose `escape_mob.v` is identical to
+  HEAD's, which would make the comparison vacuous.
 - **`run_vshad3_tb.sh` was invalidated by me, not by the change.** I removed
   orphaned Docker containers while it was mid-run and killed one of its cells,
   which then reported "the bench produced no result at all". Re-run clean —
