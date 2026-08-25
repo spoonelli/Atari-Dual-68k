@@ -1077,7 +1077,20 @@ end
     reg         cram_write_en;
     reg  [15:0] cram_din;
 
-psram #(.CLOCK_SPEED(85.909)) cram0 (
+// CLKFIX-106: clk_sdram is mf_pllbase outclk_2 = 35.795455 MHz, NOT 85.909.
+// The 85.909 figure is a stale comment from before "v22: SDRAM 42.95 -> 35.8
+// MHz" and was copied here when the CRAM path was born (73acb75) -- the PLL
+// already read 35.795455 at that commit, so this was never a deliberate margin.
+// psram.sv derives every wait-state count as CEIL(min_ns / (1000/CLOCK_SPEED)),
+// so believing cycles are 11.64ns when they are really 27.94ns made it wait 7
+// cycles for the 70ns read access where 3 suffice: ~279ns per playfield fetch
+// instead of ~168ns. CRAM serves the playfield, so this taxed every tile fetch.
+//
+// This file is NOT compiled by the MiSTer build (src/mister/Arcade-Escape.qsf
+// -> files.qip, top sys_top), but it IS compiled by the Pocket build on this
+// same branch (src/fpga/ap_core.qsf:741, :813). A Pocket .rbf built from here
+// therefore shipped the BUILD 106 bug until this fix. Gate: sim/run_psram_tb.sh.
+psram #(.CLOCK_SPEED(35.795455)) cram0 (
     .clk        ( clk_sdram ),
     .bank_sel   ( 1'b0 ),
     .addr       ( cram_addr ),
@@ -1127,7 +1140,7 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg         cst_go = 0, cst_done = 0;
     reg         vb_cst_d = 0;   // LANE4m re-arm edge
 
-    // ---------------- escape_core ROM fetch (7.159 domain) -> SDRAM (85.9 domain)
+    // ---------------- escape_core ROM fetch (7.159 domain) -> SDRAM (35.8 domain)
     wire [23:0] core_rom_addr;
     wire        core_rom_req;
     wire        core_rom_req_s;
@@ -1141,7 +1154,7 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     reg  [24:0] rd_addr_q;   // per-grant latched read address (v39)
     reg         rd_pre_q;    // v42: armor CPU reads only
     wire        sd_rd_ack;
-    // sdram-sched: 7.159 and 85.909 are same-PLL siblings (12:1) and the
+    // sdram-sched: 7.159 and 35.795455 are same-PLL siblings (5:1) and the
     // SDC now groups them synchronous, so a single capture FF is a TIMED
     // path - not a metastability risk. The 3-stage ack-return chain alone
     // cost ~2 CPU clocks on every SDRAM access; this is the tier-2 fast
@@ -1160,7 +1173,7 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     // falls, so the ~13-clk armored SDRAM read completes well before the
     // first post-AS CPU edge and DTACK lands at the authentic 4-clock phase.
     // ROM is read-only, so a speculative read can never have side effects,
-    // and ready is tag-compared against the CPU's CURRENT address every 85.9
+    // and ready is tag-compared against the CPU's CURRENT address every 35.8
     // clock, so a stale serve is structurally impossible. All crossings are
     // single-FF timed paths (SDSCHED-73/74 SDC grouping); fpv/fpe_data
     // settle >=2 sdram clocks before ready can assert (vpre stage), and the
@@ -1182,7 +1195,7 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     localparam TASLOCK_EN  = 1;
     wire [23:0] fpv_addr_w, fpe_addr_w;      // escape_core exports (7.159 dom)
     wire        fpv_spec_w, fpe_spec_w;
-    reg  [23:0] fpv_addr_s, fpe_addr_s;      // 85.9-domain samples
+    reg  [23:0] fpv_addr_s, fpe_addr_s;      // 35.8-domain samples
     reg         fpv_spec_s = 1'b0, fpe_spec_s = 1'b0;
     always @(posedge clk_sdram) begin
         fpv_addr_s <= fpv_addr_w;  fpv_spec_s <= fpv_spec_w;
@@ -1237,7 +1250,7 @@ psram #(.CLOCK_SPEED(85.909)) cram0 (
     wire [3:0] mg_req_s;
     wire [3:0]  mo_gfx_req;
     wire [95:0] mo_gfx_addr;              // 4 x 24
-    // SDSCHED-74: same-family crossings (7.159 -> 85.909, timed since the
+    // SDSCHED-74: same-family crossings (7.159 -> 35.795455, timed since the
     // '73 SDC grouping) - single capture FFs. The 3-stage done-return
     // chains cost ~400ns per fetched sprite row (~1/3 of the row budget).
     integer   mci;                        // MOCHAN-4 per-channel loop index
@@ -1617,8 +1630,12 @@ always @(posedge clk_sdram) begin
         // SDRAM byte address; one burst-of-2 = the {even,odd} word pair the
         // CRAM path used to deliver. CPUs always outrank MO: an MO grant
         // requires no pending/in-flight CPU work, and one MO read (~10 clks
-        // @85.9MHz) is far shorter than a CPU bus cycle, so worst-case CPU
-        // latency grows by well under one 7.16MHz cycle.
+        // @35.8MHz = ~279ns) is far shorter than a CPU BUS CYCLE (48 clks,
+        // ~1.34us), so MO can never hold the bus long enough to stall a CPU
+        // access. CLKFIX-106: this used to say the delay was "well under one
+        // 7.16MHz cycle", which was only true under the 85.909 misreading -
+        // at the real 35.795455 those 10 clks are exactly 2 CPU clocks. The
+        // bus-cycle comparison is the one that actually bounds the latency.
         // (SDSCHED-88: MO stays the LOWEST-priority SDRAM read client, now
         // also below both CPU fastpath fills. A fill is ~13 clks and each
         // CPU issues at most one per 48-clk bus cycle, so MO keeps >=40% of

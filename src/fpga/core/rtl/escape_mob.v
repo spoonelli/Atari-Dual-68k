@@ -66,7 +66,7 @@ module escape_mob (
 
     // MOCHAN-4: per-channel registers behind the packed ports. Keeping the
     // address in a real register array and flattening it with a concatenation
-    // means every signal that crosses into the 85.9MHz SDRAM domain is still
+    // means every signal that crosses into the 35.8MHz SDRAM domain is still
     // a plain register output - nothing combinational was added to the
     // crossing, exactly as MOCOV-1 left it.
     localparam NCH = 4;
@@ -225,7 +225,7 @@ module escape_mob (
     // multiply MOVED to the scout rather than being duplicated. The engine
     // uses ~13ns of a 139.68ns budget either way; the new critical path is
     // ly -> mo_vaddr (the scout's own address decode), and every output that
-    // crosses to the 85.9MHz SDRAM domain (gfx_req*, gfx_addr*) is still
+    // crosses to the 35.8MHz SDRAM domain (gfx_req*, gfx_addr*) is still
     // registered here, so nothing combinational was added to that crossing.
     //
     // MODEPTH-1 measured the same way, against MOCHAN-4 (the two rows above

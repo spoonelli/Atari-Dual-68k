@@ -85,12 +85,12 @@ entity escape_core is
         rom_ack    : in  std_logic;
 
         -- SDSCHED-88 fastpath (core_top clk_sdram service). fast_*_addr /
-        -- fast_*_spec are COMBINATIONAL from the live CPU bus so the 85.9MHz
+        -- fast_*_spec are COMBINATIONAL from the live CPU bus so the 35.8MHz
         -- side can start its speculative read a full CPU clock before AS
         -- falls (the TG68K kernel presents the next address one clock
         -- early); ROM is read-only so a speculative read is always harmless.
         -- fast_*_ready means "fast_*_data holds the word at this CPU's
-        -- CURRENT address" - tag-compared every 85.9 clock in core_top, so a
+        -- CURRENT address" - tag-compared every 35.8 clock in core_top, so a
         -- stale serve is structurally impossible.
         fast_v_addr  : out std_logic_vector(23 downto 0);
         fast_v_spec  : out std_logic;
@@ -615,9 +615,9 @@ begin
     e_arb_pend <= e_rom_pend when FASTPATH_EN = 0 else (e_rom_pend and e_fast_to);
 
     -- SDSCHED-88 fastpath exports: raw region decodes WITHOUT as_n (so the
-    -- 85.9 side can fill speculatively) plus the same image-address mapping
+    -- 35.8 side can fill speculatively) plus the same image-address mapping
     -- the arbiter uses. Combinational on purpose; sampled by single FFs in
-    -- the 85.9 domain (timed paths per the SDSCHED-73 SDC grouping).
+    -- the 35.8 domain (timed paths per the SDSCHED-73 SDC grouping).
     v_shad_rng <= '1' when SHAD_EN = 1 and (v_addr(23 downto 14) = "0000000000"
                        or v_addr(23 downto 15) = "000001001"
                        or v_addr(23 downto 15) = "000001010") else '0';

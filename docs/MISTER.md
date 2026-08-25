@@ -231,32 +231,59 @@ visible artefacts while a mistimed read returns plausible-looking wrong data.
   Pocket's strict PF-over-MO (which lived on the CRAM chain, where MO was not a
   client at all). Motion objects have hard per-line deadlines; the playfield
   prefetches cells ahead and tolerates sharing.
-* **The refresh interval was out of JEDEC spec and is now fixed (REFRESH-107).**
-  This was previously documented here as "nothing inside `sdram_simple` was
+* **The refresh interval was out of JEDEC spec, and REFRESH-107's fix was not
+  enough either; it is now reconciled to ONE policy (REFRESH-112).**
+  This was originally documented here as "nothing inside `sdram_simple` was
   modified", on the strength of a comment in that file reading
   `250 = 2.9us @ 85.909MHz`. That comment referred to a clock this design has
   not used in a long time. The SDRAM domain is 35.795455 MHz on **both**
-  platforms, so the real numbers were:
+  platforms — verified from the PLL IP (`src/mister/rtl/pll/pll_0002.v`
+  `output_clock_frequency1`), not from a neighbouring comment.
+
+  REFRESH-107 corrected the clock but kept the same **wrong worst-case model**,
+  `INTERVAL + DEFER_CAP`, and picked `224` to land at a believed 7.599 us. That
+  model silently drops the transaction still in flight when the deferral cap
+  expires: `refresh_due` is only consumed from `S_IDLE`, so the FSM must finish
+  a precharge-armored `rd_pre` read (15 clocks) and clear the read ack before it
+  can refresh. The true worst case is `INTERVAL + DEFER_CAP + 16`, and it is
+  **measured**, not derived:
 
   ```
-  interval          250 clk / 35.795455 MHz = 6.984 us
-  SDSCHED-88 defer + 48 clk                 = 1.341 us
-  worst case                                = 8.325 us
-  MT48LC16M16A2 requirement                 = 7.8125 us     -> 6.6% OVER
+  policy (interval/defer)   worst case   % of JEDEC budget   verdict
+  250 / 48  (original)      314 clk = 8.7721 us   112.28%    FAIL
+  224 / 48  (REFRESH-107)   288 clk = 8.0457 us   102.99%    FAIL  <- still over
+  250 / 0   (sdram-sched)   266 clk = 7.4311 us    95.12%    pass, thin margin
+  160 / 48  (SHIPPING)      224 clk = 6.2578 us    80.10%    PASS
   ```
 
-  This is the same class of bug the Pocket side found and fixed the same week,
-  where it was silently corrupting graphics data. It matters **more** here: the
-  deferral only engages under read pressure, and this platform has no PSRAM, so
-  the playfield graphics client shares this bus too — and after PFRESET-107 it
-  actually uses it. The interval is now `224` (6.258 us); `224 + 48 = 7.599 us`,
-  in spec with ~3% margin, with the bounded deferral (which the zero-wait CPU
-  fastpath was tuned against) left intact. Average interval refreshes all 8192
-  rows in 51.3 ms against the 64 ms `tREF` window.
+  Limit: MT48LC16M16A2, 8192 rows / 64 ms = 7.8125 us per row = 279.7 clocks.
+  So `224` was never a fix — it was 3% over spec on the platform where the
+  playfield **also** shares this bus (after PFRESET-107 it actually uses it),
+  which is the worse place to have a silent, temperature-dependent retention
+  violation that manifests as graphics corruption rather than a crash.
 
-  **Reconcile deliberately on merge:** the parent project's `sdram-sched` branch
-  fixed the same violation by *deleting* the deferral rather than shortening the
-  interval. Two platforms must not drift apart here again.
+  The interval is now **160** with the bounded deferral **unchanged at 48** (the
+  zero-wait CPU fastpath was tuned against that 48; changing it would force a
+  retune). Both are now **module parameters** on `sdram_simple` rather than
+  hardcoded literals, defaulting to 160/48, so the two platforms share one
+  source of truth and a divergent value has to be stated at the instantiation,
+  in the open.
+
+  **Bandwidth cost, measured:** refresh occupancy goes 4.890% (224) -> 6.831%
+  (160) of SDRAM bus clocks, **+1.94 percentage points**, taken from the
+  lowest-priority client (sprites). That is a real cost on this platform, whose
+  bus is busier than the Pocket's because the playfield moved onto it. It is
+  still the right trade: losing ~2% of sprite bandwidth beats corrupting the
+  memory the sprites are stored in.
+
+  **Gate:** `sim/run_sdram_refresh_tb.sh` measures worst-case row interval
+  against the real FSM and carries both out-of-spec policies (250/48 and this
+  branch's own 224/48) as negative controls that must be reported FAIL.
+  Note `READ_PRESSURE`: only mode 3 (bursty) reaches the true worst case. Under
+  constant pressure the measured gap collapses to `INTERVAL + 1` and every
+  policy above looks fine, because `refresh_ctr` resets when a refresh becomes
+  *due*, not when it is *serviced*. Do not re-derive this on paper; run the
+  bench.
 * tRCD/tRP/tRFC waits and the CL2 mode word are otherwise unchanged from the
   Pocket.
 
@@ -516,11 +543,30 @@ first commit and `escape_core`'s colour RAM is the full 2048 entries — so the
 only change needed was the OR into the pen. The line tag narrowing to `ly[7:0]`
 is entirely inside `escape_mob.v` and needs nothing from the glue.
 
-**PSRAM / `CLOCK_SPEED`: untouched, and unreachable from here.** MiSTer does not
-use the PSRAM path at all — `third_party/analogue-pocket-utils/psram.sv` is not
-in `src/mister/files.qip`, there is no `psram` instance in the MiSTer hierarchy,
-and the DE10-Nano has no such device. The held one-variable experiment on the
-Pocket side is unaffected by anything in this port.
+**PSRAM / `CLOCK_SPEED`: unreachable from the MiSTer build, but NOT dead code on
+this branch (CLKFIX-106, fixed here).** MiSTer does not use the PSRAM path at
+all — `third_party/analogue-pocket-utils/psram.sv` is not in
+`src/mister/files.qip`, there is no `psram` instance in the MiSTer hierarchy,
+and the DE10-Nano has no such device. All of that is true and none of it made
+the constant harmless.
+
+This branch carries **both** project trees. `src/fpga/ap_core.qsf` (lines 741 and
+813) compiles `core_top.v` and `psram.sv` for the **Pocket**, so a Pocket `.rbf`
+built from `mister-port` shipped the BUILD 106 bug: `core_top.v` instantiated
+`psram #(.CLOCK_SPEED(85.909))` while `clk_sdram` is really 35.795455 MHz
+(`mf_pllbase` `outclk_2`). `psram.sv` derives every wait as
+`CEIL(min_ns / (1000/CLOCK_SPEED))`, so it waited **7 cycles for the 70 ns read
+access where 3 suffice** — ~279 ns per playfield fetch instead of ~168 ns, on
+every tile.
+
+Now `35.795455`, matching `tas-atomic`. Gate: `sim/run_psram_tb.sh`, which runs
+the shipping config (PASS, 41.0 ns measured I/O headroom over 172 reads) and a
+negative control that declares 35.795455 while the PLL runs 85.909 (must FAIL,
+and does — 4 async pulse-width violations).
+
+**The lesson, since this document made the error:** "the MiSTer build does not
+compile it" is not the same as "this branch does not ship it." Scope a
+dead-code claim to the *build*, not the *branch*.
 
 ### A note for whoever checks the Pocket build
 
@@ -716,7 +762,7 @@ the OSD is a convenience.
   brief say "85.909 MHz, 12:1". That is **stale**; the PLL IP has said 5× since
   commit *"v22: SDRAM 42.95 → 35.8 MHz"*. Read the PLL, not the comments.
 
-### Not verified — the PFRESET-107 / REFRESH-107 build has NOT been on hardware
+### Not verified — the PFRESET-107 / REFRESH-112 build has NOT been on hardware
 
 BUILD 105 *has* been on a DE10-Nano (see "FIRST FLASH RESULT"): it boots, runs
 attract mode, takes coins, plays level 1, and renders motion objects,
@@ -733,8 +779,15 @@ build that fixes the playfield, which **nobody has flashed**.
   and which has therefore never run on any hardware on either platform. See the
   "Timing assumptions that were changed" note — this is now the top item to
   watch, with a one-line A/B if it misbehaves.
-* **REFRESH-107 on hardware.** The arithmetic is unambiguous and the change is a
-  constant, but no capture has been taken with it.
+* **REFRESH-112 on hardware.** The change is a constant, and the worst-case row
+  interval is now measured against the real FSM rather than derived on paper
+  (`sim/run_sdram_refresh_tb.sh`) — but no capture has been taken with it.
+  REFRESH-107 was listed here as "the arithmetic is unambiguous"; it was in fact
+  wrong, in the safe-looking direction, which is exactly why this row now cites
+  a bench instead of arithmetic. What is still unverified on hardware is the
+  **bandwidth** consequence: +1.94 pp of refresh occupancy comes out of the
+  sprite client, and sprite throughput under a full playfield load has never
+  been exercised on a real board.
 * SDRAM bandwidth with the playfield added and the BUILD 104 4-channel motion
   object engine — the ~71%-of-a-line figure is arithmetic from `sdram_simple`'s
   FSM, not measurement. **The budget has still never been exercised**: until
@@ -876,7 +929,7 @@ complexity proxy).
 | Still exactly 1 distinct colour per region, still a black staircase | PFRESET-107 did **not** fix it. The channel is still not completing. Nothing else in this document explains that; re-open at the arbiter. |
 | Textured, but speckled with individually wrong 8-pixel tile rows — scattered, **not** correlated with how busy the scene is | `rd_pre = 0` wrong-row serves. One-line A/B: set the PF grant arm's `rd_pre_q <= 1'b0;` to `1'b1`. See "Timing assumptions that were changed". |
 | Textured, but tile rows go stale or repeat, **worse toward the right of each line** and **worse the more robots are on screen** | Bandwidth. The budget has never been exercised until now. Levers are in "Bandwidth budget". Discriminator: the artifact rate must **track scene complexity** — compare quiet and busy frames explicitly rather than eyeballing. |
-| Random tiles wrong, changing frame to frame, **no** geometric or load correlation | Memory data corruption, not a fetch problem — i.e. REFRESH-107 did not go far enough. Next step is the SDRAM read-capture phase on the DE10-Nano module. |
+| Random tiles wrong, changing frame to frame, **no** geometric or load correlation | Memory data corruption, not a fetch problem — i.e. REFRESH-112 did not go far enough (note REFRESH-107's 224 genuinely did not — it measured 103% of the JEDEC budget; 160 measures 80%). Next step is the SDRAM read-capture phase on the DE10-Nano module. |
 
 The first two rows are the ones that matter. Everything below them is a *new*
 problem that BUILD 105 could not have shown, because until this fix the

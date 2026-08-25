@@ -1,17 +1,43 @@
 //
-// Minimal single-beat SDRAM controller for the Pocket's MT48LC16M16A2 (16-bit),
-// running in the 28.636 MHz SDRAM domain (4x CPU; generous timing margins). Two clients over 4-phase toggle-free
-// level handshakes (both synchronized externally):
+// Minimal single-beat SDRAM controller for the MT48LC16M16A2 (16-bit),
+// running in the 35.795455 MHz SDRAM domain. Two clients over 4-phase
+// toggle-free level handshakes (both synchronized externally):
 //   - write port: ROM download from the APF bridge
 //   - read port:  escape_core program-ROM fetches
-// Conservative timing (CL2, tRCD/tRP 3 cycles, auto-refresh every ~6us).
+// Conservative timing (CL2, tRCD/tRP 3 cycles).
 // Word-addressed externally? No — byte addresses in, we use addr[24:1] as the
 // 16-bit word address.
 //
+// CLKFIX-106/REFRESH-111: the header used to say "the 28.636 MHz SDRAM domain
+// (4x CPU)". That is a THIRD wrong figure for this clock, alongside the 85.909
+// that CLKFIX-106 removed elsewhere. The authority is the PLL IP itself:
+// src/fpga/core/mf_pllbase/mf_pllbase_0002.v declares
+// output_clock_frequency2 = "35.795455 MHz", and core_top wires outclk_2 to
+// clk_sdram. Period 27.936508 ns. Quote the PLL, not a neighbouring comment.
+//
 `default_nettype none
 
-module sdram_simple (
-    input  wire        clk,           // 85.909 MHz
+module sdram_simple #(
+    // REFRESH-111: these were hardcoded, and three branches then hardcoded
+    // three DIFFERENT values (Pocket 160, mister-port 224, sdram-sched 250
+    // with the deferral deleted) for the same JEDEC violation. Parameterising
+    // them is the reconciliation: one source of truth for the FSM, per-platform
+    // values chosen at instantiation and visible side by side. See
+    // docs/DEVIATIONS.md "SDRAM refresh interval" before changing either.
+    //
+    //   REFRESH_INTERVAL - clocks between refresh requests.
+    //   DEFER_CAP        - SDSCHED-88 bounded deferral: a due refresh yields to
+    //                      a pending read until it has been due this many
+    //                      clocks. 0 disables the deferral entirely.
+    //
+    // Worst-case row interval is NOT interval+DEFER_CAP: the FSM must also
+    // finish whatever transaction is in flight when the cap expires, and clear
+    // the read ack. Measured by sim/tb/tb_sdram_refresh.v, which is the only
+    // thing that should be used to justify a value here.
+    parameter REFRESH_INTERVAL = 160,
+    parameter DEFER_CAP        = 48
+) (
+    input  wire        clk,           // 35.795455 MHz (mf_pllbase outclk_2)
     input  wire        reset_n,
 
     // SDRAM chip
@@ -107,31 +133,23 @@ module sdram_simple (
         end else begin
             cmd(CMD_NOP);
             refresh_ctr <= refresh_ctr + 10'd1;
-            // REFRESH-107: this used to read "250 = 2.9us @ 85.909MHz", a
-            // comment left over from a clock this design has not used in a
-            // long time.  The SDRAM domain is 35.795455 MHz on BOTH platforms,
-            // so 250 clocks is 6.984us, and SDSCHED-88's bounded deferral adds
-            // up to another 48 clocks (1.341us) on top:
+            // CLKFIX-106: this clock is 35.795455 MHz (mf_pllbase outclk_2), NOT
+            // the 85.909 the old comment assumed -- a period of 27.94ns, not
+            // 11.64ns. At the original 250 the interval was really 6.98us
+            // typical, and the deferral below pushed the worst case past the
+            // 7.8125us JEDEC per-row limit: a latent retention violation on the
+            // memory holding sprite graphics and CPU RAM.
             //
-            //     worst case = (250 + 48) / 35.795455 MHz = 8.325 us
-            //     MT48LC16M16A2 requirement                = 7.8125 us
-            //
-            // i.e. 6.6% out of spec whenever the deferral engages, which is
-            // exactly the silent-graphics-corruption bug the Pocket side found
-            // and fixed.  It matters MORE here than on the Pocket: the
-            // deferral only engages under read pressure, and this platform has
-            // no PSRAM, so the playfield graphics client shares this bus too.
-            //
-            // 224 + 48 = 272 clocks = 7.599 us, in spec with ~3% margin, and
-            // the deferral (which the zero-wait CPU fastpath was tuned with)
-            // is left intact.  Average interval 6.258us -> all 8192 rows in
-            // 51.3 ms against the 64 ms tREF window.
-            //
-            // NOTE for the maintainer: the parent project's sdram-sched branch
-            // fixed the same spec violation by DELETING the deferral instead.
-            // Reconcile deliberately when this branch merges - do not let the
-            // two platforms drift apart here again.
-            if (refresh_ctr == 10'd224) begin      // 6.26us @ 35.795455 MHz
+            // REFRESH-111: the arithmetic everyone used to justify a
+            // replacement value was wrong in the SAFE-LOOKING direction. It
+            // assumed worst case = REFRESH_INTERVAL + DEFER_CAP. It is not.
+            // When the deferral cap expires the FSM may be part-way through a
+            // transaction, and a precharge-armored CPU read (rd_pre) takes 15
+            // clocks; the read-ack cleanup in S_IDLE costs one more. So the
+            // true worst case is REFRESH_INTERVAL + DEFER_CAP + 15, measured
+            // by sim/tb/tb_sdram_refresh.v against the real FSM rather than
+            // computed on paper. Do not re-derive it by hand; run the bench.
+            if (refresh_ctr == REFRESH_INTERVAL[9:0]) begin
                 refresh_due <= 1'b1;
                 refresh_ctr <= 10'd0;
             end
@@ -167,10 +185,16 @@ module sdram_simple (
                 // SDSCHED-88: a refresh DEFERS (bounded) to a pending read -
                 // the zero-wait CPU fastpath budgets ~24 spare clocks per bus
                 // cycle and a 10-clk tRFC in front of the fill blows it.
-                // REFRESH-107: the cap that matters is this 48, not the 63 the
-                // age counter saturates at.  224 + 48 = 7.599us, in spec; see
-                // the interval comment above before changing either number.
-                else if (refresh_due && (!(rd_req && ~rd_ack) || refresh_age >= 6'd48)) begin
+                // REFRESH-111: the justification here used to read "the 250-clk
+                // interval is 2.9us against the 7.8us/row spec, so even the
+                // 63-clk deferral cap keeps >2x margin". Both halves were
+                // wrong: 250 clocks is 6.98us not 2.9us (that was the 85.909MHz
+                // arithmetic), the cap that acts is DEFER_CAP not the 63 the
+                // age counter saturates at, and the margin was negative, not
+                // 2x. The deferral is kept because the fastpath needs it; the
+                // interval is what was made to pay for it.
+                else if (refresh_due && ((DEFER_CAP == 0) || !(rd_req && ~rd_ack)
+                                         || refresh_age >= DEFER_CAP[5:0])) begin
                     cmd(CMD_REFRESH);
                     refresh_due <= 1'b0;
                     wait_ctr <= 4'd9;                        // tRFC
