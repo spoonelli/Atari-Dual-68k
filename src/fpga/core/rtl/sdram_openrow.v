@@ -54,7 +54,8 @@
 // entirely by doing the mapping here rather than in the image. The one thing
 // that must stay true is that reads and writes use the SAME function - so it
 // is one function, used by both, and the write/read-back path is gated by
-// sim/run_sdram_openrow_tb.sh.
+// sim/run_sdram_model_tb.sh modes 6 and 7 (cross-bank write/read-back, and
+// same-row read-after-write with no gap).
 //
 // Bank assignment (word addresses; byte = word*2):
 //   bank 0  wa < 0x040000            video CPU program   (image 0x000000+)
@@ -205,7 +206,17 @@ module sdram_openrow #(
     reg [3:0]  wait_ctr;
     reg [9:0]  refresh_ctr;
     reg        refresh_due;
-    reg [5:0]  refresh_age;
+    // DEFERCAP-WIDTH: 7 bits, not the 6 sdram_simple uses. DEFER_CAP is a
+    // PARAMETER compared as DEFER_CAP[5:0] there, so any value >= 64 silently
+    // wraps - 67 becomes 3, 70 becomes 6 - and the deferral looks configured
+    // while being almost entirely absent. Harmless at the shipping 48, and it
+    // stops being harmless the moment the clock changes, because DEFER_CAP is
+    // counted in CLOCKS and scaling it for a faster clock is what pushes it
+    // past 63. Found on sdram-clock-EXPERIMENTAL, where scaling 48 -> 67 for
+    // 50.113637 MHz produced a measured worst-case refresh gap of 372 clocks
+    // against a paper prediction of 436; widening the counter made the two
+    // agree exactly. Fixed here too so the trap is not re-inherited.
+    reg [6:0]  refresh_age;
     reg [23:0] word;
     reg        is_write;
     reg [31:0] wdata_l;
@@ -258,7 +269,7 @@ module sdram_openrow #(
             rd_ack     <= 1'b0;
             refresh_ctr<= 10'd0;
             refresh_due<= 1'b0;
-            refresh_age<= 6'd0;
+            refresh_age<= 7'd0;
             bk_act     <= 4'd0;
             ras_ctr    <= 4'd15;
             for (bi = 0; bi < 4; bi = bi + 1) bk_row[bi] <= 13'd0;
@@ -273,9 +284,9 @@ module sdram_openrow #(
                 refresh_ctr <= 10'd0;
             end
             if (refresh_due) begin
-                if (refresh_age != 6'd63) refresh_age <= refresh_age + 6'd1;
+                if (refresh_age != 7'd127) refresh_age <= refresh_age + 7'd1;
             end else
-                refresh_age <= 6'd0;
+                refresh_age <= 7'd0;
 
             case (state)
             S_INIT: begin
@@ -304,7 +315,7 @@ module sdram_openrow #(
                 // sdram_simple (SDSCHED-88 / REFRESH-111). Unchanged on
                 // purpose: this module is not the place to re-litigate it.
                 else if (refresh_due && ((DEFER_CAP == 0) || !(rd_req && ~rd_ack)
-                                         || refresh_age >= DEFER_CAP[5:0])) begin
+                                         || refresh_age >= DEFER_CAP[6:0])) begin
                     // AUTO REFRESH needs every bank precharged. If any row is
                     // open it MUST be closed first - this is the open-row
                     // hazard, and it is handled by construction rather than by
