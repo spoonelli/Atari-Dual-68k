@@ -155,6 +155,12 @@ and blit loop are untouched, so MO scheduling and timing are bit-identical to
 before — measured: `run_mob_cov.sh` reports the same 215/140/24/117 cycles/line
 split for the base and the changed engine on the same scene.
 
+> **PERFDIV-111:** those absolute figures are ~9% high — the bench divided frame
+> totals by 240 while accumulating over 262 lines (scale by 240/262 = 0.916 for the
+> frame-mean). **The claim made here is unaffected**, because it is an equality
+> between two runs through the identical divisor, and the point is that the two
+> splits are the *same*, not what they are.
+
 ## What is approximated
 
 **`apply_stain` and special-sprite masking used to be omitted here; both are
@@ -358,7 +364,9 @@ asked to render it. The engine is then scored against MAME's own frame:
 
 `sim/run_mob_cov.sh` on the same state scores the base engine at **608 spurious
 pixels** against its own golden model and the changed engine at **0**, with an
-identical 215/140/24/117 cycles/line split — the masking is free.
+identical 215/140/24/117 cycles/line split — the masking is free. (PERFDIV-111:
+those absolute numbers are ~9% high; the *identity* between the two runs, which is
+the actual claim, is unaffected.)
 (`sim/tools/mob_golden.py` was updated in the same change: special pixels claim a
 column without drawing in it. An oracle that has drifted from the engine it
 scores is this project's fourth recorded measurement bug.)
@@ -426,8 +434,14 @@ tile special sprite at depth 0 of a one-entry list, spanning rows 150..173.
 BUILD 106 changed **no graphics RTL** — the stain path is byte-identical to 105.
 It corrected two constants derived from a wrong `clk_sdram` figure (35.795455
 MHz, not 85.909): the PSRAM controller's wait states, and an SDRAM refresh
-interval that was **8.33 us worst case against a 7.81 us JEDEC retention
-limit** — i.e. genuinely out of spec on the memory holding sprite graphics.
+interval that was **out of spec against the 7.8125 us JEDEC retention limit** on
+the memory holding sprite graphics.
+
+> **REFRESH-111:** the "8.33 us" quoted here was itself hand arithmetic
+> (`INTERVAL + DEFER_CAP`) and understated the violation. Measured against the real
+> FSM the original policy's worst case is **8.772 us** — the formula omits the
+> transaction still in flight when the deferral cap expires. The conclusion (out of
+> spec) was right; the number was optimistic. See `sim/run_sdram_refresh_tb.sh`.
 Stain coverage went 0.3% -> 3.2% -> 27% across 102/105/106. An 8.4x change from
 memory timing alone says most of the missing stain was **corrupted sprite tile
 data**, not a compositor fault.

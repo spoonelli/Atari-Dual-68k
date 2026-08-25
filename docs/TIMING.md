@@ -39,10 +39,17 @@ audio}, and has been all along.
 `src/fpga/core/core_constraints.sdc` deliberately puts all four PLL outputs in
 **one synchronous group**:
 
-> *the four PLL outputs are one clock family (same refclk, same PLL — 85.909MHz
-> = exactly 12 x 7.159MHz). Grouped SYNCHRONOUS, every CPU<->SDRAM crossing
-> becomes a timed path, legalizing single-cycle handshakes in place of 3-stage
-> synchronizer chains.*
+> *the four PLL outputs are one clock family (same refclk, same PLL —
+> 35.795455MHz = exactly 5 x 7.159091MHz). Grouped SYNCHRONOUS, every
+> CPU<->SDRAM crossing becomes a timed path, legalizing single-cycle handshakes
+> in place of 3-stage synchronizer chains.*
+
+> **CLKFIX-106/REFRESH-111:** this comment used to read "85.909MHz = exactly
+> 12 x 7.159MHz". The constraint itself was always fine (`derive_pll_clocks`
+> reads the real PLL), only the justification was wrong — and note that the
+> **5:1** ratio is exactly why D5's hold problem exists: every fifth SDRAM edge
+> coincides with a pixel edge. The stale "12:1" made that relationship look
+> less pathological than it is.
 
 So `vg_data* -> pfring*` is a **deliberately timed, deliberately single-cycle**
 cross-domain handoff. The thin hold is the price of that architecture, not an

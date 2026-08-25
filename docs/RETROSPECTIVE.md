@@ -498,22 +498,36 @@ soft, and attribution to a specific one of the two constants is unsupported.**
 
 BUILD 106's commit message claims to "correct everything". It does not:
 
-- `core_constraints.sdc:4-5` still reads "85.909MHz = exactly 12 x 7.159MHz" — in the
-  timing file, which is where a reader is most likely to look for the clock
-  relationship. The constraint itself is fine; only the justification is wrong.
-- `sdram_simple.v:3` still says "28.636 MHz SDRAM domain (4x CPU)", contradicting line
-  14 of the same header; `:151-156` still argues from "250-clk = 2.9 µs", 33 lines after
-  the block that repudiates both numbers.
-- **`sim/tb/tb_pf_cram.v:101` still instantiates `psram #(.CLOCK_SPEED(85.909))`** and
-  calls it "the real 12:1 clock ratio". That is not a comment. **That bench exercises
-  7-cycle PSRAM waits where the shipped core uses 3 — it models a machine this core is
-  not.**
+*(All four sites below were swept in REFRESH-111/PFCLK-111; kept here as the record of
+how long a wrong constant survives once it is only in prose.)*
 
-And the refresh fix has forked across three branches: `tas-atomic` uses 160,
-`mister-port` uses 224 with the deferral intact, `sdram-sched` keeps 250 and deletes the
-deferral instead. `6596423` is not an ancestor of `origin/mister-port`, whose
-`sdram_simple.v` still carries `// 85.909 MHz`. REFRESH-107 predicted exactly this drift
-in its own commit message; it has already happened.
+- `core_constraints.sdc:4-5` read "85.909MHz = exactly 12 x 7.159MHz" — in the timing
+  file, which is where a reader is most likely to look for the clock relationship. The
+  constraint itself was always fine; only the justification was wrong. Now
+  "35.795455MHz = exactly 5 x 7.159091MHz", and the **5:1** ratio turns out to matter:
+  it is precisely why every fifth SDRAM edge coincides with a pixel edge, which is the
+  root of the D5 hold problem. "12:1" made that look benign.
+- `sdram_simple.v:3` said "28.636 MHz SDRAM domain (4x CPU)", contradicting line 14 of
+  the same header — a **third** wrong figure for this clock, and one that no amount of
+  grepping for `85.909` would ever have found. `:151-156` argued from "250-clk = 2.9 µs",
+  33 lines after the block that repudiates both numbers.
+- **`sim/tb/tb_pf_cram.v:101` instantiated `psram #(.CLOCK_SPEED(85.909))`** and called
+  it "the real 12:1 clock ratio". That was not a comment — that bench exercised 7-cycle
+  PSRAM waits where the shipped core uses 3. Fixed, together with the simulated clock
+  and the ratio, because changing the parameter alone would have reproduced
+  `run_psram_tb.sh`'s own negative control.
+
+The refresh fix had forked across three branches — `tas-atomic` 160, `mister-port` 224
+with the deferral intact, `sdram-sched` 250 with the deferral deleted. REFRESH-107
+predicted exactly this drift in its own commit message, and it happened.
+
+**Reconciled in REFRESH-111 to one policy (160/48) on both platforms, and the constants
+are now module parameters so the two trees cannot quietly disagree again.** The finding
+that settled it: all three branches justified their value with the same wrong formula,
+`worst = INTERVAL + DEFER_CAP`, which omits the transaction still in flight when the
+deferral cap expires. Measured, it is `INTERVAL + DEFER_CAP + 16`. Under that correction
+`mister-port`'s 224 is **not a fix at all** — 8.046 µs measured against a 7.8125 µs
+limit. See [`DEVIATIONS.md`](DEVIATIONS.md) §F1 and `sim/run_sdram_refresh_tb.sh`.
 
 The one durable defence built here is `sim/tb/tb_psram_timing.v`, which carries
 `DECLARED_CLOCK_MHZ` and `ACTUAL_CLOCK_MHZ` as **separate knobs** and runs the DUT at
@@ -1026,15 +1040,31 @@ line. HUD rows must be excluded with margin — status 0–11, hex bar 96–128,
   rows, and so do `0` and `C`. **0.027 instead of 0.840 turns a healthy diagnostic into
   an alarming one, and then the diagnostic gets blamed.** Replaced by
   `read_hud_native.py`, which template-matches each font pixel's middle 2×2.
-- **A bench modelling the wrong machine, still live today.** `tb_pf_cram.v` instantiates
-  the PSRAM controller at `CLOCK_SPEED(85.909)` and calls it "the real 12:1 clock ratio"
-  (§5.2).
-- **A per-line cycle statistic inflated ~9%.** `tb_mob_perf.v` divides frame totals by
-  240 while accumulating over all 262 lines, so the published `cycles/line` splits sum to
-  ~496, not the 456 the runner scripts label them with. The error is common-mode, so
-  every *relative* comparison in §§3–4 stands — but absolute statements like "212 of the
-  456 cycles in a scanline go to walking the list" overstate the fraction (212/498 =
-  42.6%, not 46.5%).
+- **A bench modelling the wrong machine.** `tb_pf_cram.v` instantiated the PSRAM
+  controller at `CLOCK_SPEED(85.909)` and called it "the real 12:1 clock ratio" (§5.2).
+  **Fixed (PFCLK-111)** — but the fix uncovered something worse: that bench has **never
+  passed**, at any commit, for two reasons unrelated to the clock. Its golden checker
+  and the bench itself have always used *different* test patterns, and channel B never
+  issues. See the warning header in `sim/tb/tb_pf_cram.v`. The wrong clock was a second
+  fault hiding behind a bench that could not report anything.
+- **A per-line cycle statistic inflated ~9%.** `tb_mob_perf.v` divided frame totals by
+  240 while accumulating over all 262 lines, so the published `cycles/line` splits summed
+  to ~496 on a scanline that has 456. **Fixed (PERFDIV-111).**
+
+  > **The correction printed here previously was itself wrong**, and is worth keeping as
+  > an exhibit. It said the fraction should be "212/498 = 42.6%, not 46.5%" — dividing by
+  > the *inflated sum* to renormalise. That is not what the bug was. The right fix is to
+  > divide the frame totals by the real accumulation window (262 lines), which scales
+  > **every** phase figure by 240/262 = 0.916 and leaves the split summing to exactly
+  > 456. So a published `traverse` of 212 cycles/line is really **≈194.2** frame-mean.
+  > (The *during-build* figure — total restricted to the 240 lines on which a build runs,
+  > over 240 — cannot be recovered from a published number retroactively; it needs a
+  > re-run, because the two denominators no longer differ by a constant once vblank
+  > spill is counted. Both are now printed side by side.)
+  >
+  > The error was common-mode across phases and configurations, so every *relative*
+  > comparison and every conclusion in §§3–4 stands unchanged. Only the absolute
+  > per-line numbers move.
 - **`$readmemh` failure is not an error in iverilog.** A cleanup script wiping fixture
   files produced hours of phantom results. Fixtures now live outside any cleaned
   directory.
@@ -1200,7 +1230,7 @@ Listed so they can be corrected at the source:
 | `ROMMAP.md:53-57` | future-tense "openFPGA loading plan"; an ".mra-style manifest builds this" | **Stale on the Pocket** — it is `support/build_rom.py`. A real `.mra` exists only on the MiSTer branch. |
 | `DEVIATIONS.md` §E | "Stain second pass matches `apply_stain` on every scored frame, all cases" | **Narrower than it reads.** True of the automaton offline and of `run_stain_tb.sh`; **not** established end-to-end on silicon, where coverage is 61.3% of a 66.8% ceiling. |
 | `DEVIATIONS.md` §B2 | the line-buffer ghost is "Fixed" | Fixed in RTL and proven in simulation; **not confirmed on hardware.** |
-| `sim/run_mob_cov.sh`, `run_mob_perf_sweep.sh` | "cycles/line … (456 total)" | **Inflated ~9%** — the bench divides by 240 while accumulating over 262 lines. |
+| `sim/run_mob_cov.sh`, `run_mob_perf_sweep.sh` | "cycles/line … (456 total)" | **FIXED (PERFDIV-111)** — the bench divided by 240 while accumulating over 262 lines. The label "(456 total)" was the tell: the four printed figures summed to ~496. Both a frame-mean (÷262) and a during-build (÷240) split are now printed, and a `cycles_check` line asserts the sum identity so this cannot drift again. |
 
 ---
 

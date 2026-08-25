@@ -74,3 +74,6 @@ for scene in $SCENES; do
   done
 done
 echo "cycles/line = idle / traverse / prime(fetch stall) / blit   (456 total)"
+echo "  PERFDIV-111: 'per line' is now printed twice - frame-mean (/262 lines) and"
+echo "  during-build (/240 lines). Both sum to 456. Figures published before"
+echo "  PERFDIV-111 divided 262 lines of accumulation by 240 and summed to ~496."
