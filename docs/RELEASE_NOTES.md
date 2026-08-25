@@ -112,7 +112,14 @@ should stay that way** — turning it off is the 1.252e-03 row above. It is
 exposed for diagnosis, not as a tuning knob.
 
 **A left-edge artifact.** Native columns 0-1 render stale playfield data on
-some screens. MAME convicts it, so it is a real bug rather than a display
+some screens. **Exact repro and measurement (build 113 field capture,
+t=16.5-17.5s):** during the blue map/transition screen the whole picture is
+flat navy EXCEPT columns 0 and 1, which still show the *previous* gameplay
+scene - red wall segments and a fragment of grey floor, full screen height.
+Measured per native column against the flat-navy body: columns 0 and 1 are
+**100% non-navy**, columns 2-9 are **0%**. A hard two-column boundary. The
+transition screen is the best place to see it precisely because the rest of
+the frame is featureless, so the stale strip cannot be mistaken for content. MAME convicts it, so it is a real bug rather than a display
 quirk. It is **not new** — it is present identically in earlier builds and is
 not a regression from anything in this release. It is a known item, deferred
 rather than fixed; no fix is imminent. Recorded in
