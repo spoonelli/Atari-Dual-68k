@@ -627,8 +627,9 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                     vidout_rgb <= hex_px ? 24'hFFFF00 : 24'h101040;
                 end else if(ver_stamp) begin
                     // Only reachable with diag_on == 0: every branch above that
-                    // covers rows 228..233 requires diag_on. This is the clean-boot
-                    // build stamp.
+                    // covers rows 228..233 requires diag_on. Now also requires
+                    // hud_en_s, so with the menu gate clear this branch cannot
+                    // be reached at all and the screen is genuinely clean.
                     vidout_rgb <= ver_px ? 24'h00FFFF : 24'h101010;
                 end else begin
                     vidout_rgb <= alpha_rgb;
@@ -2287,7 +2288,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3114;   // + Developer HUD menu gate (id 38, default OFF) - screen shows '14'
+    localparam [15:0] BUILD_ID = 16'h3115;   // + build stamp follows the HUD gate (no plate on a clean screen) - screen shows '15'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2310,7 +2311,18 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ver slots in BOTH states -- see the note above BUILD_ID.
     // vx0[3]==0 restricts the painted area to each 8px glyph box, so a clean
     // screen gets two small plates rather than a 64px-wide bar.
-    wire ver_stamp = (visible_y >= 'd228) && (visible_y < 'd234)
+    // HUD-114: the clean-boot build stamp is now part of the diagnostic layer
+    // rather than an always-on plate. It used to persist with diag_on == 0, so
+    // a player saw two cyan digits burned into every screen from power-on -
+    // exactly the "dev build" tell a release must not have. Qualified by
+    // hud_en_s, it follows the rest of the debug layer.
+    //
+    // The project rule that every build carries an on-screen ID is UNCHANGED:
+    // tick 'Developer HUD' in the core menu and the stamp is there, which is
+    // the same one action that reveals everything else you would check it
+    // alongside. What is gone is it being visible without asking.
+    wire ver_stamp = hud_en_s
+                     && (visible_y >= 'd228) && (visible_y < 'd234)
                      && (visible_x >= 'd296) && (visible_x < 'd328) && (vx0[3]==1'b0);
 
     // ---------------- playfield pipeline (pixel domain)
