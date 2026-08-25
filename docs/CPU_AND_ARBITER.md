@@ -445,6 +445,68 @@ variant is **not** inferable from the ROM set the player loads — which is
 precisely why `CPU_TYPE` is a configuration choice rather than something the
 core could auto-detect.
 
+### 1.7 Could `CPU_TYPE` be a runtime switch in the interact menu? — assessed, and the recommendation is NOT YET
+
+Since both cabinet variants are authentic and a single ROM image serves both, an
+obvious idea is to expose the variant as a menu option that takes effect on
+reset, like a cabinet DIP, so a user can match whichever board they own without
+a reflash. Assessed here; **not implemented, and not recommended for now.**
+
+**Is the hook there? Partly.** `TG68K` exposes `CPU` only as a **generic**
+(`TG68K.vhd:47`). It is the inner kernel that takes it as a **port**
+(`TG68KdotC_Kernel`, declared at `TG68K.vhd:100`, driven at `:180`). So a
+runtime switch needs a vendored change to the `TG68K` wrapper to add a port
+passthrough — small, but it is a CPU-core edit, and `escape_core`'s `CPU_TYPE`
+would have to become a port rather than a generic.
+
+**Does the kernel latch it safely at reset? NO — and this is the important
+finding.** `use_VBR_Stackframe` is a plain registered follower of `cpu(0)`
+(`TG68KdotC_Kernel.vhd:510-516`): it is clocked every cycle, is not gated by
+`clkena_in`, and **has no reset term at all**. `cpu(0)` is *also* used
+**combinationally** in the instruction decoder (`:2082`, `:2119`). Nothing
+anywhere holds the value stable across execution.
+
+The consequence is not theoretical. Changing the variant mid-execution means an
+exception pushed as one frame size can be popped as the other — which is
+precisely the fault injected as a negative control for §1.3.1, and it kills the
+CPU outright: **1/30 heartbeat windows, 29 stalls**. A runtime switch would
+therefore be correct *only* while both CPUs are held in reset, and the CPU core
+would not protect you if that discipline were ever broken. Any implementation
+should first add an explicit "latch `cpu` at reset release" to the kernel (a
+two-line vendored change) so the hazard is structural rather than procedural.
+
+**What it costs.** Today `CPU` is a constant, so Quartus constant-folds it: the
+`use_VBR_Stackframe` register collapses, the `trap0`→`trap1` vs `trap0`→`trap2`
+microcode branch prunes to one path, the `rte2`→`rte3` word-pop branch prunes,
+and the `SR_Read` decode branch prunes. As a live signal **none of that folds** —
+both microcode paths stay, plus combinational `cpu(0)` fan-out into instruction
+decode. In the 7.159 MHz CPU domain that is a non-issue for setup (a 139.7 ns
+period with ~120 ns of headroom, §2.4). The real exposure is the same one §2.4
+identifies: any logic change reshuffles placement, and this design's hold margin
+is **+0.100 ns** with a known +0.005 ns path where **`BUILD_ID` alone moved it
+0.088 ns** (`DEVIATIONS.md` D5). That is a re-roll risk, not a design cost — but
+it is a re-roll for a feature with no observable effect.
+
+**And that is the argument against.** §1.3, §1.3.1 and §1.4 exist to show that
+**this ROM cannot tell the two parts apart** — no reachable 68010 instruction, no
+handler that touches the frame, 0.0000% loop-mode occupancy, and TG68K has no
+loop mode anyway. So a user toggling this switch would see, and could see,
+*nothing at all*. A menu item that produces no feedback is a support burden
+("did it apply?") rather than a feature, and it would be buying that burden with
+de-optimised CPU-core logic and a placement re-roll.
+
+**Recommendation: do not build it now.** Stated plainly, because there is a real
+argument on the other side — it is genuinely more authentic to let a JAMMA owner
+run a JAMMA CPU, and the "takes effect on reset" semantic is exactly the right
+model. If it is wanted later, the order should be: (1) latch `cpu` at reset in
+the kernel, (2) measure the ALM/M10K/slack delta in CI *before* committing to
+the menu plumbing, (3) only then wire the interact entry, with the reset
+sequencer holding **both** CPUs — the extra CPU's release is driven by the main
+CPU, so a partial reset is not sufficient.
+
+For BUILD 110 the right shape is the current one: a compile-time selector with
+one place to change it, defaulting to the dedicated cabinet.
+
 ---
 
 ## Part 2 — the mux arbiter
