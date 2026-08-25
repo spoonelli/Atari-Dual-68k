@@ -2,16 +2,20 @@
 
 A second front end for the same machine. `src/mister/` holds a MiSTer top level
 that instantiates **the identical RTL the Pocket build uses** — `escape_core`,
-`escape_mob`, `escape_prio`, `hall_stick`, `sdram_simple` — with MiSTer-shaped
-glue around it. Nothing in the machine is forked; if you fix a bug in
-`src/fpga/core/rtl/`, both platforms get it.
+`escape_mob`, `escape_prio`, `escape_stain`, `hall_stick`, `sdram_simple` —
+with MiSTer-shaped glue around it. Nothing in the machine is forked; if you fix
+a bug in `src/fpga/core/rtl/`, both platforms get it.
 
 > **Status: BUILD 105 ran on a real DE10-Nano.** It boots, plays, and renders
 > motion objects, alphanumerics and the HUD correctly — and drew a completely
 > flat playfield. That was PFRESET-107, diagnosed and fixed; see
 > [FIRST FLASH RESULT](#first-flash-result-build-105-on-real-hardware--and-what-it-actually-was).
-> **The fixed build has not itself been flashed.** Rebased on `tas-atomic` at
-> BUILD 105. Read
+> **The fixed build has not itself been flashed.**
+>
+> **The branch is now `mister-112`, merged with `tas-atomic` at BUILD 112** —
+> see [BUILD 112](#build-112--catching-up-to-the-pocket-line) for what came
+> across, what did not, and why. **Nothing in BUILD 112 has been on hardware
+> either.** Read
 > [What is verified / what is not](#what-is-verified--what-is-not) before you
 > assume anything works, and
 > [Three things predicted to break on first flash](#three-things-predicted-to-break-on-first-flash-all-wrong--kept-for-the-record)
@@ -521,6 +525,154 @@ game logic has an order of magnitude more margin than the framework it sits in.
 
 ---
 
+## BUILD 112 — catching up to the Pocket line
+
+`mister-port` sat at BUILD 105/107/108 while the Pocket line ran on to BUILD
+112. `mister-112` is `mister-port` **merged with** `tas-atomic` (not rebased —
+a rebase would have replayed the MiSTer commits on top of a `core_top.v` that
+still carries the CLKFIX-106 defect, and would have discarded the merge
+history the two lines need to keep converging).
+
+**Base:** `origin/mister-port` at `02d061d`, which is **byte-identical to
+`origin/refresh-112`** — the owner's own session had already pushed REFRESH-112
+and CLKFIX-106 onto `mister-port` before this merge started. None of that work
+is redone here and none of it is touched. `REFRESH_INTERVAL=160` /
+`DEFER_CAP=48` are the owner's values, unchanged.
+**Merged from:** `origin/tas-atomic` at `d45b884`.
+
+### What came across
+
+Everything below `src/fpga/core/rtl/` is shared source that `files.qip`
+compiles, so most of this arrives in the MiSTer bitstream without any glue
+change at all.
+
+| Item | Where | Lands on MiSTer how |
+|---|---|---|
+| **Two-frame line-buffer ghost fix** (self-clearing readout) | `escape_mob.v` | Automatically — same file, same module |
+| **`escape_stain`** (apply_stain automaton extracted to a module) | `escape_stain.v` | Glue change: `escape_mister.v` had its own inline transcription, now replaced by the module |
+| **VSHAD3-112** 16 KB partial ROM shadow at `0x54000` | `escape_core.vhd` | Automatically. Was a **full 32 KB** shadow here before the merge |
+| **`vshad3_on`** runtime toggle | `escape_core.vhd` | Glue change: new `escape_mister.v` port, `CONF_STR` `O[8]`, `~status[8]` |
+| **`CPU_TYPE`** generic, default 68010 | `escape_core.vhd` | Automatically; now stated explicitly at the instantiation |
+| **CADENCE-107** `dbg_cadv` / `dbg_cadw` meters | `escape_core.vhd` | Compiled, outputs left open (no HUD here) |
+| **`support/check_slack.py`** multi-corner slack gate | `support/` | CI change; replaces `src/mister/check_slack.py`, which is deleted |
+| **`support/report_hold_paths.tcl`** | `support/` | CI change, plus a fix: it hardcoded `project_open ap_core` and so had never run for MiSTer |
+| Benches `run_stain_tb.sh`, `run_sdram_refresh_tb.sh`, `run_vshad3_tb.sh`, `run_cadence_tb.sh`, `run_busrate.sh`, `run_pf_reset_tb.sh` | `sim/` | Three of them are now CI steps; see below |
+
+**The ghost fix is the highest-value item and it is the one that needed no
+work.** It is confirmed on real **Pocket** hardware ("scroll artifacts
+disappeared") and it is a change to `escape_mob.v`, which both platforms
+compile from one copy. It has **not** been confirmed on MiSTer hardware, for
+the simple reason that no BUILD 112 MiSTer bitstream has ever been flashed.
+
+### What did not come across, and why
+
+* **`interact.json`** — Pocket-only. It is an openFPGA/APF manifest; MiSTer
+  has no analogue and never reads it. The one entry that matters to both
+  platforms, id 37 *"ROM Shadow 0x54000"*, was hand-carried to `CONF_STR` as
+  `O[8]`. Note the asymmetry in the other direction too: the Pocket's Interact
+  menu has a **hard 16-variable cap** (11 in use). `CONF_STR` has no such cap —
+  it is bounded only by `status[]`, 128 bits, of which this core uses 8. A
+  future toggle that will not fit on the Pocket can still exist here.
+* **`core_top.v` HUD, debug pages, layer isolation, test tone** — Pocket-only
+  forensics, deliberately absent (difference 4 at the top of
+  `escape_mister.v`). The CADENCE-107 counters therefore compile but have no
+  display; reading them on MiSTer would need a `status[]`-driven readback path
+  that does not exist.
+* **`ee_save.vhd` / EEPROM persistence** — unchanged from BUILD 103. Still
+  Pocket-only, still not in `files.qip`, high scores still do not survive a
+  power cycle here.
+* **`sim/run_pf_reset_tb.sh`** — added to the tree but **not** to this
+  workflow. It slices blocks out of `core_top.v`, which `files.qip` does not
+  compile; it is a Pocket gate and putting it in a job called *Build MiSTer
+  core* would make the name a lie. See the CI gap note below.
+
+### PFRESET: checked for divergence, and converged
+
+PFRESET originated **here** (`dcd1196`, PFRESET-107) and was backported to the
+Pocket (`ee46ba1`, PFRESET-111), so the obvious risk was that the two had
+drifted. They have not. Both reset the same nine registers —
+`vg_reqA_px`, `vg_reqB_px`, `inflA`, `inflB`, `pfq_count`, `pfq_wr`, `pfq_rd`,
+`pf_wp`, `pf_rp` — on the same condition (`core_reset_n`, pixel domain), as the
+last statement of the playfield pixel-domain `always` block so it wins any
+same-cycle collision. The MiSTer version additionally clears
+`cpu_owner`/`mo_owner`/`pf_owner`/`fpv_owner`/`fpe_owner` on `ioctl_download`,
+which the Pocket does not need and could not use: `pf_owner` does not exist
+there (the playfield is on CRAM, not on an SDRAM grant arm) and there is no
+`ioctl_download` re-entry path to clear anything for. **MiSTer is a strict
+superset; nothing was ported and nothing is missing.**
+
+*Residual gap, symmetric on both platforms and not fixed here:* the
+service-side in-flight state is un-reset on both. Pocket does not clear
+`cvg_ph` / `cram_read_en` / `cvg_hi` / `cvg_ch` on `core_rstn_sd`; MiSTer does
+not clear `pf_owner` on `core_rstn_sd` either (only on `ioctl_download`). Both
+rely on the transaction completing naturally. If that is ever hardened it
+should be hardened on both ports at once.
+
+### The ROM shadow on MiSTer — what is predicted and what is not
+
+On the Pocket the 16 KB partial shadow measured **2.410e-04 vs 1.252e-03**
+sprite dropouts per robot-object-frame — a **5.19x** reduction, p=1.0e-05 —
+and was statistically indistinguishable from the old full 32 KB shadow at 9
+fewer M10K.
+
+**That number is not claimed here and cannot be inferred from it.** The
+mechanism is: shadowing takes main-CPU fetches off the shared bus so the
+lowest-priority client (motion objects) gets more of it. On the Pocket the
+playfield is served from CRAM and the SDRAM bus is at ~23% of a scanline; here
+the playfield is on the *same* bus and the budget is ~71% (see *Bandwidth
+budget* above). Both the contention being relieved and the traffic competing
+for the freed slots are different. What can honestly be said:
+
+* **Predicted, not measured:** the *direction* is the same. Fewer CPU fetches
+  on the bus cannot reduce what is left for the MO client.
+* **Not predicted:** the *magnitude*. It could plausibly be larger here
+  (the bus is scarcer, so each freed slot is worth more) or smaller (the
+  playfield may absorb the freed slots before the MO client sees them,
+  since PF and MO share the lowest tier round-robin). Nothing in this tree
+  measures it, and no bench on this branch puts MO and PF on the real
+  arbiter together under load.
+* **Does transfer:** *which* half of `0x50000-0x57FFF` to shadow. That is a
+  property of this ROM's access pattern, not of the memory system — 94.5% of
+  main-CPU traffic in that range lands in `0x54000-0x57FFF`, and pages
+  `0x50000`/`0x51000`/`0x52000` are read **zero** times during gameplay
+  (`docs/VSHAD3.md` §8). Same ROM, same CPUs, same code path.
+* **The full 32 KB shadow is probably affordable here** where it is not on the
+  Pocket — the DE10-Nano had 386/553 M10K at BUILD 108 against the Pocket's
+  299/308. It is **not** taken, on purpose: `escape_core.vhd` is shared source
+  and forking the shadow width per platform would buy the ~5.5% of in-range
+  traffic that lives in the pages measured to be read zero times, in exchange
+  for a permanent divergence in the one file both platforms most need to keep
+  identical. If the owner wants it, the honest way is a generic, not an edit.
+
+`VSHAD3_EN(1)` and `CPU_TYPE(1)` are now **stated explicitly** at the
+`escape_core` instantiation in `escape_mister.v`. Both already defaulted to 1,
+so the bitstream is unchanged; the point is that the decisions are visible
+where someone would go to change them.
+
+### CI: what the MiSTer workflow now gates on
+
+`.github/workflows/build-mister.yml` runs three shared-RTL benches ahead of
+Quartus, each driving a file this workflow actually compiles:
+
+| Step | Gates | Proven able to fail by |
+|---|---|---|
+| `check_ports.py` | the Verilog→VHDL boundary | renaming `.vshad3_on` → names it; deleting `.rom_data` → names it |
+| `run_mister_pf_tb.sh` | playfield channel is serviced | the BUILD 105 A/B table above (0/0 vs 13 794/13 794) |
+| `run_stain_tb.sh` | line-buffer ghost + stain automaton | reverting the self-clearing readout → 226 mismatching px, all in cases D and E |
+| `run_sdram_refresh_tb.sh` | refresh interval vs JEDEC | its own in-run negative controls report 250/48 at 8.7721 µs and 224/48 at 8.0457 µs as FAIL |
+| `run_vshad3_tb.sh` | partial shadow decode + runtime toggle | the toggle changes measured fetch cost 5.015 → 4.015 clk; a still-32 KB range would score 5.015 at `0x50000` |
+| `support/check_slack.py` | negative slack, any corner | a fixture whose only negative row is at the third corner |
+
+**Known CI gap, stated rather than hidden:** `sim/run_pf_reset_tb.sh` — the
+Pocket's PFRESET gate — is wired into **no** workflow at all. Neither
+`build.yml` nor `ci.yml` references any `sim/run_*` script. The MiSTer side has
+had its equivalent gated since PFRESET-107; the Pocket backport did not get the
+same treatment, so PFRESET-111 is protected only by someone running the bench
+by hand. That is a Pocket-side gap and is deliberately not fixed from this
+branch.
+
+---
+
 ## Tracking the Pocket branch (BUILD 103-105)
 
 This port is rebased on `tas-atomic` at **BUILD 105**. Three changes landed
@@ -667,10 +819,30 @@ Keyboard also maps arrows, left ctrl (Fire), left alt (Jump), space (Duck),
 
 ## OSD options
 
-Aspect ratio, scandoubler FX, **Service Mode** (the cabinet's self-test lever)
-and **Skip Self-Test** (forces the boot's tests-passed branch). The game has no
-DIP switches — the real cabinet is configured through its 93C46 EEPROM — so
-there is no `<switches>` block in the `.mra` and no `ioctl_index == 254` path.
+Aspect ratio, scandoubler FX, **Service Mode** (the cabinet's self-test lever),
+**Skip Self-Test** (forces the boot's tests-passed branch) and **ROM Shadow
+0x54000**. The game has no DIP switches — the real cabinet is configured
+through its 93C46 EEPROM — so there is no `<switches>` block in the `.mra` and
+no `ioctl_index == 254` path.
+
+### ROM Shadow 0x54000 (BUILD 112)
+
+`O[8]`, the MiSTer equivalent of the Pocket's Interact variable id 37. **On**
+is the default. It gates the *decode* of the 16 KB partial ROM shadow, not the
+BRAM: the block is instantiated and filled either way, so flipping it costs no
+M10K and needs no reflash — which is the whole point, the owner can A/B sprite
+dropouts against CPU cadence on the device.
+
+**The menu entry reads `On,Off`, not `Off,On`, and that ordering is
+load-bearing.** `hps_io` powers `status[]` up at zero and a fresh SD card has
+no saved config, so whichever label sits first is what every first-boot player
+gets. The default is On, so On must be first and the wire is `~status[8]`.
+
+The toggle crosses from `clk_ram` (35.795455) to `clk_sys` (7.159091) through
+the same 2-flop `sync2` every other slow control here uses. That is the CDC.
+The *atomicity* — only resampling between bus cycles, so a mid-cycle flip
+cannot change which memory answers a cycle already in flight — is `s3_arm_p`
+inside `escape_core.vhd`, shared with the Pocket.
 
 **EEPROM contents are not persisted.** `escape_core` holds the EEPROM in BRAM
 and it resets with the core, so bookkeeping and high scores do not survive a

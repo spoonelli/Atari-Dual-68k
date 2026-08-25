@@ -21,6 +21,7 @@ docker run --rm -v "$REPO":/work -w /work "$IMG" bash -c "
     src/fpga/core/rtl/sdram_simple.v \
     src/fpga/core/rtl/escape_mob.v \
     src/fpga/core/rtl/escape_prio.v \
+    src/fpga/core/rtl/escape_stain.v \
     src/fpga/core/rtl/hall_stick.v \
     sim/tb/stub_escape_core.v \
     sim/tb/sdram_model.v \
