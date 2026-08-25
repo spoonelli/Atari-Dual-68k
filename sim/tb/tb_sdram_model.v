@@ -19,6 +19,17 @@
 //           EXPECT tRCD > 0.
 //   MODE 5  tRAS(min) violation: PRECHARGE immediately after ACTIVE.
 //           EXPECT tRASmin > 0.
+//   MODE 6  WRITE/READ INTERLEAVE across banks. The download path writes; an
+//           open-row controller must not serve a read of a just-written
+//           location from a stale row, and must not let a write land in the
+//           wrong row either. Writes and reads are interleaved across all four
+//           regions so banks are constantly switching under the traffic.
+//           EXPECT every read-back to equal what was written.
+//   MODE 7  SAME-ROW read-after-write, no gap: write A, then immediately read
+//           A while its row is still open. This is the case an open-row policy
+//           is most likely to get wrong, because the read takes the HIT path
+//           and skips the ACTIVE entirely.
+//           EXPECT the written value back, not the underlying pattern.
 //
 // MODES 4 AND 5 RUN AT 100 MHz, NOT 35.795455, AND THAT IS THE POINT.
 // At 35.795455 MHz the device minimums round to tRCD = tRP = 1 clock and
@@ -68,6 +79,13 @@ module tb_sdram_model;
     wire [1:0]  m_dqm   = ovr ? 2'b00     : c_dqm;
     wire        m_cke   = ovr ? 1'b1      : c_cke;
 
+    // write port - MODES 6/7 exercise the download path concurrently with
+    // reads. The other modes hold it idle.
+    reg         wr_req = 0;
+    wire        wr_ack;
+    reg  [24:0] wr_addr = 25'd0;
+    reg  [31:0] wr_data = 32'd0;
+
     reg         rd_req = 0;
     wire        rd_ack;
     reg  [24:0] rd_addr = 25'h0000000;
@@ -84,7 +102,7 @@ module tb_sdram_model;
         .dram_a(c_a), .dram_ba(c_ba), .dram_dq(dq),
         .dram_dqm(c_dqm), .dram_cas_n(c_cas_n), .dram_ras_n(c_ras_n),
         .dram_we_n(c_we_n), .dram_cke(c_cke),
-        .wr_req(1'b0), .wr_ack(), .wr_addr(25'd0), .wr_data(32'd0),
+        .wr_req(wr_req), .wr_ack(wr_ack), .wr_addr(wr_addr), .wr_data(wr_data),
         .rd_req(rd_req), .rd_ack(rd_ack), .rd_addr(rd_addr), .rd_pre(rd_pre),
         .rd_data(rd_data), .init_done(init_done)
     );
@@ -157,6 +175,47 @@ module tb_sdram_model;
         end
     endtask
 
+    // Distinct from the underlying pattern, so a read that returns the
+    // UNWRITTEN content of the right address is still caught as a mismatch.
+    function [15:0] wval(input [23:0] wa);
+        begin wval = expf(wa) ^ 16'hA5A5; end
+    endfunction
+
+    task do_write(input [24:0] byte_addr);
+        reg [23:0] w;
+        begin
+            w = byte_addr[24:1];
+            wr_addr = byte_addr;
+            wr_data = {wval(w), wval({w[23:1], 1'b1})};
+            @(posedge clk);
+            wr_req = 1;
+            wait (wr_ack == 1);
+            @(posedge clk);
+            wr_req = 0;
+            @(posedge clk);
+            wait (wr_ack == 0);
+        end
+    endtask
+
+    // Read and check against the WRITTEN value.
+    task do_read_check(input [24:0] byte_addr);
+        reg [23:0] w;
+        begin
+            w = byte_addr[24:1];
+            rd_addr = byte_addr;
+            @(posedge clk);
+            rd_req = 1;
+            wait (rd_ack == 1);
+            @(posedge clk);
+            n_checked = n_checked + 2;
+            if (rd_data[31:16] !== wval(w))          n_mismatch = n_mismatch + 1;
+            if (rd_data[15:0]  !== wval({w[23:1], 1'b1})) n_mismatch = n_mismatch + 1;
+            rd_req = 0;
+            @(posedge clk);
+            wait (rd_ack == 0);
+        end
+    endtask
+
     task idle_clks(input integer n);
         begin
             for (i = 0; i < n; i = i + 1) @(posedge clk);
@@ -173,6 +232,30 @@ module tb_sdram_model;
 
         if (MODE == 0 || MODE == 1) begin
             do_reads(NREADS);
+        end else if (MODE == 6) begin
+            // Interleave writes and reads across all four regions, so the
+            // bank in use keeps changing and rows keep being evicted between
+            // the write and the read-back.
+            for (i = 0; i < 64; i = i + 1) begin
+                do_write(25'h0000000 + i*8);      // video CPU region
+                do_write(25'h0090000 + i*8);      // extra CPU region
+                do_write(25'h0110000 + i*8);      // chars/JSA region
+                do_write(25'h0130000 + i*8);      // sprite region
+            end
+            for (i = 0; i < 64; i = i + 1) begin
+                do_read_check(25'h0000000 + i*8);
+                do_read_check(25'h0090000 + i*8);
+                do_read_check(25'h0110000 + i*8);
+                do_read_check(25'h0130000 + i*8);
+            end
+        end else if (MODE == 7) begin
+            // Write then IMMEDIATELY read the same address. With an open-row
+            // policy the read takes the hit path and skips the ACTIVE, so a
+            // wrong row here returns plausible-looking stale data.
+            for (i = 0; i < 128; i = i + 1) begin
+                do_write(25'h0004000 + i*8);
+                do_read_check(25'h0004000 + i*8);
+            end
         end else begin
             // Take the command bus away from the controller. The controller is
             // idle (rd_req low) so it emits only NOPs; we drive the mutation.
@@ -243,6 +326,30 @@ module tb_sdram_model;
         end
         5: if (mem.v_tras_min == 0) begin
             $display("TB_SDRAM_MODEL FAIL: tRAS(min) violation was not reported"); fails = 1;
+        end
+        6: begin
+            if (n_mismatch != 0) begin
+                $display("TB_SDRAM_MODEL FAIL: %0d read-back mismatches across banks -", n_mismatch);
+                $display("  a write landed in the wrong row, or a read was served from one.");
+                fails = 1;
+            end
+            if (n_checked < 512) begin
+                $display("TB_SDRAM_MODEL FAIL: only %0d words checked", n_checked); fails = 1;
+            end
+            if (mem.wt_coll != 0) begin
+                $display("TB_SDRAM_MODEL FAIL: %0d write-table collisions - data checking invalid",
+                         mem.wt_coll); fails = 1;
+            end
+        end
+        7: begin
+            if (n_mismatch != 0) begin
+                $display("TB_SDRAM_MODEL FAIL: %0d same-row read-after-write mismatches -", n_mismatch);
+                $display("  the open row served stale data for a just-written location.");
+                fails = 1;
+            end
+            if (n_checked < 256) begin
+                $display("TB_SDRAM_MODEL FAIL: only %0d words checked", n_checked); fails = 1;
+            end
         end
         default: ;
         endcase

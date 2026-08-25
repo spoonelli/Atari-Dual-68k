@@ -196,21 +196,72 @@ module sdram_model #(
         wt_coll = 0;
     end
 
+    // Index by a HASH of the full word address, not by its low bits. Direct
+    // indexing on wa[14:0] made every region whose base is a multiple of
+    // 0x8000 alias to the same entries - and the four regions this design
+    // actually uses (0, 0x48000, 0x88000, 0x98000 in words) are all such
+    // multiples, so a cross-region write test evicted itself 100% of the time.
+    // The collision counter caught that rather than reporting it as wrong data,
+    // which is the whole reason it exists.
+    function [WT_BITS-1:0] wt_index(input [23:0] wa);
+        reg [31:0] h;
+        begin
+            h = {8'h00, wa} * 32'h9E3779B1;
+            h = h ^ (h >> 15);
+            wt_index = h[WT_BITS-1:0];
+        end
+    endfunction
+
+    // OPEN ADDRESSING with linear probing, so a write NEVER evicts another
+    // address. Direct mapping (even hashed) evicts on collision, and an
+    // evicted write reads back as the underlying pattern - i.e. as a DATA
+    // MISMATCH that looks exactly like the wrong-row bug this model exists to
+    // find. With probing, `wt_coll` can only be non-zero if the table is
+    // genuinely full, so a mismatch is always the controller's fault.
+    localparam WT_PROBE = 64;
+
+    function integer wt_lookup(input [23:0] wa);   // -1 if absent
+        integer ix, j, r;
+        begin
+            r = -1;
+            ix = wt_index(wa);
+            for (j = 0; j < WT_PROBE; j = j + 1) begin
+                if (r == -1) begin
+                    if (!wt_val[(ix + j) % WT_N])              r = -2;  // empty: absent
+                    else if (wt_tag[(ix + j) % WT_N] == wa)    r = (ix + j) % WT_N;
+                end
+            end
+            wt_lookup = (r < 0) ? -1 : r;
+        end
+    endfunction
+
     function [15:0] mem_read(input [23:0] wa);
         integer ix;
         begin
-            ix = wa[WT_BITS-1:0];
-            if (wt_val[ix] && wt_tag[ix] == wa) mem_read = wt_dat[ix];
-            else                                mem_read = fdata(wa);
+            ix = wt_lookup(wa);
+            if (ix >= 0) mem_read = wt_dat[ix];
+            else         mem_read = fdata(wa);
         end
     endfunction
 
     task mem_write(input [23:0] wa, input [15:0] d);
-        integer ix;
+        integer ix, j, done;
         begin
-            ix = wa[WT_BITS-1:0];
-            if (wt_val[ix] && wt_tag[ix] != wa) wt_coll = wt_coll + 1;
-            wt_val[ix] = 1'b1; wt_tag[ix] = wa; wt_dat[ix] = d;
+            ix = wt_index(wa);
+            done = 0;
+            for (j = 0; j < WT_PROBE; j = j + 1) begin
+                if (!done) begin
+                    if (!wt_val[(ix + j) % WT_N] || wt_tag[(ix + j) % WT_N] == wa) begin
+                        wt_val[(ix + j) % WT_N] = 1'b1;
+                        wt_tag[(ix + j) % WT_N] = wa;
+                        wt_dat[(ix + j) % WT_N] = d;
+                        done = 1;
+                    end
+                end
+            end
+            // Only reachable if WT_PROBE consecutive slots are all occupied by
+            // OTHER addresses - i.e. the table is saturated, not a hash clash.
+            if (!done) wt_coll = wt_coll + 1;
         end
     endtask
 
