@@ -379,6 +379,42 @@ The cadence gap being chased is 0.973 vs 0.9977 ≈ **2.5 %**. The ceiling is
 > **This line of inquiry is closed.** (See Part 2.3 for the effect that pushes
 > the real board the *other* way.)
 
+#### 1.4a A hypothetical runtime 68000/68010 toggle — what it could and could not do
+
+Kept as an investigation note. **The shipping setting stays `CPU_TYPE = 1`
+(68010)**: it matches SP-332 and the owner's photographed `MC68010P8`.
+
+*It is compile-time today, and thoroughly so.* `escape_core` binds
+`TG68K generic map (CPU => CPU_SEL)`, and inside `TG68K.vhd` the kernel
+instantiation binds `CPU => CPU` (`:180`), so a constant propagates all the way
+into the kernel. A runtime toggle means turning that generic into a routed
+signal at every level.
+
+*It could not produce a performance difference, for a reason beyond the loop-mode
+argument above.* Between `"00"` and `"01"` only **CPU(0)** differs, and nothing
+timing-related keys on it:
+
+| gated on | behaviours | timing-relevant? |
+|---|---|---|
+| **CPU(0)** — the only differing bit | `SR_Read` (privilege), `VBR_Stackframe` (exception frame format) | no, purely functional |
+| **CPU(1)** — identical (0) for both parts | `extAddr_Mode`, `MUL_Mode`, `DIV_Mode`, `BitField` | yes, but unchanged either way |
+
+`MUL_Mode`/`DIV_Mode` therefore stay 16-bit for both, and `BarrelShifter` is
+hardcoded to 1 in `TG68K.vhd` rather than switched. So the toggle would change
+**two functional behaviours and zero timing behaviours** — structurally none,
+not merely a small effect. Worth stating because it is a genuine ACCURACY
+LIMIT, not just a null result: if the real dedicated cabinet were faster than
+the JAMMA one, this core could not express that at either setting.
+
+*And it would not be safe to flip during play.* Both switchable behaviours are
+mode 2 — read combinationally, not latched at reset. `VBR_Stackframe` changes
+the exception stack frame FORMAT, so an exception taken in one mode and `RTE`'d
+in the other pops the wrong frame and corrupts the stack; this game is VBLANK-
+interrupt driven, so that window opens ~60 times a second. `SR_Read` changes
+whether `MOVE SR,<ea>` traps. A toggle would have to latch at reset (the way
+`vshad3_on` latches between bus cycles for atomicity) or auto-trigger the
+existing Soft Reset Core (`interact.json` id 11).
+
 ### 1.5 What the owner checked on the physical board — DONE
 
 This section used to say what to record. It has been recorded.
