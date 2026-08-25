@@ -37,7 +37,8 @@ entity tb_escape_busrate is
         G_FPEN   : integer := 1;      -- escape_core FASTPATH_EN
         G_FP     : integer := 1;      -- fastpath server fill latency, clks
         G_SHAD   : integer := 1;      -- shadow BRAMs filled + enabled
-        G_VS3    : integer := 1;      -- escape_core VSHAD3_EN
+        G_VS3    : integer := 1;      -- escape_core VSHAD3_EN (compile-time)
+        G_VS3ON  : integer := 1;      -- escape_core vshad3_on port (runtime)
         G_LAT    : integer := 2;      -- legacy rom service latency
         G_WARM   : integer := 20000;  -- clocks to settle before counting
         G_CLKS   : integer := 200000; -- clocks to count over
@@ -90,9 +91,16 @@ architecture tb of tb_escape_busrate is
     signal m_vas   : std_logic;
     signal m_vaddr : std_logic_vector(31 downto 0);
 
+    signal vs3on    : std_logic;
     signal cyc_cnt  : integer := 0;   -- v_as_n falling edges inside the window
     signal clk_cnt  : integer := 0;   -- clocks inside the window
-    signal shad_cnt : integer := 0;   -- of those cycles, how many were shadowed
+    -- VSHAD3-112: the old range was one 32 KB block; it is now two 16 KB
+    -- halves, only the HIGH one of which is shadowed (measured: 94.5% of the
+    -- main CPU's gameplay traffic in 0x50000-0x57FFF lands in 0x54000-0x57FFF
+    -- and pages 0x50000-0x52FFF are never touched at all). Count both halves
+    -- separately so the bench STATES where the loop ran instead of assuming.
+    signal lohalf_cnt : integer := 0; -- cycles in 0x50000-0x53FFF (NOT shadowed)
+    signal shad_cnt   : integer := 0; -- cycles in 0x54000-0x57FFF (shadowed)
     signal fast_cnt : integer := 0;   -- ...and how many were fastpath-eligible
 begin
     clk <= not clk after 5 ns when not done else '0';
@@ -110,7 +118,9 @@ begin
                    shad_wclk=>shad_wclk, shad_waddr=>shad_waddr,
                    shad_wdata=>shad_wdata, shad_we=>shad_we,
                    vblank_in=>vblank,
+                   vshad3_on=>vs3on,
                    p1_buttons=>"0000", p2_buttons=>"0000" );
+    vs3on <= '1' when G_VS3ON = 1 else '0';
 
     m_vas   <= << signal uut.v_as_n : std_logic >>;
     m_vaddr <= << signal uut.v_addr : std_logic_vector(31 downto 0) >>;
@@ -199,6 +209,14 @@ begin
             fill_range(16#000000#, 16#4000#);      -- vshad
             fill_range(16#048000#, 16#8000#);      -- vshad2
             if G_VS3 = 1 then
+                -- VSHAD3-112: the shadow is 16 KB (0x54000-0x57FFF) but this
+                -- still offers the whole old 32 KB. escape_core's vshad3_we
+                -- decode drops everything below 0x54000, so the other half is
+                -- simply not written - a superset fill is safe, an undersized
+                -- one would serve zeroes as instructions. Deliberately NOT
+                -- gated by G_VS3ON: the runtime toggle gates the decode, not
+                -- the fill, and the bench has to be able to toggle the shadow
+                -- back ON and still find real code in the BRAM.
                 fill_range(16#050000#, 16#8000#);  -- vshad3
             end if;
             fill_range(16#080000#, 16#4000#);      -- eshad
@@ -223,7 +241,10 @@ begin
             clk_cnt <= clk_cnt + 1;
             if m_vas = '0' and vas_d = '1' then
                 cyc_cnt <= cyc_cnt + 1;
-                if m_vaddr(23 downto 15) = "000001010" then
+                if m_vaddr(23 downto 14) = "0000010100" then
+                    lohalf_cnt <= lohalf_cnt + 1;
+                end if;
+                if m_vaddr(23 downto 14) = "0000010101" then
                     shad_cnt <= shad_cnt + 1;
                 end if;
                 if unsigned(m_vaddr(23 downto 0)) <= x"09FFFF" then
@@ -237,10 +258,12 @@ begin
         write(l, string'(" fp=")); write(l, G_FP);
         write(l, string'(" shad=")); write(l, G_SHAD);
         write(l, string'(" vs3=")); write(l, G_VS3);
+        write(l, string'(" vs3on=")); write(l, G_VS3ON);
         writeline(output, l);
         write(l, string'("BUSRATE clocks=")); write(l, clk_cnt);
         write(l, string'(" buscycles=")); write(l, cyc_cnt);
-        write(l, string'(" in_vshad3_range=")); write(l, shad_cnt);
+        write(l, string'(" in_50000_53FFF=")); write(l, lohalf_cnt);
+        write(l, string'(" in_54000_57FFF=")); write(l, shad_cnt);
         write(l, string'(" in_rom=")); write(l, fast_cnt);
         writeline(output, l);
         -- clocks per bus cycle, to three decimals, without real arithmetic
