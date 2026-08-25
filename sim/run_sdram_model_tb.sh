@@ -16,6 +16,15 @@ cd "$REPO"
 mkdir -p sim/build
 IMG="${IVERILOG_IMAGE:-hdlc/iverilog:latest}"
 
+# SDRAM_DUT=openrow runs every mutation against sdram_openrow.v instead.
+if [ "${SDRAM_DUT:-simple}" = "openrow" ]; then
+  DUT_SRC="src/fpga/core/rtl/sdram_openrow.v"; DUT_DEF="-DDUT_OPENROW"
+  echo "### controller under test: sdram_openrow"
+else
+  DUT_SRC="src/fpga/core/rtl/sdram_simple.v";  DUT_DEF=""
+  echo "### controller under test: sdram_simple (shipping)"
+fi
+
 FAIL=0
 
 run_mode() {   # $1=mode  $2=label  $3=clk_ns (optional, default 27.936508)
@@ -24,9 +33,9 @@ run_mode() {   # $1=mode  $2=label  $3=clk_ns (optional, default 27.936508)
   # Never grade a stale artefact: remove the vvp before rebuilding.
   rm -f "sim/build/tb_sdram_model_$1.vvp"
   OUT="$(docker run --rm -v "$REPO":/work -w /work "$IMG" bash -c "
-    iverilog -g2012 -Ptb_sdram_model.MODE=$1 -Ptb_sdram_model.CLK_NS=$CLKNS \
+    iverilog -g2012 $DUT_DEF -Ptb_sdram_model.MODE=$1 -Ptb_sdram_model.CLK_NS=$CLKNS \
       -o sim/build/tb_sdram_model_$1.vvp \
-      src/fpga/core/rtl/sdram_simple.v sim/tb/sdram_model.v sim/tb/tb_sdram_model.v &&
+      $DUT_SRC sim/tb/sdram_model.v sim/tb/tb_sdram_model.v &&
     timeout 300 vvp sim/build/tb_sdram_model_$1.vvp" 2>&1 \
     | grep -v '^WARNING: The requested' | grep -v '^INFO:')"
   echo "$OUT" | grep -E 'TB_SDRAM_MODEL|SDRAM_MODEL (cmds|timing|violations|  |write-table)' || true

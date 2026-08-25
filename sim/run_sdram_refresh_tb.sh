@@ -23,14 +23,24 @@ cd "$REPO"
 mkdir -p sim/build
 IMG="${IVERILOG_IMAGE:-hdlc/iverilog:latest}"
 
+# SDRAM_DUT=openrow runs the whole sweep against src/.../sdram_openrow.v
+# instead of sdram_simple.v. Defaults to the shipping controller.
+if [ "${SDRAM_DUT:-simple}" = "openrow" ]; then
+  DUT_SRC="src/fpga/core/rtl/sdram_openrow.v"; DUT_DEF="-DDUT_OPENROW"
+  echo "### controller under test: sdram_openrow"
+else
+  DUT_SRC="src/fpga/core/rtl/sdram_simple.v";  DUT_DEF=""
+  echo "### controller under test: sdram_simple (shipping)"
+fi
+
 run() {   # $1=interval  $2=defer_cap  $3=read_pressure  $4=tag
   docker run --rm -v "$REPO":/work -w /work "$IMG" bash -c "
-    iverilog -g2012 \
+    iverilog -g2012 $DUT_DEF \
       -Ptb_sdram_refresh.REFRESH_INTERVAL=$1 \
       -Ptb_sdram_refresh.DEFER_CAP=$2 \
       -Ptb_sdram_refresh.READ_PRESSURE=$3 \
       -o sim/build/tb_sdram_refresh_$4.vvp \
-      src/fpga/core/rtl/sdram_simple.v sim/tb/tb_sdram_refresh.v &&
+      $DUT_SRC sim/tb/tb_sdram_refresh.v &&
     timeout 600 vvp sim/build/tb_sdram_refresh_$4.vvp" 2>&1 \
   | grep -v '^WARNING: The requested' | grep -v '^INFO:' | grep -v '^ *Time: 0'
 }
