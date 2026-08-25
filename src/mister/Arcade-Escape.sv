@@ -142,6 +142,23 @@ localparam CONF_STR = {
 	"O[6],Service Mode,Off,On;",
 	"O[7],Skip Self-Test,Off,On;",
 	"-;",
+	// VSHAD3-112 runtime toggle.  This is the MiSTer equivalent of the
+	// Pocket's interact.json variable id 37 "ROM Shadow 0x54000" - and the
+	// only equivalent there is: interact.json is an openFPGA/APF file that
+	// MiSTer neither reads nor has an analogue of, so a Pocket menu entry
+	// that should exist on both platforms has to be hand-carried to CONF_STR.
+	// (The Pocket's Interact menu also has a hard 16-variable cap, currently
+	// 11 used.  CONF_STR has no such cap - it is limited only by status[]
+	// width, 128 bits, of which this core uses 8.)
+	//
+	// SENSE IS INVERTED ON PURPOSE.  hps_io powers status[] up at zero and a
+	// fresh SD card has no saved config, so bit-clear MUST be the default
+	// behaviour.  The shadow's default is ON (matching Interact id 37
+	// defaultval 1), therefore 0 = On and the wire is driven ~status[8].
+	// Writing this "Off,On" would silently ship every first-boot player the
+	// non-default configuration.
+	"O[8],ROM Shadow 0x54000,On,Off;",
+	"-;",
 	"R[0],Reset;",
 	"-;",
 	// ---------------------------------------------------------------------
@@ -387,6 +404,9 @@ escape_mister machine
 	.start1     (joystick_0[8] | joystick_1[8] | kb_start1 | kb_start2),
 	.service    (status[6]),
 	.skip_test  (status[7]),
+	// Inverted: see the CONF_STR comment. 0 (power-up / no saved config) =
+	// shadow ON, which is the default the Pocket ships.
+	.vshad3_on  (~status[8]),
 
 	.rom_ready  (rom_ready)
 );

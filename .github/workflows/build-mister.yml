@@ -11,7 +11,7 @@ name: Build MiSTer core (Quartus)
 
 on:
   push:
-    branches: [main, mister-port]
+    branches: [main, mister-port, mister-112]
   pull_request:
   workflow_dispatch:
 
@@ -38,6 +38,40 @@ jobs:
       - name: Playfield fetch service (tb_mister_pf)
         run: ./sim/run_mister_pf_tb.sh
 
+      # ---------------------------------------------------------------------
+      # BUILD 112: the shared-RTL gates. Every bench below drives a file this
+      # workflow actually compiles into the DE10-Nano bitstream, which is the
+      # only reason they belong in THIS workflow rather than the Pocket one.
+      #
+      # Deliberately NOT added: sim/run_pf_reset_tb.sh. It slices blocks out
+      # of src/fpga/core/core_top.v, which files.qip does not compile - it is
+      # a POCKET gate and putting it here would make this workflow's name a
+      # lie. It is currently wired into no workflow at all; that gap is real
+      # and is recorded in docs/MISTER.md rather than papered over here.
+      # ---------------------------------------------------------------------
+
+      # GFXDASH-3 two-frame line-buffer ghost. Drives escape_mob.v's
+      # self-clearing readout AND escape_stain.v, both compiled below by
+      # files.qip. Proven able to fail: reverting the self-clearing write
+      # makes it report 226 mismatching pixels concentrated in cases D and E.
+      - name: Line-buffer ghost + stain automaton (tb_stain)
+        run: ./sim/run_stain_tb.sh
+
+      # REFRESH-112. sdram_simple.v is the ONLY memory controller on this
+      # platform - the playfield is on this bus too - so a refresh interval
+      # out of JEDEC spec is strictly worse here than on the Pocket. The
+      # bench carries its own out-of-spec negative controls (250/48 and the
+      # old 224/48) and reports them as FAIL in the same run that passes the
+      # shipping 160/48, so it cannot silently match nothing.
+      - name: SDRAM refresh interval vs JEDEC (tb_sdram_refresh)
+        run: ./sim/run_sdram_refresh_tb.sh
+
+      # VSHAD3-112. The 16 KB partial shadow decode and its runtime toggle
+      # both live in escape_core.vhd, which this build compiles, and the
+      # MiSTer top now drives vshad3_on from CONF_STR bit 8.
+      - name: Partial ROM shadow + runtime toggle (tb_vshad3)
+        run: ./sim/run_vshad3_tb.sh
+
       - name: Compile Arcade-Escape
         run: |
           docker run --rm -v "$PWD":/work -w /work/src/mister \
@@ -60,9 +94,42 @@ jobs:
             theypsilon/quartus-lite-c5:18.1 \
             quartus_sta -t timing_report.tcl Arcade-Escape || true
 
+      # Hold-path detail, uploaded with the bitstream. The margin warning the
+      # slack gate prints is useless without the path it is warning about;
+      # this is the reporter that names it (support/report_hold_paths.tcl,
+      # arrived with the tas-atomic merge).
+      - name: Hold-path detail
+        if: always()
+        run: |
+          docker run --rm -v "$PWD":/work -w /work/src/mister \
+            theypsilon/quartus-lite-c5:18.1 \
+            quartus_sta -t ../../support/report_hold_paths.tcl Arcade-Escape || true
+
+      # BUILD 112: switched from src/mister/check_slack.py (now deleted) to
+      # the shared support/check_slack.py.
+      #
+      # BE PRECISE ABOUT WHY. The MiSTer-local copy was NARROW, not broken -
+      # it FAILS CLOSED, so it was never one of this project's silent-pass
+      # gates. Measured on synthetic fixtures, both versions agree exactly on
+      # the bare single-corner report form: clean passes, one -5.538 row
+      # fails. The differences are:
+      #   * it anchored each table name to the leading ';', so a multi-corner
+      #     heading ("; Slow 1100mV 85C Model Setup Summary ;") matched
+      #     nothing and it refused to certify the report at all - safe, but
+      #     it would have blocked this build the moment Quartus emitted more
+      #     than one timing model;
+      #   * it stopped at the FIRST match per table, i.e. one corner. A
+      #     fixture whose ONLY negative row is at the third corner passes it
+      #     and fails the shared version;
+      #   * it has no "tables present but zero parseable rows" trap, which is
+      #     the failure mode where a report-format change turns a gate into a
+      #     no-op that still prints a pass;
+      #   * it prints no evidence. The shared one prints the tightest row per
+      #     check and flags thin-but-positive margins against per-kind floors,
+      #     so a pass is auditable rather than asserted.
       - name: Fail on negative slack
         if: always()
-        run: python3 src/mister/check_slack.py src/mister/output_files/Arcade-Escape.sta.rpt
+        run: python3 support/check_slack.py src/mister/output_files/Arcade-Escape.sta.rpt
 
       - name: Stage release files
         run: |
@@ -79,3 +146,4 @@ jobs:
             mister-release/
             src/mister/output_files/Arcade-Escape.fit.summary
             src/mister/output_files/Arcade-Escape.sta.rpt
+            src/mister/output_files/Arcade-Escape.hold_paths.rpt

@@ -8,6 +8,7 @@
 //     escape_core   (src/fpga/core/rtl/escape_core.vhd)  - dual 68000 + JSA
 //     escape_mob    (src/fpga/core/rtl/escape_mob.v)     - motion objects
 //     escape_prio   (src/fpga/core/rtl/escape_prio.v)    - MO/PF priority
+//     escape_stain  (src/fpga/core/rtl/escape_stain.v)   - apply_stain pass
 //     hall_stick    (src/fpga/core/rtl/hall_stick.v)     - analog stick model
 //     sdram_simple  (src/fpga/core/rtl/sdram_simple.v)   - SDRAM controller
 //
@@ -114,6 +115,14 @@ module escape_mister (
     input  wire        start1,      // doubles as the self-test step/continue key
     input  wire        service,     // active high = service mode
     input  wire        skip_test,
+    // VSHAD3-112 runtime toggle for the 16 KB partial ROM shadow at 0x54000.
+    // 1 = shadow serves 0x54000-0x57FFF from BRAM (default, matches the
+    // Pocket's Interact id 37 default); 0 = those addresses take the SDRAM
+    // fastpath instead.  The BRAM is instantiated and filled either way, so
+    // this costs no M10K and the owner can A/B it on the device without a
+    // reflash.  Synchronised into clk_sys below, then resampled inside
+    // escape_core only between bus cycles.  See Arcade-Escape.sv CONF_STR.
+    input  wire        vshad3_on,
 
     // ---- status -----------------------------------------------------------
     output wire        rom_ready    // SDRAM up, image loaded, self-check done
@@ -970,19 +979,28 @@ escape_prio uprio (
 //     alive(x) = stain(x) & ~( E(x-1) & ~S(x) )
 //
 // S = special pixel with pen bit 1 (START_MARKER), E = pen bit 2 (END_MARKER).
-reg  stain_alive = 1'b0;
-reg  stain_e_q   = 1'b0;
-wire stain_now   = mo_stain_s | stain_alive;
-wire stain_brk   = stain_e_q & ~mo_stain_s;
-always @(posedge clk_sys) begin
-    if (visible_x == 10'd0) begin        // first cycle of a new line
-        stain_alive <= 1'b0;
-        stain_e_q   <= 1'b0;
-    end else begin
-        stain_alive <= stain_now & ~stain_brk;
-        stain_e_q   <= mo_stain_e;
-    end
-end
+//
+// GFXDASH-3: the automaton was inline here, byte-identical to the copy that
+// was inline in core_top.v - two transcriptions of the same recurrence, in two
+// files NO simulation script compiles.  It now lives in the shared module
+// src/fpga/core/rtl/escape_stain.v, instantiated once by core_top.v (Pocket),
+// once here (MiSTer) and once by sim/tb/tb_stain.v.  sim/run_stain_tb.sh
+// therefore drives THE SHIPPED INSTANCE on both platforms instead of a
+// third transcription in Python.
+//
+// The extraction is behaviour-preserving and the substitution here is exact:
+// the module's line_start/s_in/e_in/stain are the old visible_x==0 /
+// mo_stain_s / mo_stain_e / stain_now, with the same two flip-flops, the same
+// power-up value and the same clear condition.  Pure logic - the M10K delta
+// is structurally zero.
+wire stain_now;
+escape_stain ustain (
+    .clk        ( clk_sys ),
+    .line_start ( visible_x == 10'd0 ),
+    .s_in       ( mo_stain_s ),
+    .e_in       ( mo_stain_e ),
+    .stain      ( stain_now )
+);
 
 // pens: alpha 0..255 = {3'b000,color6,pix2}; MO 256..511; playfield 512..767;
 // SHADE moves the playfield into 768..1023 (CRA9).  The stain then moves
@@ -1050,12 +1068,18 @@ hall_stick hall_p2 (
 // The dedicated BOMB button asserts all three at once - this is how the game
 // implements the smart bomb, and the reason the core needs a single button
 // that presses Jump+Fire+Duck simultaneously (see docs/CONTROLS.md).
-wire coin1_s, coin2_s, start1_s, service_s, skip_s;
+wire coin1_s, coin2_s, start1_s, service_s, skip_s, vshad3_s;
 sync2 s_c1 (clk_sys, coin1,   coin1_s);
 sync2 s_c2 (clk_sys, coin2,   coin2_s);
 sync2 s_st (clk_sys, start1,  start1_s);
 sync2 s_sv (clk_sys, service, service_s);
 sync2 s_sk (clk_sys, skip_test, skip_s);
+// VSHAD3-112: hps_io drives status[] from clk_ram (35.795455), escape_core
+// samples vshad3_on in clk_sys (7.159091).  Same 2-flop treatment as every
+// other slow control here.  This is the CDC; the ATOMICITY gate (only
+// resample between bus cycles) is s3_arm_p inside escape_core.vhd, which is
+// the same split the Pocket uses via core_top's synch_3.
+sync2 s_v3 (clk_sys, vshad3_on, vshad3_s);
 
 wire [3:0] p1_btn = {p1_duck | p1_bomb, 1'b0, p1_fire | p1_bomb, p1_jump | p1_bomb};
 wire [3:0] p2_btn = {p2_duck | p2_bomb, 1'b0, p2_fire | p2_bomb, p2_jump | p2_bomb};
@@ -1063,8 +1087,38 @@ wire [3:0] p2_btn = {p2_duck | p2_bomb, 1'b0, p2_fire | p2_bomb, p2_jump | p2_bo
 // ===========================================================================
 // the machine
 // ===========================================================================
+// VSHAD3_EN and CPU_TYPE are stated explicitly rather than defaulted. Both
+// already default to 1 in escape_core.vhd, so this changes nothing about the
+// build - it makes the two decisions visible at the instantiation, which is
+// where anyone changing them will look.
+//
+//   VSHAD3_EN = 1  Instantiate the 16 KB partial ROM shadow at 0x54000.
+//       THE M10K IS SPENT HERE AND THE BENEFIT IS NOT MEASURED HERE. On the
+//       Pocket the 16 KB shadow measured a 5.19x reduction in sprite dropouts
+//       (2.410e-04 vs 1.252e-03 per robot-object-frame, p=1.0e-05) and is
+//       statistically indistinguishable from the old full 32 KB shadow.
+//       THAT NUMBER DOES NOT TRANSFER TO MiSTer AND IS NOT CLAIMED HERE. The
+//       shadow works by taking main-CPU fetches OFF the shared bus so the
+//       lowest-priority client (motion objects) gets more of it - but on this
+//       platform the PLAYFIELD is also on that bus (difference 1 at the top
+//       of this file), so both the contention being relieved and the traffic
+//       competing for the freed slots are different. The direction of the
+//       effect should be the same; the magnitude is unmeasured on MiSTer.
+//       Kept ON because the DE10-Nano has real M10K headroom where the Pocket
+//       has none, so the wrong-way risk is a few blocks, not a failed fit.
+//       WHICH half of 0x50000-0x57FFF to shadow does transfer: it is a
+//       property of this ROM's access pattern, not of the memory system.
+//       94.5% of main-CPU traffic in that range lands in 0x54000-0x57FFF and
+//       pages 0x50000/0x51000/0x52000 are read zero times during gameplay
+//       (docs/VSHAD3.md section 8), and the CPUs run the same code here.
+//
+//   CPU_TYPE = 1   68010, the dedicated cabinet. Both schematic sets specify
+//       U68010 and the owner's board is a photographed MC68010P8; the JAMMA
+//       variant shipped a 68000 and is CPU_TYPE 0. Neither is a fallback.
+//       Behaviour is identical on this ROM; interrupt entry costs ~5 extra
+//       clocks for the extended exception frame. See docs/CPU_AND_ARBITER.md.
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
-              .TASLOCK_EN(TASLOCK_EN)) ecore (
+              .TASLOCK_EN(TASLOCK_EN), .VSHAD3_EN(1), .CPU_TYPE(1)) ecore (
     .clk        ( clk_sys ),
     .reset_n    ( core_reset_n ),
     .rom_addr   ( core_rom_addr ),
@@ -1098,6 +1152,7 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .step_btn   ( start1_s ),
     .skip_test  ( skip_s ),
     .irq_strict ( 1'b0 ),
+    .vshad3_on  ( vshad3_s ),
     .uvol_ym    ( 3'b111 ),
     .uvol_tms   ( 3'b111 ),
     .uvol_fm    ( 24'hFFFFFF ),
