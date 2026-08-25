@@ -127,6 +127,29 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
     exit 1
 fi
 
+# Guard 5: the platform image must be EXACTLY the text placeholder, by content.
+# ARTWORK-113: the marquee art is under the same rule as ROM data - usable
+# locally for testing, never distributed (docs/ARTWORK.md). It used to live in
+# git history and was purged. Guards 3 and 4 do not stop it: the image is under
+# the size limit and sits at an EXPECTED manifest path, so a copied-in marquee
+# would package silently. This pins it by hash instead. If you are legitimately
+# changing the placeholder art, update PLACEHOLDER_SHA256 in the same commit -
+# that edit is the point at which someone has to think about what is shipping.
+PLACEHOLDER_SHA256="4733b92befd0a72b16716c03144f6225dc36346fcb7500e6efb7bf0b8a9040ec"
+IMG="$STAGE/Platforms/_images/$PLATFORM.bin"
+IMG_SHA="$(shasum -a 256 < "$IMG" | cut -d' ' -f1)"
+if [ "$IMG_SHA" != "$PLACEHOLDER_SHA256" ]; then
+    echo "!! REFUSING to package: Platforms/_images/$PLATFORM.bin is not the" >&2
+    echo "   distributable placeholder." >&2
+    echo "     expected $PLACEHOLDER_SHA256" >&2
+    echo "     found    $IMG_SHA" >&2
+    if [ "$IMG_SHA" = "2557c131823270514f5f7dbc036b518327b8ad7d7c942ec103f0aa1637d9418c" ]; then
+        echo "   That is the COPYRIGHTED MARQUEE ART. It must never ship." >&2
+        echo "   See docs/ARTWORK.md - install it on the SD card, not here." >&2
+    fi
+    exit 1
+fi
+
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
 ( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets )
