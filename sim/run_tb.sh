@@ -21,7 +21,7 @@ if [ ! -d "$REPO_ROOT/third_party/Arcade-Atari-system1_MiSTer/rtl" ]; then
   MAIN="$(git -C "$REPO_ROOT" worktree list --porcelain | head -1 | sed 's/^worktree //')"
   TPMOUNT=(-v "$MAIN/third_party:/work/third_party:ro")
 fi
-exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work "${TPMOUNT[@]}" -w /work "$IMAGE" bash -c "
+exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work ${TPMOUNT[@]+"${TPMOUNT[@]}"} -w /work "$IMAGE" bash -c "
   set -e
   # per-TB workdir: a shared sim/build wiped on entry was killing any
   # concurrently-running vecrace slices (they build in sim/build/vecrace-*)
