@@ -1754,8 +1754,21 @@ always @(posedge clk_sdram) begin
 end
 
     // ---------------- SDRAM controller
+    // SDRAM-ARCH (branch sdram-openrow-EXPERIMENTAL): compile-time select between
+    // the shipping controller and the open-row + bank-interleaved one. Flip
+    // this one localparam to A/B them; sdram_simple.v is not modified.
+    //
+    // Measured, no-shadow config, one frame of real traffic
+    // (sim/run_sdram_traffic_tb.sh):
+    //     sdram_simple   row-hit  6.7%   service 14.12 clk   MO 68.5% served
+    //     sdram_openrow  row-hit 79.2%   service  6.15 clk   MO  100% served
+    // and the MO fetch latency that produces takes the motion-object engine
+    // from 11 partially-rendered lines to 0 (sim/tools/mob_golden.py).
+    localparam SDRAM_OPENROW_EN = 1;
+
     wire sdram_init_done;
-sdram_simple sdr (
+generate if (SDRAM_OPENROW_EN != 0) begin : g_sdr_openrow
+sdram_openrow sdr (
     .clk        ( clk_sdram ),
     .reset_n    ( pll_core_locked ),
     .dram_a     ( dram_a ),
@@ -1787,6 +1800,33 @@ sdram_simple sdr (
     .rd_data    ( sd_rd_data ),
     .init_done  ( sdram_init_done )
 );
+end else begin : g_sdr_simple
+sdram_simple sdr (
+    .clk        ( clk_sdram ),
+    .reset_n    ( pll_core_locked ),
+    .dram_a     ( dram_a ),
+    .dram_ba    ( dram_ba ),
+    .dram_dq    ( dram_dq ),
+    .dram_dqm   ( dram_dqm ),
+    .dram_cas_n ( dram_cas_n ),
+    .dram_ras_n ( dram_ras_n ),
+    .dram_we_n  ( dram_we_n ),
+    .dram_cke   ( dram_cke ),
+    .wr_req     ( sd_wr_req ),
+    .wr_ack     ( sd_wr_ack ),
+    .wr_addr    ( sd_wr_addr ),
+    .wr_data    ( sd_wr_data ),
+    .rd_pre     ( (chk_state == 4'd10) ? rd_pre_q : 1'b1 ),
+    .rd_addr    ( (chk_state == 4'd10) ? rd_addr_q :
+                  (chk_state == 4'd1) ? 25'd0 :
+                  (chk_state == 4'd3) ? 25'h0110400 :
+                  (chk_state == 4'd5) ? 25'h0110410 :
+                  (chk_state == 4'd8 || chk_state == 4'd7) ? (25'h0110000 + {10'd0, chr_dma_word, 1'b0}) :
+                  {1'b0, core_rom_addr} ),
+    .rd_data    ( sd_rd_data ),
+    .init_done  ( sdram_init_done )
+);
+end endgenerate
 
     // ---------------- core reset: wait for ROM fully downloaded + sdram up
     wire dataslot_allcomplete_s, sdram_init_done_s;
