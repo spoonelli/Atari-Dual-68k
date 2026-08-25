@@ -63,13 +63,11 @@ Read off `core_top.v` `.p1_buttons` and cross-checked against `input.json`:
 | Select        | Coin            | 14              |
 | Start         | Self-test step / continue | 15    |
 
-> **Known defect, P2 bomb.** `.p2_buttons` ORs in `cont2_key[8]` (**L1**) where
-> `.p1_buttons` uses `cont1_key[6]` (**X**). `input.json` declares P2's bomb as
-> `pad_btn_x`, identically to P1 — so as built, **player 2's X does nothing and
-> L1 fires the bomb instead**. The declared mapping and the RTL disagree. A
-> one-bit change (`cont2_key[8]` → `cont2_key[6]`) would align them; it is
-> **not** applied here because it changes player-facing behaviour and has not
-> been tested on hardware. `core_top.v:2941`.
+> **P2 bomb - FIXED in build 113.** `.p2_buttons` used to OR in
+> `cont2_key[8]` (**L1**) where `.p1_buttons` uses `cont1_key[6]` (**X**),
+> so X did nothing for P2 and L1 fired the bomb instead, contradicting
+> `input.json`. P2 now reads bit 6, matching P1. This was the same
+> bit-8-is-L1 confusion that produced the original P1 report.
 
 ### Debug controls
 
