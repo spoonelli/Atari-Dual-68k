@@ -799,7 +799,13 @@ end
     // Default ON. The BRAM is instantiated and filled either way, so this
     // costs no M10K and can be flipped on device without a reflash.
     reg        vshad3_on_74 = 1'b1;   // 0xA0000150: 'ROM Shadow 0x54000'
-    // HUD-113: 0xA0000154 'Developer HUD' (interact.json id 38). Defaults OFF
+    // HUD-118: 0xA0000160 'Developer HUD' (interact.json id 38). Defaults OFF.
+    // ADDRESS: 0x160, NOT 0x154. Every working interact address in this core is
+    // 0x10-ALIGNED (0x000,0x010,...,0x110,0x140,0x150). Build 117 shipped this
+    // at 0x154 - the only unaligned one - and the toggle did nothing on device:
+    // the bridge write never landed, so hud_en_s stayed low and L1 was
+    // correctly ignored. The convention was there to be read and I did not
+    // read it.
     // so a player never meets the diagnostic overlay: with this clear, L1 and
     // R1 do nothing and are free for game use. The HUD RTL is still compiled
     // in, so a user helping debug a report can enable it from the menu with no
@@ -807,7 +813,7 @@ end
     // docs/RELEASE_CHECKLIST.md section F for why it is a runtime gate rather
     // than a compile-time-only flag: a repo default that differs from the
     // shipped build means what people build is not what people tested.
-    reg        hud_en_74    = 1'b0;   // 0xA0000154: 'Developer HUD'
+    reg        hud_en_74    = 1'b0;   // 0xA0000160: 'Developer HUD'
     reg        ee_autoen_74 = 1'b1;   // 0xA0000140: 'EEPROM Autosave' (default ON)
                                       // (0x120-0x13C belong to the MIX-100
                                       //  per-FM-channel mixer)
@@ -821,7 +827,7 @@ end
 always @(posedge clk_74a) begin
     if(bridge_wr && bridge_addr == 32'hA0000140) ee_autoen_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000150) vshad3_on_74 <= bridge_wr_data[0];
-    if(bridge_wr && bridge_addr == 32'hA0000154) hud_en_74    <= bridge_wr_data[0];
+    if(bridge_wr && bridge_addr == 32'hA0000160) hud_en_74    <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000000) svc_mode_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000020) skip_test_74 <= bridge_wr_data[0];
     if(bridge_wr && bridge_addr == 32'hA0000030) wdis_74      <= bridge_wr_data[0];
@@ -2288,7 +2294,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3117;   // PFLINE-b: line-start prime slot is wp-1 + MO tile-hole gate - screen shows '17'
+    localparam [15:0] BUILD_ID = 16'h3118;   // Developer HUD address 0x154 -> 0x160 (unaligned = never landed) - screen shows '18'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
