@@ -14,9 +14,16 @@
 # BUILD 112: the project name was hardcoded to ap_core, so this reporter was
 # Pocket-only and the MiSTer build had no hold-path detail at all - only the
 # summary tables, which is the exact situation HOLD-108 was written to end.
-# It now takes the project as an optional trailing argument (the same
-# convention src/mister/timing_report.tcl already uses) and defaults to
+# It now takes the project as an optional trailing argument and defaults to
 # ap_core, so the Pocket invocation above is unchanged.
+#
+# THREE WAYS TO FIND THE PROJECT, in order, because only the third is certain.
+# src/mister/timing_report.tcl documents the trailing-argument form in its own
+# header and then ignores it - it hardcodes "project_open Arcade-Escape" - so
+# there is no working precedent in this tree to copy, and $quartus(args) is not
+# something to bet a silent no-op on. If the argument is absent or the named
+# project is not here, fall back to whatever .qpf is actually in the working
+# directory, and only then to the ap_core default.
 #
 # Writes <project>.hold_paths.rpt next to the project's other output files:
 # the 20 worst hold paths at the Fast 1100mV 0C corner (the corner hold is
@@ -24,10 +31,19 @@
 # detail, plus the 10 worst at Fast 85C.
 # Diagnostic only: it gates nothing and must never fail a build.
 
-set proj "ap_core"
+set proj ""
 if {[info exists quartus(args)] && [llength $quartus(args)] > 0} {
     set proj [lindex $quartus(args) 0]
 }
+if {$proj eq "" || ![file exists "$proj.qpf"]} {
+    set found [glob -nocomplain -- "*.qpf"]
+    if {[llength $found] == 1} {
+        set proj [file rootname [lindex $found 0]]
+    } elseif {$proj eq ""} {
+        set proj "ap_core"
+    }
+}
+puts "report_hold_paths: opening project '$proj' in [pwd]"
 project_open $proj
 
 set out "output_files/$proj.hold_paths.rpt"
