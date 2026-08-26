@@ -627,6 +627,17 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
                     end else begin
                         vidout_rgb <= 24'h101010;
                     end
+                end else if(diag_on && visible_y >= 'd222 && visible_y < 'd228) begin
+                    // MOTEL-129: video-decodable frame counter. Eight 16px
+                    // blocks = frame_count[7:0], MSB left, white=1. Any
+                    // capture yields logic-frames-per-video-frame by sampling
+                    // eight fixed pixels - slowdown becomes a per-frame
+                    // number, no scroll-alignment analysis needed.
+                    if(visible_x >= 'd8 && visible_x < 'd136)
+                        vidout_rgb <= frame_count[3'd7 - ((visible_x - 'd8) >> 4)]
+                                      ? 24'hFFFFFF : 24'h202020;
+                    else
+                        vidout_rgb <= 24'h101010;
                 end else if(diag_on && visible_y >= 'd234) begin
                     case(visible_x[8:6])
                         3'd0: vidout_rgb <= sdram_init_done_s      ? 24'h00A000 : 24'hA00000;
@@ -2091,7 +2102,7 @@ end
     //   2 main-CPU (PC/wr-region) | 3 engine (actor head/mode bytes)
     //   4 apply_stain diagnostic (MOSTAIN-2)
     //   5 cadence (CADENCE-107)
-    // The wrap is at 5 (see the dbgmode counter above): pages 6 and 7 do NOT
+    // The wrap is at 6 (MOTEL-129 added page 6): page 7 does NOT
     // exist and cannot be reached by cycling. vidkill stays on R2 HOLD only,
     // now gated by diag_on; CRAM sums retired (sim benches cover).
     //
@@ -2162,7 +2173,7 @@ end
         end
         if(cont1_key[9] & ~rbtn_d) begin
             if(m_trace) tr_back <= tr_back + 7'd1;
-            else        dbgmode <= (dbgmode == 3'd5) ? 3'd0 : dbgmode + 3'd1;
+            else        dbgmode <= (dbgmode == 3'd6) ? 3'd0 : dbgmode + 3'd1;   // MOTEL-129: 7 pages
         end
     end
     // LANE3h3: modes 1-5 RETIRED (answered questions - PF map, input probe,
@@ -2209,6 +2220,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // i.e. 00FF/0100. Anything appreciably under 0100 is a missed deadline
     // rate, in the units the arcade board is quoted in.
     wire m_cadence    = (dbgmode == 3'd5);
+    // MOTEL-129 page 6: field1 = {lines truncated, worst fetch latency} this
+    // frame, field2 = frame counter. Turns "sprites feel worse" into numbers
+    // readable off any capture.
+    wire m_motel      = (dbgmode == 3'd6);
     // Frame-latched in escape_core; re-latched here at the HUD's own vblank
     // edge so a digit can never be sampled mid-update. Registers only.
     reg [15:0] cadv_fr = 16'd0, cadw_fr = 16'd0;
@@ -2362,10 +2377,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // attract NEVER resets after boot (extra released once at T=11s,
         // runs forever) - our ~35s reboot loop = a main-CPU death, and this
         // page names it.
-        4'd0:  hex_digit = m_trace ? tr_step[7:4] : m_cadence ? cadv_fr[15:12] : m_stain ? stain_px_fr[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
-        4'd1:  hex_digit = m_trace ? tr_step[3:0] : m_cadence ? cadv_fr[11:8]  : m_stain ? stain_px_fr[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
-        4'd2:  hex_digit = m_trace ? (trace_frozen ? 4'hF : 4'h0) : m_cadence ? cadv_fr[7:4]   : m_stain ? stain_px_fr[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
-        4'd3:  hex_digit = m_trace ? tr_addr[23:20] : m_cadence ? cadv_fr[3:0]   : m_stain ? stain_px_fr[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
+        4'd0:  hex_digit = m_motel ? mo_dbg_trunc[7:4] : m_trace ? tr_step[7:4] : m_cadence ? cadv_fr[15:12] : m_stain ? stain_px_fr[15:12] : m_eprobe ? pg1_f1[15:12] : m_vprobe ? pg2_f1[15:12] : m_gprobe ? engine_fr[15:12] : vcyc_fr[15:12];
+        4'd1:  hex_digit = m_motel ? mo_dbg_trunc[3:0] : m_trace ? tr_step[3:0] : m_cadence ? cadv_fr[11:8]  : m_stain ? stain_px_fr[11:8]  : m_eprobe ? pg1_f1[11:8]  : m_vprobe ? pg2_f1[11:8]  : m_gprobe ? engine_fr[11:8]  : vcyc_fr[11:8];
+        4'd2:  hex_digit = m_motel ? mo_dbg_maxlat[7:4] : m_trace ? (trace_frozen ? 4'hF : 4'h0) : m_cadence ? cadv_fr[7:4]   : m_stain ? stain_px_fr[7:4]   : m_eprobe ? pg1_f1[7:4]   : m_vprobe ? pg2_f1[7:4]   : m_gprobe ? engine_fr[7:4]   : vcyc_fr[7:4];
+        4'd3:  hex_digit = m_motel ? mo_dbg_maxlat[3:0] : m_trace ? tr_addr[23:20] : m_cadence ? cadv_fr[3:0]   : m_stain ? stain_px_fr[3:0]   : m_eprobe ? pg1_f1[3:0]   : m_vprobe ? pg2_f1[3:0]   : m_gprobe ? engine_fr[3:0]   : vcyc_fr[3:0];
         // middle field: retired with the scrubber (LANE3i2) - shows 0000.
         // BOTH burst words against download truth. err=00 with passes
         // climbing = SDRAM content and read path proven good, so the pf
@@ -2378,10 +2393,10 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
         // page 0 field2 = LANE4l max extra bus-cycle length: normal cycles
         // are tiny (< 0x0040); a stuck write shows FFFF = the invisible
         // freeze mode (bus active, rescue can't see it)
-        4'd5:  hex_digit = m_trace ? tr_addr[19:16] : m_cadence ? cadw_fr[15:12] : m_stain ? spc_px_fr[15:12] : m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
-        4'd6:  hex_digit = m_trace ? tr_addr[15:12] : m_cadence ? cadw_fr[11:8]  : m_stain ? spc_px_fr[11:8] : m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
-        4'd7:  hex_digit = m_trace ? tr_addr[11:8] : m_cadence ? cadw_fr[7:4]   : m_stain ? spc_px_fr[7:4] : m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
-        4'd8:  hex_digit = m_trace ? tr_addr[7:4] : m_cadence ? cadw_fr[3:0]   : m_stain ? spc_px_fr[3:0] : m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
+        4'd5:  hex_digit = m_motel ? frame_count[15:12] : m_trace ? tr_addr[19:16] : m_cadence ? cadw_fr[15:12] : m_stain ? spc_px_fr[15:12] : m_vprobe ? pg2_f2[15:12] : m_gprobe ? frame_ctr[15:12] : m_eprobe ? pg1_f2[15:12] : ecyc_fr[15:12];
+        4'd6:  hex_digit = m_motel ? frame_count[11:8] : m_trace ? tr_addr[15:12] : m_cadence ? cadw_fr[11:8]  : m_stain ? spc_px_fr[11:8] : m_vprobe ? pg2_f2[11:8]  : m_gprobe ? frame_ctr[11:8]  : m_eprobe ? pg1_f2[11:8]  : ecyc_fr[11:8];
+        4'd7:  hex_digit = m_motel ? frame_count[7:4] : m_trace ? tr_addr[11:8] : m_cadence ? cadw_fr[7:4]   : m_stain ? spc_px_fr[7:4] : m_vprobe ? pg2_f2[7:4]   : m_gprobe ? frame_ctr[7:4]   : m_eprobe ? pg1_f2[7:4]   : ecyc_fr[7:4];
+        4'd8:  hex_digit = m_motel ? frame_count[3:0] : m_trace ? tr_addr[7:4] : m_cadence ? cadw_fr[3:0]   : m_stain ? spc_px_fr[3:0] : m_vprobe ? pg2_f2[3:0]   : m_gprobe ? frame_ctr[3:0]   : m_eprobe ? pg1_f2[3:0]   : ecyc_fr[3:0];
         // field 3 (v61): {coin-line edge count, game credit count $3F7F55}.
         // Edges ticking without Select presses = input line glitching.
         // (replaces the v59 shadow checksum, verified 8318 on device)
@@ -2408,7 +2423,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3128;   // MO cache removed (device A/B: 122 beat 121) - screen shows '28'
+    localparam [15:0] BUILD_ID = 16'h3129;   // MO/stain 1px alignment + MOTEL telemetry page 6 - screen shows '29'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2496,6 +2511,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire        mo_valid_raw;
     wire        mo_valid = mo_valid_raw & ~m_mokill;
     wire        mo_stain_s_raw, mo_stain_e_raw;      // MOSTAIN-1
+    wire [7:0]  mo_dbg_trunc, mo_dbg_maxlat;          // MOTEL-129
     wire        mo_stain_s = mo_stain_s_raw & ~m_mokill;
     wire        mo_stain_e = mo_stain_e_raw & ~m_mokill;
 
@@ -2521,6 +2537,8 @@ escape_mob umob (
     .disp_pen ( mo_pen ),
     .disp_prio( mo_prio ),
     .disp_valid( mo_valid_raw ),
+    .dbg_trunc  ( mo_dbg_trunc ),
+    .dbg_maxlat ( mo_dbg_maxlat ),
     .disp_stain_s( mo_stain_s_raw ),
     .disp_stain_e( mo_stain_e_raw )
 );
@@ -2657,7 +2675,14 @@ escape_prio uprio (
     wire       stain_now;
 escape_stain ustain (
     .clk        ( clk_sys_7159 ),
-    .line_start ( visible_x == 10'd0 ),
+    // MOALIGN-129: the clear must be VISIBLE at pixel 0, and the automaton
+    // registers it - so assert line_start one clock earlier, on the last
+    // blanking clock. With the old lagged MO read the vis_x==0 clear happened
+    // to land before the first consumed pixel; with delivery now aligned,
+    // pixel 0 would inherit the previous line's stain-alive state (caught by
+    // tb_stain case B: a stain-to-end-of-line bleeding into column 0 of every
+    // following line).
+    .line_start ( x_count == VID_H_BPORCH - 1 ),
     .s_in       ( mo_stain_s ),
     .e_in       ( mo_stain_e ),
     .stain      ( stain_now )

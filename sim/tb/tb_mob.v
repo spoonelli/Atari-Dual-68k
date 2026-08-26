@@ -339,9 +339,12 @@ escape_prio uprio (
         if(dumping
            && x_count >= VID_H_BPORCH+1 && x_count < VID_H_BPORCH+VID_H_ACTIVE+1
            && y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE) begin
-            // disp read is registered: pen for visible_x N is valid one cycle later
+            // MOALIGN-129: the DUT now reads its display buffer at disp_x+1, so
+            // delivery aligns with consumption and the old "visible_x - 1"
+            // logging compensation is GONE. Gates passing unchanged with both
+            // edits proves the RTL change is a pure one-pixel alignment.
             if(disp_valid) begin
-                $fwrite(fd, "%0d %0d %h %0d\n", visible_x - 10'd1, visible_y,
+                $fwrite(fd, "%0d %0d %h %0d\n", visible_x, visible_y,
                         disp_pen, disp_prio);
                 px_seen = px_seen + 1;
             end
@@ -349,7 +352,7 @@ escape_prio uprio (
             // compositor uses their START/END markers to stain what is under
             // them (sim/tools/render_scene.py replays the same rule).
             if(disp_stain_s || disp_stain_e) begin
-                $fwrite(fds, "%0d %0d %0d %0d\n", visible_x - 10'd1, visible_y,
+                $fwrite(fds, "%0d %0d %0d %0d\n", visible_x, visible_y,
                         disp_stain_s, disp_stain_e);
                 n_spec = n_spec + 1;
             end
