@@ -439,6 +439,15 @@ wire [3:0]   moc_done;
 wire [127:0] moc_data;
 wire [15:0]  moc_hit, moc_miss;
 
+// MOCACHE-128 (ported): cache bypassed - device A/B (121 vs 122) found
+// no-cache better and the pocket shipping path removed it in build 128.
+assign moc_done    = mg_done_s;
+assign moc_data    = mg_data;
+assign mo_gfx_req  = moc_req;
+assign mo_gfx_addr = moc_addr;
+assign moc_hit     = 16'd0;
+assign moc_miss    = 16'd0;
+`ifdef MOCACHE_ENABLED
 escape_mo_cache #(.ENTRIES(32), .IDXBITS(5)) u_mo_cache (
     .clk(clk_sys), .reset_n(core_reset_n),
     .mo_req(moc_req),   .mo_addr(moc_addr),
@@ -447,6 +456,7 @@ escape_mo_cache #(.ENTRIES(32), .IDXBITS(5)) u_mo_cache (
     .mem_done(mg_done_s), .mem_data(mg_data),
     .hit_cnt(moc_hit),  .miss_cnt(moc_miss)
 );
+`endif
 
 
 // Registered MO pre-decode. Safety of looking one cycle back is the same
@@ -1053,7 +1063,10 @@ escape_prio uprio (
 wire stain_now;
 escape_stain ustain (
     .clk        ( clk_sys ),
-    .line_start ( visible_x == 10'd0 ),
+    // MOALIGN-129 (ported): escape_mob's display read is now at disp_x+1, so
+    // delivery aligns with consumption; the registered clear must be VISIBLE
+    // at pixel 0, i.e. line_start asserts on the last blanking clock.
+    .line_start ( x_count == VID_H_BPORCH - 1 ),
     .s_in       ( mo_stain_s ),
     .e_in       ( mo_stain_e ),
     .stain      ( stain_now )
