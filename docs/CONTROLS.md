@@ -85,7 +85,7 @@ Not game controls — development tooling, and none of it is on by default.
 | Pocket | Effect |
 |---|---|
 | **L1** | Show / hide the diagnostic HUD. **Starts hidden**, and does nothing at all unless **Developer HUD** is enabled in the core menu (see below). |
-| **R1** | Cycle HUD page 0-5 (works with the HUD hidden; the page shows next time you press L1) |
+| **R1** | Cycle HUD page 0-6 (works with the HUD hidden; the page shows next time you press L1) |
 | **L2** | Toggle the trace view |
 | **R1 (hold)** | Hide motion objects |
 | **L2 (hold)** | Hide the alpha layer |
