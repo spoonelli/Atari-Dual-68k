@@ -231,3 +231,17 @@ pipe latency may be fractionally under 3 ("no 2.5 clock setting, so 3 it is"):
 DE+3 fully covers the left edge and slightly over-trims into the right, where
 the last pixel's data can arrive while DE is still open during startup
 conditions. Revisit only if it ever appears during play.
+
+UPDATE (same day, owner frames 616-620, 646): the residual is a ~1-native-px
+grey column at the RIGHT edge that draws in progressively top-to-bottom over
+two frames on map/transition screens - the same live-draw signature the left
+strip had - then is invisible in gameplay. Owner: acceptable for now.
+
+Diagnosis on file for whoever picks it up: the layers do not share one
+latency. At DE+2 the left edge showed 1 px of PLAYFIELD residue (pf latency 3)
+while alpha was aligned (latency ~2); at DE+3 the playfield is aligned and the
+ALPHA layer leads by one - at the right edge the last column samples alpha's
+vis_x+1 content (its off-screen/wrap tile, the grey), visible only where the
+playfield is flat. The clean fix is to EQUALISE layer latencies (one register
+stage on the alpha path) rather than move DE again; "there is no 2.5-clock DE
+setting" is exactly right.
