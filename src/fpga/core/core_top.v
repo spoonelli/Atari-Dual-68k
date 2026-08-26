@@ -514,7 +514,19 @@ assign video_hs = vidout_hs;
     localparam  VID_V_BPORCH = 'd12;
     localparam  VID_V_ACTIVE = 'd240;
     localparam  VID_V_TOTAL = 'd262;
-    localparam  VID_H_BPORCH = 'd60;
+    // PFWRAP-125: 60 -> 62. Measured directly against MAME on the identical
+    // static screen (native-resolution snapshot vs de-scaled capture): EVERY
+    // layer - playfield AND alpha - sat 2 px right of MAME's window, with a
+    // sharp correlation minimum at exactly dx=-2. So the visible window opened
+    // 2 px early in the raster, and the leftmost 2 columns showed content LEFT
+    // of the intended window: for the playfield that is the 512-px tilemap
+    // wrapping to its FAR-RIGHT columns - the "left-edge strip" of stale-scene
+    // content, live-updating, latency-immune, invisible in MAME. Six fetch-side
+    // fixes (lead, ring depth, rp offset, channels, resync, tile cache) failed
+    // because the fetch was never wrong: the WINDOW was. The owner called it:
+    // "is that line just phase shifted from the other side?" - it is, from the
+    // tilemap's other side, by exactly this constant.
+    localparam  VID_H_BPORCH = 'd62;
     localparam  VID_H_ACTIVE = 'd336;
     localparam  VID_H_TOTAL = 'd456;
 
@@ -2364,7 +2376,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3125;   // PFWRAP: left-edge fix (hblank wrap enqueues) on the 6x base - screen shows '25'
+    localparam [15:0] BUILD_ID = 16'h3125;   // window +2px (left-edge strip fix, MAME-measured) on the 6x base - screen shows '25'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
