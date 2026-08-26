@@ -1380,6 +1380,21 @@ psram #(.CLOCK_SPEED(42.954546)) cram0 (
     wire [127:0] moc_data;
     wire [15:0]  moc_hit, moc_miss;
 
+    // MOCACHE-128: cache REMOVED from the shipping path. The owner's device
+    // A/B (121 with vs 122 without, same base) found 122 objectively better on
+    // sprite artifacts, and the refined dropout model gives that a mechanism:
+    // the failure is a late-LIST object losing stamps under peak load, and a
+    // cache MISS through this module costs more than a direct fetch - the
+    // extra hop taxes exactly the fetches that were already last in line. Its
+    // sim benefit was never proven (51 -> 19 missing across seeds with one
+    // seed REGRESSING 0 -> 10). Bypass wiring identical to build 122's.
+    assign moc_done    = mg_done_s;
+    assign moc_data    = mg_data;
+    assign mo_gfx_req  = moc_req;
+    assign mo_gfx_addr = moc_addr;
+    assign moc_hit     = 16'd0;
+    assign moc_miss    = 16'd0;
+`ifdef MOCACHE_ENABLED
     escape_mo_cache #(.ENTRIES(32), .IDXBITS(5)) u_mo_cache (
         .clk(clk_sys_7159), .reset_n(core_reset_n),
         .mo_req(moc_req),   .mo_addr(moc_addr),
@@ -1388,6 +1403,7 @@ psram #(.CLOCK_SPEED(42.954546)) cram0 (
         .mem_done(mg_done_s), .mem_data(mg_data),
         .hit_cnt(moc_hit),  .miss_cnt(moc_miss)
     );
+`endif
     // SDSCHED-74: same-family crossings (7.159 -> 35.795, timed since the
     // '73 SDC grouping) - single capture FFs. The 3-stage done-return
     // chains cost ~400ns per fetched sprite row (~1/3 of the row budget).
@@ -2392,7 +2408,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3127;   // DE delay 2 -> 3 clks (device-calibrated) - screen shows '27'
+    localparam [15:0] BUILD_ID = 16'h3128;   // MO cache removed (device A/B: 122 beat 121) - screen shows '28'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
