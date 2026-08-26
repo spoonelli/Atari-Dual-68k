@@ -2,7 +2,9 @@
 # user core constraints
 #
 # sdram-sched: the four PLL outputs are one clock family (same refclk, same
-# PLL - 35.795455MHz = exactly 5 x 7.159091MHz). Grouped SYNCHRONOUS, every
+# PLL). LOWLAT-124: the SDRAM outputs run 42.954546 MHz = exactly 6 x
+# 7.159091 MHz - still an INTEGER ratio, so the synchronous grouping stays
+# valid (it was 5x). Grouped SYNCHRONOUS, every
 # CPU<->SDRAM crossing becomes a timed path, legalizing single-cycle
 # handshakes in place of 3-stage synchronizer chains.
 # put your clock groups in here as well as any net assignments

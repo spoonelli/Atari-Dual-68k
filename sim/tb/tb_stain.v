@@ -157,6 +157,9 @@ module tb_stain;
         .gfx_addr ( gfx_addr ),
         .gfx_done ( gfx_done ),
         .gfx_data ( gfx_data ),
+        // MOALIGN-129: the DUT's display leg now reads at disp_x+1, aligning
+        // delivery with consumption; the old visible_x-1 logging compensation
+        // is gone to match (same change as tb_mob).
         .disp_x   ( visible_x[8:0] ),
         .disp_pen ( disp_pen ),
         .disp_prio( disp_prio ),
@@ -170,7 +173,7 @@ module tb_stain;
     wire stain_now;
     escape_stain ustain (
         .clk        ( clk ),
-        .line_start ( visible_x == 10'd0 ),
+        .line_start ( x_count == VID_H_BPORCH - 1 ),   // MOALIGN-129: clear visible AT pixel 0
         .s_in       ( disp_stain_s ),
         .e_in       ( disp_stain_e ),
         .stain      ( stain_now )
@@ -202,15 +205,15 @@ module tb_stain;
 
     always @(posedge clk) begin
         if(frame >= FIRST_SCORED && frame < NFRAMES
-           && x_count >= VID_H_BPORCH+1 && x_count < VID_H_BPORCH+VID_H_ACTIVE+1
+           && x_count >= VID_H_BPORCH && x_count < VID_H_BPORCH+VID_H_ACTIVE
            && y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE) begin
             if(stain_now) begin
-                $fwrite(fd, "S %0d %0d %0d\n", frame, visible_y, visible_x - 10'd1);
+                $fwrite(fd, "S %0d %0d %0d\n", frame, visible_y, visible_x);
                 n_stain = n_stain + 1;
             end
             if(disp_valid) begin
                 $fwrite(fd, "P %0d %0d %0d %0d\n", frame, visible_y,
-                        visible_x - 10'd1, disp_pen[3:0]);
+                        visible_x, disp_pen[3:0]);
                 n_pix = n_pix + 1;
             end
             if(disp_stain_s) n_s = n_s + 1;

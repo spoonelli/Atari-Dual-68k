@@ -60,6 +60,13 @@ module escape_mob (
     // OWNS its line-buffer slot (so it masks normal sprites under it, exactly
     // like the reference's single motion-object bitmap) and its own pen bits 1
     // and 2 are the START/END markers that drive apply_stain in the compositor.
+    // MOTEL-129: quantifiable degradation telemetry, latched once per frame.
+    // dbg_trunc  = lines this frame whose walk was cut by fetch_budget
+    //              exhaustion with work remaining (the dropout event itself).
+    // dbg_maxlat = worst gfx fetch round trip this frame, in pixel clocks,
+    //              saturating at 255.
+    output reg  [7:0]  dbg_trunc,
+    output reg  [7:0]  dbg_maxlat,
     output wire        disp_stain_s,    // special pixel here, pen bit 1 set
     output wire        disp_stain_e     // special pixel here, pen bit 2 set
 );
@@ -129,8 +136,20 @@ module escape_mob (
     // it becomes an occupancy probe for first-write-wins (see S_BLIT). Still
     // one read + one write per buffer, so this is free: no extra M10K, no
     // extra port, no extra cycle.
-    wire [8:0] rd_addr0 = build_sel ? disp_x : blit_x;
-    wire [8:0] rd_addr1 = build_sel ? blit_x : disp_x;
+    // MOALIGN-129: the DISPLAY leg reads at disp_x + 1, not disp_x. The read
+    // is registered, so presenting address N at clock T delivers data at T+1,
+    // when the compositor is already on pixel N+1. tb_mob knew and logged at
+    // visible_x MINUS ONE to compensate, so every gate was pixel-perfect while
+    // the DEVICE composited the MO layer - and the stain markers, which come
+    // from the same registered read - one pixel RIGHT of the playfield. A 1px
+    // MO offset is invisible on sprites; the stain is where it showed: the
+    // leftmost column of every stained region went uncovered, which is the
+    // map specks and the shed checkerboard fragments. Reading at disp_x+1
+    // aligns delivery with consumption; the bench compensation is removed in
+    // the same commit, and the gates passing unchanged proves the change is a
+    // pure one-pixel alignment.
+    wire [8:0] rd_addr0 = build_sel ? (disp_x + 9'd1) : blit_x;
+    wire [8:0] rd_addr1 = build_sel ? blit_x : (disp_x + 9'd1);
     always @(posedge clk) begin
         disp_q0 <= buf0[rd_addr0];
         disp_q1 <= buf1[rd_addr1];
@@ -462,6 +481,39 @@ module escape_mob (
     // measuring anything real. The line abort - not the budget - is what
     // bounds a build; never-wedge is unaffected.
     reg [6:0]  fetch_budget;
+    // MOTEL-129 accumulators (frame-local), latched into dbg_* at frame start.
+    reg [7:0]  tel_trunc = 8'd0;
+    reg [7:0]  tel_maxlat = 8'd0;
+    reg [7:0]  tel_lat [0:3];
+    reg [3:0]  tel_req_d = 4'd0, tel_done_d = 4'd0;
+    integer    ti;
+    initial begin dbg_trunc=8'd0; dbg_maxlat=8'd0; for(ti=0;ti<4;ti=ti+1) tel_lat[ti]=8'd0; end
+    always @(posedge clk) begin
+        // per-channel fetch latency: req toggle -> done toggle, pixel clocks
+        tel_req_d  <= gfx_req;
+        tel_done_d <= gfx_done;
+        for(ti=0;ti<4;ti=ti+1) begin
+            if(gfx_req[ti] != tel_req_d[ti]) tel_lat[ti] <= 8'd1;
+            else if(gfx_done[ti] != tel_done_d[ti]) begin
+                if(tel_lat[ti] > tel_maxlat) tel_maxlat <= tel_lat[ti];
+            end else if(tel_lat[ti] != 8'd0 && tel_lat[ti] != 8'hFF)
+                tel_lat[ti] <= tel_lat[ti] + 8'd1;
+        end
+        // frame boundary: latch and clear
+        if(y_count == 10'd0 && x_count == 10'd0) begin
+            dbg_trunc  <= tel_trunc;
+            dbg_maxlat <= tel_maxlat;
+            tel_trunc  <= 8'd0;
+            tel_maxlat <= 8'd0;
+        end
+        // truncation: the walk leaves S_NEXT for S_IDLE because the budget is
+        // gone while work remains (queue non-empty or scout not done).
+        if(state == S_NEXT && fetch_budget == 0
+           && (q_cnt != 3'd0 || (sstate != SC_DONE && sstate != SC_IDLE))
+           && tel_trunc != 8'hFF)
+            tel_trunc <= tel_trunc + 8'd1;
+    end
+
     reg [9:0]  cur_line_latch;
 
     // v80: MAME atarimo ground truth - the entry Y field is NEGATED and

@@ -238,6 +238,36 @@ escape_prio uprio (
     .pen      ( pr_pen )
 );
 
+    // OCC-124: is the occupancy/tag test rejecting pixels that were written?
+    // occ gates BOTH the normal draw (disp_valid) and the stain (spc_hit), so a
+    // tag failure would drop whole scanlines of an object AND kill the stain on
+    // the same rows. Count, per scanline: entries whose PEN is non-zero (i.e.
+    // something really was written there) but whose TAG does not match.
+    integer occ_rej, occ_ok, spc_seen, spc_rej;
+    initial begin occ_rej=0; occ_ok=0; spc_seen=0; spc_rej=0; end
+    always @(posedge clk) if(rstn) begin
+        // look at whichever buffer is being DISPLAYED this line
+        if(dut.build_sel) begin
+            if(dut.disp_q0[3:0] != 4'd0) begin
+                if(dut.disp_q0[19:11] == {dut.built_fp0, dut.built_ly0}) occ_ok = occ_ok+1;
+                else begin
+                    occ_rej = occ_rej+1;
+                    if(dut.disp_q0[10]) spc_rej = spc_rej+1;
+                end
+                if(dut.disp_q0[10]) spc_seen = spc_seen+1;
+            end
+        end else begin
+            if(dut.disp_q1[3:0] != 4'd0) begin
+                if(dut.disp_q1[19:11] == {dut.built_fp1, dut.built_ly1}) occ_ok = occ_ok+1;
+                else begin
+                    occ_rej = occ_rej+1;
+                    if(dut.disp_q1[10]) spc_rej = spc_rej+1;
+                end
+                if(dut.disp_q1[10]) spc_seen = spc_seen+1;
+            end
+        end
+    end
+
     // ---------------- debug: what does the engine actually do per line?
     reg dumping = 0;
     integer n_slip, n_entries, n_ymatch, n_fetch, n_wren, n_wren_off;
@@ -301,15 +331,20 @@ escape_prio uprio (
         $display("DBG slips=%0d entries=%0d ymatch=%0d fetch=%0d wren=%0d offscreen_px=%0d",
                  n_slip, n_entries, n_ymatch, n_fetch, n_wren, n_wren_off);
         $display("DBG2 done=%0d pend=%0d blitstate=%0d", n_done, n_pend, n_blitst);
+        $display("OCC-124 written-but-TAG-REJECTED=%0d  tag-ok=%0d  (%.3f%% rejected)  specials seen=%0d of which rejected=%0d",
+                 occ_rej, occ_ok, (occ_rej+occ_ok)>0 ? 100.0*occ_rej/(occ_rej+occ_ok) : 0.0, spc_seen, spc_rej);
         $finish;
     end
     always @(posedge clk) begin
         if(dumping
            && x_count >= VID_H_BPORCH+1 && x_count < VID_H_BPORCH+VID_H_ACTIVE+1
            && y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE) begin
-            // disp read is registered: pen for visible_x N is valid one cycle later
+            // MOALIGN-129: the DUT now reads its display buffer at disp_x+1, so
+            // delivery aligns with consumption and the old "visible_x - 1"
+            // logging compensation is GONE. Gates passing unchanged with both
+            // edits proves the RTL change is a pure one-pixel alignment.
             if(disp_valid) begin
-                $fwrite(fd, "%0d %0d %h %0d\n", visible_x - 10'd1, visible_y,
+                $fwrite(fd, "%0d %0d %h %0d\n", visible_x, visible_y,
                         disp_pen, disp_prio);
                 px_seen = px_seen + 1;
             end
@@ -317,7 +352,7 @@ escape_prio uprio (
             // compositor uses their START/END markers to stain what is under
             // them (sim/tools/render_scene.py replays the same rule).
             if(disp_stain_s || disp_stain_e) begin
-                $fwrite(fds, "%0d %0d %0d %0d\n", visible_x - 10'd1, visible_y,
+                $fwrite(fds, "%0d %0d %0d %0d\n", visible_x, visible_y,
                         disp_stain_s, disp_stain_e);
                 n_spec = n_spec + 1;
             end

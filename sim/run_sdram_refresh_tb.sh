@@ -36,6 +36,7 @@ fi
 run() {   # $1=interval  $2=defer_cap  $3=read_pressure  $4=tag
   docker run --rm -v "$REPO":/work -w /work "$IMG" bash -c "
     iverilog -g2012 $DUT_DEF \
+      -Ptb_sdram_refresh.CLK_NS=${CLK_NS:-27.936508} \
       -Ptb_sdram_refresh.REFRESH_INTERVAL=$1 \
       -Ptb_sdram_refresh.DEFER_CAP=$2 \
       -Ptb_sdram_refresh.READ_PRESSURE=$3 \
@@ -72,11 +73,26 @@ report() {  # $1=label  $2=interval  $3=defer  $4=pressure  $5=tag  $6=expect(PA
 # Negative controls FIRST: two policies that are genuinely out of spec and MUST
 # be reported FAIL. The second one is not hypothetical - 224/48 is what
 # origin/mister-port ships, believing (from hand arithmetic) that it is in spec.
+# LOWLAT-124: CONTROLS ARE CALIBRATED TO THE CLOCK. The JEDEC limit in CLOCKS
+# is 279.7 at 35.795455 MHz and 335.6 at 42.954546 MHz, so a control that is
+# out of spec at one clock can be comfortably inside it at the other. Set
+# CLK_NS to pick the clock. Measured note: the real worst gap runs ~48 clocks
+# BELOW interval+defer_cap, so controls must be chosen against MEASUREMENT, not
+# against the paper sum - 350/67 was tried at 50 MHz and turned out to be in
+# spec, which the gate caught by refusing to certify.
+if [ "${CLK_NS:-27.936508}" = "23.280" ]; then
+  echo "### clock: 42.954546 MHz (CLK_NS=23.280) - JEDEC limit 335.6 clocks"
+  report "NEGATIVE CONTROL - 400/58 = 458 paper, ~410 measured"   400 58 3 neg1   FAIL
+  report "NEGATIVE CONTROL - 340/58 = 398 paper, ~350 measured"   340 58 3 neg2   FAIL
+  report "SHIPPING at 6x - 192/58 = 250 clk = 5.82 us"            192 58 3 fast   PASS
+  report "sanity: idle bus, no read pressure"                     192 58 0 idle   PASS
+else
 report "NEGATIVE CONTROL - original policy, pre-CLKFIX-106"   250 48 3 orig   FAIL
 report "NEGATIVE CONTROL - mister-port's 224, deferral kept"  224 48 3 mister FAIL
 report "sdram-sched proposal - 250, deferral DELETED"         250  0 3 sched  PASS
 report "SHIPPING both platforms - 160, deferral kept"         160 48 3 pocket PASS
 report "sanity: idle bus, no read pressure"                   160 48 0 idle   PASS
+fi
 
 if [ "$FAIL" -ne 0 ]; then
   echo "SDRAM REFRESH GATE FAIL" >&2
