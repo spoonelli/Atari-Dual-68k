@@ -1131,7 +1131,7 @@ end
 // so believing cycles are 11.64ns when they are really 27.94ns made it wait 7
 // cycles for the 70ns read access where 3 suffice: ~279ns per playfield fetch
 // instead of ~168ns. CRAM serves the playfield, so this taxed every tile fetch.
-psram #(.CLOCK_SPEED(35.795455)) cram0 (
+psram #(.CLOCK_SPEED(42.954546)) cram0 (
     .clk        ( clk_sdram ),
     .bank_sel   ( 1'b0 ),
     .addr       ( cram_addr ),
@@ -1827,7 +1827,37 @@ end
 
     wire sdram_init_done;
 generate if (SDRAM_OPENROW_EN != 0) begin : g_sdr_openrow
-sdram_openrow sdr (
+// LOWLAT-124: clk_sdram = 42.954546 MHz = exactly 6 x 7.159091, chosen over
+// the 7x (50.113637) of build 123 for a specific reason: tRAS.
+//
+//   clock   tRAS clocks   tRAS wall   vs 35.795455
+//   5x      2             55.9 ns     -           (shipping)
+//   6x      2             46.6 ns     -17%        <-- this build
+//   7x      3             59.9 ns     +7%         <-- build 123 REGRESSION
+//
+// At 7x, 45 ns needs THREE clocks and row activation gets SLOWER in wall time
+// even though everything else got faster. At 6x it still fits in two, so every
+// timing improves at once. The integer ratio is preserved, so the SDC's
+// synchronous clock grouping stays valid.
+//
+// Timings re-derived at 23.280 ns/clock, all with positive margin:
+//   tRCD 20 ns -> 1 clk (23.3, +3.3)    was 2 clk, CONSERVATIVE - the
+//   tRP  20 ns -> 1 clk (23.3, +3.3)    controller's own header says "1 clk
+//   tRAS 45 ns -> 2 clk (46.6, +1.6)    (T_RCD_CLK = 2, kept)". That kept
+//   tRFC 66 ns -> 3 clk (69.8, +3.8)    clock was pure latency on every access.
+//   refresh 160*1.2 = 192, defer 48*1.2 = 58 -> 250 clk = 5.82 us vs 7.8125
+//
+// tRAS margin is the thin one at +1.6 ns. -75 is assumed (the slowest grade the
+// part is offered in, and no grade is recorded anywhere in this repo), so the
+// real margin is likely larger. sim/tb/sdram_model.v's JEDEC checker verifies.
+sdram_openrow #(
+    .REFRESH_INTERVAL ( 192 ),
+    .DEFER_CAP        (  58 ),
+    .T_RCD_CLK        (   1 ),
+    .T_RP_CLK         (   1 ),
+    .T_RAS_CLK        (   2 ),
+    .T_RFC_CLK        (   3 )
+) sdr (
     .clk        ( clk_sdram ),
     .reset_n    ( pll_core_locked ),
     .dram_a     ( dram_a ),
@@ -2334,7 +2364,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3121;   // Developer HUD: interact 'value' 0 -> 1 (ticking wrote a zero) - screen shows '21'
+    localparam [15:0] BUILD_ID = 16'h3124;   // 42.95 MHz (6x) + tightened tRCD/tRP/tRFC - lowest latency yet - screen shows '24'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
