@@ -33,6 +33,11 @@ module escape_pf #(
     // the slot being read is the one just written. Backing rp off by N gives
     // the fetch N cells of slack, which is what LEAD alone could not deliver.
     parameter [1:0]   RP_OFF = 2'd0,
+    parameter integer WRAPFIX = 0,   // PFWRAP-125: EXPERIMENTAL hblank-enqueue gate, superseded
+    // by the window-placement fix (core_top VID_H_BPORCH 60->62) and OFF by
+    // default - the strip was the window opening 2px early, not the fetches.
+    // Kept with its bench plumbing because the >=14-clock stale-slot mode is
+    // real (tb_pfline ABSOLUTE gate) and this is the tested lever against it,
     // PFCACHE-123: playfield tile-row cache. The floor is a lattice of
     // REPEATED tiles, so adjacent cells constantly fetch the SAME address. A
     // hit costs one clock instead of a full round trip, which attacks the one
@@ -175,8 +180,31 @@ module escape_pf #(
             end
             3'd3: begin
                 // enqueue this cell's fetch (issue side drains when free)
+                // PFWRAP-125: during horizontal blanking vis_x WRAPS (x_count
+                // 0..59 -> vis_x 964..1023), so the phase-0 map lookups address
+                // pf_x2 = wrapped+16+xscroll = the FAR-RIGHT tilemap columns
+                // (~58..63) - a full off-screen region away. Those bogus
+                // fetches fill the queue and the ring ahead of the two
+                // legitimate wrapped-into-next-line lookups (cells 0,1), so
+                // whenever the round trip exceeds the 13 clocks between the
+                // cell-0 enqueue and pixel 0, the slots still hold OFF-SCREEN
+                // MAP CONTENT and the left edge displays it. That is the
+                // device's left-edge strip: live-updating (it is re-fetched
+                // every line), scene-coherent (it is real tilemap data), and
+                // immune to lead/depth/channel fixes (the address is wrong,
+                // not late). Field-confirmed: the strip redrew progressively
+                // as the CPU wrote the next level's map (frames 1561-63) and
+                // switched content instantly when those columns were
+                // rewritten (8730-31).
+                //
+                // The gate: during hblank (vis_x[9]), enqueue ONLY the tail
+                // lookups whose pf_x2 has legitimately wrapped into the coming
+                // line's left prefix. (vis_x[8:0]+16) is xscroll-independent:
+                // the coming line's cells satisfy vis_x[8:0] >= 496 - WRAPFIX
+                // widens nothing else. WRAPFIX=0 restores shipping behaviour.
                 if(y_count >= VID_V_BPORCH - 2 && y_count < VID_V_BPORCH + VID_V_ACTIVE
-                   && pfq_count != 3'd4) begin
+                   && pfq_count != 3'd4
+                   && (WRAPFIX == 0 || !vis_x[9] || vis_x[8:0] >= (9'd512 - LEAD))) begin
                     case(pfq_wr)
                         2'd0: begin pfq_addr0 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot0 <= pf_wp; end
                         2'd1: begin pfq_addr1 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot1 <= pf_wp; end

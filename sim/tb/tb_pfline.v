@@ -31,7 +31,7 @@
 
 module tb_pfline;
     localparam [9:0] V_BPORCH = 10'd12,  V_ACTIVE = 10'd240;
-    localparam [9:0] H_BPORCH = 10'd60,  H_ACTIVE = 10'd336;
+    localparam [9:0] H_BPORCH = 10'd62,  H_ACTIVE = 10'd336;   // PFWRAP-125: matches device
     localparam [9:0] H_TOTAL  = 10'd456, V_TOTAL  = 10'd262;
 
     parameter [8:0] XSCROLL = 9'd0;
@@ -50,6 +50,7 @@ module tb_pfline;
     // ROOT module - so that form silently does nothing and the sweep measures
     // the default. It cost two vacuous sweeps before the counter caught it.
     parameter integer PFC_EN  = 0;
+    parameter integer WRAPFIX = 1;
     parameter [1:0]   RP_OFF  = 2'd0;
     // the nibble is 4 bits, so the ramp wraps at min(MAPMOD,16)
     localparam integer RAMPMOD = (MAPMOD > 16) ? 16 : MAPMOD;
@@ -133,7 +134,7 @@ module tb_pfline;
 
     escape_pf #(.VID_V_BPORCH(V_BPORCH), .VID_V_ACTIVE(V_ACTIVE),
                 .LEAD(LEAD), .NCH(NCH),
-                .PFC_EN(PFC_EN), .RP_OFF(RP_OFF)) dut (
+                .PFC_EN(PFC_EN), .RP_OFF(RP_OFF), .WRAPFIX(WRAPFIX)) dut (
         .clk(clk), .core_reset_n(rstn),
         .vis_x(vis_x), .visible_x(visible_x), .visible_y(visible_y),
         .x_count(x_count), .y_count(y_count),
@@ -232,6 +233,44 @@ module tb_pfline;
         if(dut.pc_hit && dut.pfq_count!=3'd0) nhit=nhit+1;
     end
 
+    // PFWRAP-125: ABSOLUTE position check. The ramp property pix(x)==pix(x-8)+1
+    // is translation-invariant: a left edge served from the WRONG MAP COLUMNS
+    // still satisfies it as long as the wrong columns are consecutive - and
+    // consecutive wrapped columns (62,63,0,1...) are exactly what the hblank
+    // vis_x wrap produces. That blind spot is documented at the ramp; this
+    // check covers it. Anchor at a mid-line cell (x=200, fetched with
+    // un-wrapped vis_x, known good) and extrapolate the expected code back to
+    // every cell to its left. A left edge shifted onto far-right tilemap
+    // columns cannot satisfy the extrapolation.
+    integer abs_bad, abs_lines_bad, abs_first_min;
+    reg [3:0] linepix [0:335];
+    initial begin abs_bad=0; abs_lines_bad=0; abs_first_min=999; end
+    always @(posedge clk) if(scoring && in_active) begin : abs_blk
+        integer k, firstbad, expk;
+        linepix[visible_x] = pf_pix;
+        if(visible_x == H_ACTIVE-1) begin
+            firstbad = -1;
+            for(k = 0; k < 25; k = k + 1) begin
+                expk = (linepix[204] - (25 - k)) % RAMPMOD;
+                if(expk < 0) expk = expk + RAMPMOD;
+                if(linepix[k*8+4] !== expk[3:0]) begin
+                    abs_bad = abs_bad + 1;
+                    if(firstbad < 0) firstbad = k*8+4;
+                end
+            end
+            if(firstbad >= 0) begin
+                abs_lines_bad = abs_lines_bad + 1;
+                if(firstbad < abs_first_min) abs_first_min = firstbad;
+            end
+            // one-shot dump of the first bad line's cells
+            if(firstbad >= 0 && abs_lines_bad == 1) begin
+                $write("PFLINE ABSDUMP y=%0d anchor=%0d cells:", visible_y, linepix[204]);
+                for(k = 0; k < 25; k = k + 1) $write(" %0d", linepix[k*8+4]);
+                $write("\n");
+            end
+        end
+    end
+
     task report_result;
         begin
             $display("PFLINE xscroll=%0d  lines scored=%0d  lines with a stale left edge=%0d",
@@ -256,6 +295,12 @@ module tb_pfline;
                 $fatal;
             end
             $display("PFLINE requests issued: A=%0d B=%0d C=%0d D=%0d  cache_hits=%0d  PFC_EN=%0d", nA,nB,nC,nD,nhit,dut.PFC_EN);
+            $display("PFLINE ABSOLUTE: lines with wrong-COLUMN cells=%0d of %0d  bad cells=%0d  first bad x=%0d",
+                     abs_lines_bad, lines_scored, abs_bad, (abs_first_min==999)?-1:abs_first_min);
+            if(abs_lines_bad != 0)
+                $display("PFLINE ABSOLUTE GATE: FAIL - left-edge cells served from the WRONG map columns");
+            else
+                $display("PFLINE ABSOLUTE GATE: PASS - every checked cell traces to its own map column");
             if(lines_bad == 0)
                 $display("PFLINE GATE: PASS - the cell ramp is unbroken on every line");
             else begin
