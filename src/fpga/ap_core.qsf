@@ -744,6 +744,7 @@ set_global_assignment -name VERILOG_FILE core/rtl/sdram_openrow.v
 set_global_assignment -name VERILOG_FILE core/rtl/escape_mob.v
 set_global_assignment -name VERILOG_FILE core/rtl/escape_prio.v
 set_global_assignment -name VERILOG_FILE core/rtl/escape_mo_cache.v
+set_global_assignment -name VERILOG_FILE core/rtl/escape_pf.v
 set_global_assignment -name VERILOG_FILE core/rtl/escape_stain.v
 set_global_assignment -name VERILOG_FILE core/rtl/hall_stick.v
 set_global_assignment -name VHDL_FILE core/rtl/escape_core.vhd
