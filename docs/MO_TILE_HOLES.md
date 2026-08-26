@@ -250,3 +250,27 @@ Further owner evidence for that troubleshoot, when it happens: frame 4896 of
 the same capture (Genki 2026-08-26 160136) shows the right column with NO
 distortion during gameplay - the leak needs a flat/static field to be visible,
 consistent with alpha's off-screen wrap tile only contrasting there.
+
+## Map grey-out: CORRECTED SEMANTICS (owner)
+
+The between-levels map is a PATH SELECTION display, not a traversal record:
+**one path is lit in full colour and the other two are greyed out/removed.**
+Which path is lit varies run to run.
+
+Consequences for the fix:
+* The speck field = the two REMOVED paths leaving 1-px colour remnants. The
+  platforms ARE being drawn there and then suppressed render-side (if the game
+  simply omitted those MOs there would be nothing to leave residue), so the
+  removal mechanism is the special/stain palette path - and ours leaks ~1 px
+  per platform edge.
+* Acceptance test for any fix: exactly ONE lit path, TWO cleanly
+  removed/greyed paths, zero residue - compared against a MAME level-3 map
+  capture, accepting that the SELECTED path differs between runs (compare
+  structure/cleanliness, not which branch is lit).
+* Also re-examine our renders for whether MORE than one path is lit (a stain
+  coverage failure would under-remove, lighting paths that should be gone).
+
+Closed as not-defects today, for the record: the solid-grey blinking marker
+(matches MAME exactly; the CRT photo's dither was shadow-mask texture) and any
+MO-vs-PF layer phase offset (all layers coherent at the same uniform +1 vs
+MAME after the DE fix).
