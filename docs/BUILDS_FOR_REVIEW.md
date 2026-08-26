@@ -11,7 +11,7 @@ feel.
 | **128** (in hand) | baseline: strip fixed, cache out, 6x SDRAM | reference point |
 | **129** | + MO/stain ONE-PIXEL ALIGNMENT + telemetry page 6 | map specks GONE; pad-shedding gone; stain-page deficit unchanged-or-better |
 | **130** | + MO-over-fastpath ARBITRATION in active lines | page 6 truncation count -> 0 in crowds; page 4 stain deficit -> <=1; page 5 cadence cost, if any |
-| **mister-130** | alignment + stain timing + cache bypass (no clock change) | parity check on the DE10 |
+| **mister-130** | alignment + stain timing + cache bypass (no clock change) | parity check on the DE10 (packaged: AtariDual68k-mister-130.zip, setup +0.761 / hold +0.246) |
 
 ## How to read the new telemetry (Developer HUD on, R to page 6)
 
@@ -32,24 +32,56 @@ feel.
   same detector (with a passed synthetic-erasure control) that found the
   console-cabinet event in the 126 capture. 128 was NOT objectively worse than
   127; the subjective regression decomposed into authentic behaviours:
-* **Doors are authentic**: the 5627 red tab is part of the door-open cycle
-  (pixel-stable ~102 px for 60 frames); 6983's yellow fragment is a real door
-  clipped at the screen edge, world-fixed. Only the mid-cycle plain-wall
-  states await MAME adjudication.
-* **Floor "specks" are orphaned SHADOWS of authentically blinking sprites**
-  (strict 4-8 frame periods, position-stable). The open question is whether
-  the blink OFF phase should render a SHADE silhouette (we render plain
-  floor); MAME adjudication running.
+* **Doors are authentic in STRUCTURE**: the 5627 red tab is part of the
+  door-open cycle (pixel-stable ~102 px for 60 frames); 6983's yellow fragment
+  is a real door clipped at the screen edge, world-fixed. The mid-cycle
+  plain-wall states are NOT authentic - see adjudication verdict 4.
+* **Floor "specks" are orphaned SHADOWS of blinking sprites** (strict 4-8
+  frame periods, position-stable). Adjudication verdicts 1-3 above settle what
+  that blink is: an inauthentic load-dependent MO drop, not a rendering of any
+  authentic off-phase.
 
-## Open items with agents/analysis pending
+## MAME adjudication verdicts (in, with data)
 
-1. MAME adjudication: blink silhouette, door plain-wall states, stain-vs-
-   occlusion semantics (agent running).
-2. Slowdown authenticity vs the real-PCB reference footage (stall metric
+1. **The spawn/damage "blink" in MAME is a PALETTE FLASH, drawn every frame.**
+   Proven at the data level: per-frame dumps across the flash window
+   (t=45.0..45.2 in the replay) show MO RAM **bit-identical for 12 straight
+   frames** while 18 CRAM entries (0x125-0x126, 0x148-0x14B, 0x156,
+   0x174-0x175, 0x17C-0x17E, 0x1DD-0x1DF, 0x1ED-0x1EF) toggle on an exact
+   4-on/4-off cadence - e.g. 0x148: FF0F (bright magenta) <-> FF40 (suit
+   orange). The figure never leaves the MO list; only its colours change.
+2. **Consequence: the device blink is NOT the flash.** A palette change cannot
+   put FLOOR pixels where a sprite is - only MO loss can. And the sprites that
+   blink on device (static console slaves, 6-14 frame cadence) **never blink
+   in MAME at all**. The device blink is an inauthentic periodic MO drop.
+3. **RTL is innocent on static input**: tb_mob MOBLINK check (BLINKCHK=1) on
+   the crowd-room fixture (xs=473 ys=412) - 16 consecutive frames from frozen
+   RAM, **15504 px every frame**, zero oscillation. So the blink needs
+   frame-to-frame VARIATION to happen: SDRAM latency/arbitration phase pushing
+   the walk over its fetch budget on some frames. That is precisely what
+   **page 6 dbg_trunc** counts and what **MOARB-130** attacks.
+   * **Decisive device observation: watch page 6 during a blink episode.
+     dbg_trunc pulsing in step with the blink = confirmed; then 130 vs 129 is
+     the A/B.**
+4. **Doors**: MAME door cycles contain ZERO plain-wall frames. The Pocket's
+   2-6 frame plain-wall states during door cycles are a real defect (same
+   family as the blink: whole-object loss under load).
+5. **Stain semantics ground truth**: apply_stain is unconditional wrt the
+   playfield; the only authentic truncation is MO-vs-MO marker clobbering
+   (atarimo.cpp:239-252). So a stain-page deficit beyond the clobbering
+   baseline is loss, not authenticity.
+
+## Open items
+
+1. Slowdown authenticity vs the real-PCB reference footage (stall metric
    exists; reference comparison queued).
-3. The map screen after 129: if residue REMAINS on the between-levels map, it
+2. The map screen after 129: if residue REMAINS on the between-levels map, it
    is a different defect than the alignment - the MAME level-3 state dump and
    fixture pipeline are ready to chase it.
+3. If 130 does NOT cure the blink/door drops while dbg_trunc goes to 0, the
+   loss is downstream of the walk (stamp delivery), and the next lever is the
+   real 4-word SDRAM burst (controller change - documented in
+   escape_mo_cache.v header).
 
 ## Standing facts for the decision
 

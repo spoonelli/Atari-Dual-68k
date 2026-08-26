@@ -43,6 +43,7 @@ module tb_mob;
     // The LFSR is used rather than $random so a failing run is reproducible
     // from GFX_SEED alone and can be handed to someone else.
     parameter GFX_JIT  = 0;
+    parameter BLINKCHK = 0;              // MOBLINK-130 per-frame stability check
     // MOCACHE-118: 0 = DUT talks straight to the gfx model, every existing
     // gate bit-identical. 1 = escape_mo_cache spliced between them, exactly
     // as core_top would wire it.
@@ -323,6 +324,27 @@ escape_prio uprio (
         dumping = 1;
         repeat (VID_V_TOTAL * VID_H_TOTAL + 10) @(posedge clk);
         $fclose(fd);
+        // MOBLINK-130: with STATIC RAM, per-frame MO pixel counts must be
+        // constant. Measured on the crowd-room scene (xs=473 ys=412): 15504 px
+        // on all 16 frames - the RTL does not oscillate on frozen input, so the
+        // device blink is load-dependent (budget truncation), not intrinsic.
+        // Costs 16 extra frames of sim, so it only runs when asked
+        // (BLINKCHK=1). The device blinks certain static sprites on a 6-14 frame
+        // period; if the RTL oscillates here with frozen inputs, the blink is
+        // reproduced and debuggable. 16 further frames, one count per frame.
+        if(BLINKCHK != 0) begin : blinkchk
+            integer bf, bcnt;
+            for(bf = 0; bf < 16; bf = bf + 1) begin
+                bcnt = 0;
+                repeat (VID_V_TOTAL * VID_H_TOTAL) begin
+                    @(posedge clk);
+                    if(x_count >= VID_H_BPORCH && x_count < VID_H_BPORCH+VID_H_ACTIVE
+                       && y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE
+                       && disp_valid) bcnt = bcnt + 1;
+                end
+                $display("MOBLINK frame %0d px=%0d", bf, bcnt);
+            end
+        end
         $fclose(fdp);
         $fclose(fds);
         $display("TB_MOB DONE: %0d pixels, %0d gfx reqs, %0d special pixels", px_seen, reqs, n_spec);
