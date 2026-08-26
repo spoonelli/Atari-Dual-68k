@@ -83,6 +83,21 @@ feel.
    real 4-word SDRAM burst (controller change - documented in
    escape_mo_cache.v header).
 
+## The walk-cycle clock (slowdown ground truth, from MAME MO RAM)
+
+Tracking the player object through 600 per-frame MO RAM dumps (t=50..60 of the
+replay): the walk animation advances its picture code every **8 logic frames**,
+alternating base<->step codes in a 4-phase cycle - **32 logic frames = 533 ms
+per full cycle** at 60 Hz. That is a wall-clock-measurable signal present in
+ANY footage, original CRT included: time the animation phase changes, divide 8
+frames by the measured spacing, and you have the local game speed with no
+telemetry needed. Complements the MOTEL bit row (which needs the HUD on):
+  * phase spacing 8 video frames  -> full speed
+  * spacing ~9   -> ~89% (the census's half-rate stretches would show ~16)
+Decoder for the bit row + build stamp: sim/tools/capture_decode.py
+(stamp decode validated 5/5 on builds 124-128 captures; bit row awaits the
+first 129+ capture).
+
 ## Standing facts for the decision
 
 * The stain machinery runs constantly in gameplay (~254 specials live in
