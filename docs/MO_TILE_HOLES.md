@@ -217,3 +217,17 @@ path that cannot deliver under contention. That is consistent with the SDRAM
 work improving both without curing either, and it means the next thing to try
 is fetch BANDWIDTH for the playfield - more channels, or a faster drain - not
 more lead.
+
+---
+
+# STRIP: CLOSED at build 127 (DE delay 3 clocks), with one logged residual
+
+Device-confirmed by the owner. The left-edge strip is gone at DE+3.
+
+**Logged for future review (owner: non-essential):** at DE+3 there was "the
+slight presence of draw on the right side" which "didn't persist past level
+start" - a transient right-edge artifact during level start only. The true
+pipe latency may be fractionally under 3 ("no 2.5 clock setting, so 3 it is"):
+DE+3 fully covers the left edge and slightly over-trims into the right, where
+the last pixel's data can arrive while DE is still open during startup
+conditions. Revisit only if it ever appears during play.
