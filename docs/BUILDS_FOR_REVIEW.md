@@ -124,6 +124,12 @@ Decoder for the bit row + build stamp: sim/tools/capture_decode.py
 (stamp decode validated 5/5 on builds 124-128 captures; bit row awaits the
 first 129+ capture).
 
+Caveat: the video-side sweep measured a 12-frame visual loop (with a 24-frame
+secondary) on a DIAGONAL walk, vs this 32-frame MO-code cycle from the replay's
+mixed play - likely different animations (diagonal vs straight, or walk vs
+run). Both measurements agree on the conclusion that matters: CRT and Pocket
+run at the same rate.
+
 ## Autonomous sweep of the 08-26 re-test captures (builds 124-128)
 
 An analysis agent swept the five Genki captures (build stamps decoded
