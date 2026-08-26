@@ -1,6 +1,6 @@
 # Decision builds — for the owner's return (evening 2026-08-27)
 
-Three Pocket builds and one MiSTer build, each isolating one variable. Flash in
+Pocket builds and one MiSTer build, each isolating one variable. Flash in
 order; every sprite/stain verdict is now a NUMBER on the HUD rather than a
 feel.
 
@@ -10,8 +10,34 @@ feel.
 |---|---|---|
 | **128** (in hand) | baseline: strip fixed, cache out, 6x SDRAM | reference point |
 | **129** | + MO/stain ONE-PIXEL ALIGNMENT + telemetry page 6 | map specks GONE; pad-shedding gone; stain-page deficit unchanged-or-better |
-| **130** | + MO-over-fastpath ARBITRATION in active lines | page 6 truncation count -> 0 in crowds; page 4 stain deficit -> <=1; page 5 cadence cost, if any |
+| **130** | + MO-over-fastpath ARBITRATION in active lines | page 6 truncation count in crowds; page 4 stain deficit; page 5 cadence cost, if any |
+| **131** | + **MOPAIR: 2px/clock MO blit** (the schematic answer) + honest trunc counter | **the headline build** — crowd dropout/blink/door plain-walls should collapse; see below |
 | **mister-130** | alignment + stain timing + cache bypass (no clock change) | parity check on the DE10 (packaged: AtariDual68k-mister-130.zip, setup +0.761 / hold +0.246) |
+
+## Why 131 exists (found while you were away)
+
+The crowd-room MAME fixture (xs=473 ys=412) FAILED the vs-MAME gate at ZERO
+memory latency: 527 reference pixels missing, whole late-list objects, with
+`dbg_trunc` reading 0 and the walk still mid-flight at 85 line-ends per frame.
+Per-line arithmetic: worst crowd lines carry ~102 stamps = ~816 blit cycles
+against the 456 cycles one scanline has. **The deficit was architectural — no
+cache, clock, or arbitration change could ever recover those pixels.**
+
+SP-332 sheet 9 gives the answer: the real line buffer is a PAIR of LB customs
+(92U/85U) taking MOL0/1 + MOR0/1 with a 14 MHz DCLK — the board fills TWO
+pixels per pixel-clock. MOPAIR-131 restructures the engine's line buffers into
+even/odd banks written in one clock, matching that. Result on the fixtures:
+crowd 527 missing -> **0** (100.0000% agreement AND coverage), flash-window and
+level-3-map scenes 100%/100%, stain automaton all cases 0 mismatches, priority
+gate PASS everywhere.
+
+Also in 131: `dbg_trunc` (page 6) now counts TIME truncation — a line-end
+firing while unconsumed entries remain — not just budget exhaustion, which
+never actually fires. NOTE reading it: a nonzero count is an UPPER BOUND, not
+confirmed loss (a truncated tail that is fully occluded by earlier sprites
+drops nothing, and MAME agrees pixel-for-pixel while trunc reads 60-80 in
+crowds). Trend it against blink episodes: blink with trunc pulsing = confirmed
+starvation; blink with trunc steady = look elsewhere.
 
 ## How to read the new telemetry (Developer HUD on, R to page 6)
 
@@ -97,6 +123,30 @@ telemetry needed. Complements the MOTEL bit row (which needs the HUD on):
 Decoder for the bit row + build stamp: sim/tools/capture_decode.py
 (stamp decode validated 5/5 on builds 124-128 captures; bit row awaits the
 first 129+ capture).
+
+## Autonomous sweep of the 08-26 re-test captures (builds 124-128)
+
+An analysis agent swept the five Genki captures (build stamps decoded
+on-screen: 10:27=124, 14:19=125, 14:46=126, 16:01=127, 16:53=128). Findings
+(full report /tmp/sweep/REPORT.md, crops in /tmp/sweep/crops/):
+
+* **Stall rate (duplicated frames while scrolling)**: 124 = 11.5% with
+  textbook half-rate bursts; 128 = 5.9% (upper bound, some may be walk
+  cadence); 125/126/127 = 1.2-2.0% (~measurement floor). NOT scene-matched -
+  treat as indicative, and re-measure on 129+ with the bit row, which needs no
+  scene matching at all.
+* **Map grey-out specks CONFIRMED on 126's level-3 map** (t221-226, stable
+  scattered specks + 1px yellow columns in the greyed paths) - the exact
+  defect MOALIGN-129 targets. Other captures never reach a greyed map:
+  untestable there, not clean.
+* **Zero blink episodes and zero door cycles in this footage** - both defect
+  families are scene-dependent and simply absent from these sessions; nothing
+  to conclude either way.
+* **Real-cabinet CRT footage identified: IMG_4549.MOV** (~4 min, dedicated
+  cab, live play - the best reference) and IMG_4625 2.MOV (attract+demo).
+* **No game-speed difference between the real PCB and build 128**: the CRT
+  walk-scroll runs a rock-steady 2.0 native px/frame matching the Pocket
+  measurement, and the animation autocorrelation dips line up.
 
 ## Standing facts for the decision
 

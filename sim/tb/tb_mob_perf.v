@@ -392,11 +392,16 @@ module tb_mob_perf;
         if(dut.state == 4'd4 && state_d != 4'd4) begin
             n_sprites = n_sprites + 1;
 `ifdef MOB_BASE
-            if(dut.sc_pf_valid) begin
-                n_pfhit = n_pfhit + 1;
-                n_leadsum = n_leadsum + (now_t - pf_issue_t);
-                n_leadn   = n_leadn + 1;
-            end
+            // ORDFIX-131: the base arm probed sc_pf_valid/pf_issue_t, signals
+            // of an engine generation that no resolvable BASE_REF still has -
+            // the gate failed to elaborate for EVERY recent base, and had been
+            // doing so silently inside run_all_gates. All queue-era bases
+            // expose q_pf/pf_t, so probe those in both arms; the gate is
+            // documented as adjacent-commits-only anyway.
+            // (no lead-time term here: pf_t lives behind the MODEPTH probe
+            // guard, and this gate's verdict is the +ord order diff, not the
+            // diagnostics - the base arm only has to elaborate and count.)
+            if(dut.q_pf[0]) n_pfhit = n_pfhit + 1;
 `else
             if(dut.q_pf[0]) begin
                 n_pfhit = n_pfhit + 1;
@@ -410,12 +415,11 @@ module tb_mob_perf;
 `endif
         end
 `ifdef MOB_BASE
-        if(dut.iss_en && !dut.pump_want) pf_issue_t = now_t;
+        // ORDFIX-131: same modernization as above - the queue-era census works
+        // on every base this gate can actually resolve.
         if(dut.pump_live && !dut.pump_ready) begin
-            if(dut.sc_pf_valid)            c_sc_done  = c_sc_done  + 1;
-            else if(!dut.hit_pending || !dut.pf_armed)
-                                           c_sc_noarm = c_sc_noarm + 1;
-            else if(dut.busy_iss)          c_sc_block = c_sc_block + 1;
+            if(!dut.sc_want)           c_sc_done  = c_sc_done  + 1;
+            else if(dut.q_cnt == 3'd0) c_sc_noarm = c_sc_noarm + 1;
         end
 `else
         // ---- MODEPTH-1 census ----------------------------------------------
@@ -507,7 +511,13 @@ module tb_mob_perf;
             end
             default: c_trav  = c_trav  + 1;
         endcase
+`ifdef MOB_BASE
         if(dut.wr_en) n_wren = n_wren + 1;
+`else
+        // MOPAIR-131: two independent bank writes per cycle
+        if(dut.wr_en_e) n_wren = n_wren + 1;
+        if(dut.wr_en_o) n_wren = n_wren + 1;
+`endif
         // tile-rows blitted entirely into the invisible 344..504 window: the
         // whole 8 pixels are clipped away, so the fetch and the 8 blit cycles
         // bought nothing. (505..511 wraps back into view, so it is NOT dead.)
@@ -640,10 +650,23 @@ module tb_mob_perf;
         // of a line lands its write during x_count==0 - after the abort has
         // flipped build_sel but into the buffer that was being built, which is
         // correct - and it belongs to the line that just finished.
+`ifdef MOB_BASE
         if(dut.wr_en) begin
             sh_pen[dut.wr_x] = dut.wr_data[7:0];
             sh_val[dut.wr_x] = 1'b1;
         end
+`else
+        // MOPAIR-131: shadow both bank writes; address reconstitutes as
+        // {bank addr, parity}, pen as {color (wr_hi low nibble), pix}.
+        if(dut.wr_en_e) begin
+            sh_pen[{dut.wr_xe, 1'b0}] = {dut.wr_hi[3:0], dut.wr_pen_e};
+            sh_val[{dut.wr_xe, 1'b0}] = 1'b1;
+        end
+        if(dut.wr_en_o) begin
+            sh_pen[{dut.wr_xo, 1'b1}] = {dut.wr_hi[3:0], dut.wr_pen_o};
+            sh_val[{dut.wr_xo, 1'b1}] = 1'b1;
+        end
+`endif
         if(x_count == 10'd0 && y_count >= VID_V_BPORCH-1
            && y_count < VID_V_BPORCH+VID_V_ACTIVE-1) begin
             for(si = 0; si < 512; si = si + 1) begin

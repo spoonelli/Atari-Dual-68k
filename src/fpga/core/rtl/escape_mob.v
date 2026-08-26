@@ -113,15 +113,34 @@ module escape_mob (
     // 240-line span - and cross-frame staleness is caught by fpar exactly as
     // before. The entry therefore stays at 20 bits = the native M10K geometry
     // (512x20), so this costs ZERO extra blocks: the 308-M10K ceiling is spent.
-    reg [19:0] buf0 [0:511];            // {fpar, tag[7:0], special, prio[1:0], color[3:0], pix[3:0]}
-    reg [19:0] buf1 [0:511];
+    // MOPAIR-131: each line buffer is TWO banks, even and odd screen columns,
+    // written in the same clock - which is what the REAL BOARD does: sheet 9
+    // of SP-332 shows the line buffer as a PAIR of LB customs (92U/85U)
+    // handling MOL0/1 and MOR0/1 with a 14 MHz DCLK - the MO fill path is two
+    // pixels per RCLK, twice this engine's old rate. The crowd fixture
+    // (xs=473 ys=412) proved the deficit ARCHITECTURAL: its worst lines need
+    // ~102 stamps = ~816 fill cycles against the 456 a scanline has, so 527
+    // reference pixels dropped at ZERO memory latency - no cache, clock or
+    // arbitration change could ever recover them. Pairing the banks halves
+    // blit occupancy to <= 408 cycles on that same line, which fits.
+    // Bank E holds even x at address x>>1, bank O odd x at the same shift;
+    // a pair write lands E and O in one clock (addresses differ by one when
+    // the pair straddles, see S_BLIT). Cost: the same 20 Kbit split across
+    // four 256x20 BRAMs instead of two 512x20 - two more M10K blocks.
+    reg [19:0] buf0e [0:255];           // {fpar, tag[7:0], special, prio[1:0], color[3:0], pix[3:0]}
+    reg [19:0] buf0o [0:255];
+    reg [19:0] buf1e [0:255];
+    reg [19:0] buf1o [0:255];
     // M10K comes up zeroed on the device; mirror that for simulation so the
     // occupancy probe below reads a defined value on the very first line
     // instead of X. Simulation-only: kept out of synthesis so it can never
     // perturb RAM inference.
     // synthesis translate_off
     integer bi;
-    initial for(bi = 0; bi < 512; bi = bi + 1) begin buf0[bi] = 20'd0; buf1[bi] = 20'd0; end
+    initial for(bi = 0; bi < 256; bi = bi + 1) begin
+        buf0e[bi] = 20'd0; buf0o[bi] = 20'd0;
+        buf1e[bi] = 20'd0; buf1o[bi] = 20'd0;
+    end
     // synthesis translate_on
     reg        fpar = 1'b0;
     reg        built_fp0 = 1'b0, built_fp1 = 1'b0;
@@ -129,7 +148,6 @@ module escape_mob (
         if(y_count == 10'd0 && x_count == 10'd0) fpar <= ~fpar;
     reg        build_sel;               // which buffer is being built
     reg [7:0]  built_ly0, built_ly1;    // the ly each buffer was last built for
-    reg [19:0] disp_q0, disp_q1;
     reg [8:0]  blit_x;                  // declared early: feeds the probe read
     // MOPLACE-2: the buffer being BUILT is not the one being displayed, so its
     // read port sat idle at disp_x every cycle. Point it at blit_x instead and
@@ -148,12 +166,37 @@ module escape_mob (
     // aligns delivery with consumption; the bench compensation is removed in
     // the same commit, and the gates passing unchanged proves the change is a
     // pure one-pixel alignment.
-    wire [8:0] rd_addr0 = build_sel ? (disp_x + 9'd1) : blit_x;
-    wire [8:0] rd_addr1 = build_sel ? blit_x : (disp_x + 9'd1);
+    // MOPAIR-131: the display leg addresses pixel N via bank N[0] at N>>1;
+    // both banks are read at the same shifted address and the registered
+    // parity bit picks the winner, so the delivered stream is identical to
+    // the old single-bank read (same disp_x+1 issue/consume alignment).
+    // The build leg's read ports become the occupancy PROBE for the pair
+    // being written: bank E and bank O each probe their own half.
+    wire [8:0] nxt_x   = disp_x + 9'd1;
+    wire [8:0] blit_xb = blit_x + 9'd1;      // second pixel of the pair
+    // per-bank probe addresses for the pair (x at blit_x, x+1 at blit_xb):
+    // the even-x member goes to bank E, the odd-x member to bank O.
+    wire [7:0] pr_addr_e = blit_x[0] ? blit_xb[8:1] : blit_x[8:1];
+    wire [7:0] pr_addr_o = blit_x[0] ? blit_x[8:1]  : blit_xb[8:1];
+    reg  [19:0] disp_q0e, disp_q0o, disp_q1e, disp_q1o;
+    reg         nxp_d0, nxp_d1;              // registered parity of the read
     always @(posedge clk) begin
-        disp_q0 <= buf0[rd_addr0];
-        disp_q1 <= buf1[rd_addr1];
+        if(build_sel) begin
+            disp_q0e <= buf0e[nxt_x[8:1]];
+            disp_q0o <= buf0o[nxt_x[8:1]];
+            disp_q1e <= buf1e[pr_addr_e];
+            disp_q1o <= buf1o[pr_addr_o];
+            nxp_d0   <= nxt_x[0];
+        end else begin
+            disp_q0e <= buf0e[pr_addr_e];
+            disp_q0o <= buf0o[pr_addr_o];
+            disp_q1e <= buf1e[nxt_x[8:1]];
+            disp_q1o <= buf1o[nxt_x[8:1]];
+            nxp_d1   <= nxt_x[0];
+        end
     end
+    wire [19:0] disp_q0 = nxp_d0 ? disp_q0o : disp_q0e;
+    wire [19:0] disp_q1 = nxp_d1 ? disp_q1o : disp_q1e;
     // "this entry holds a real pixel written for the line this buffer was last
     // built for". S_BLIT only ever writes pix != 0 (pen 0 is transparent), so
     // requiring pix != 0 makes an all-zero entry unrepresentable as a hit -
@@ -165,6 +208,14 @@ module escape_mob (
     wire occ1 = (disp_q1[19:11] == {built_fp1, built_ly1}) && (disp_q1[3:0] != 4'd0);
     wire hit0 = occ0 && !disp_q0[10];
     wire hit1 = occ1 && !disp_q1[10];
+    // MOPAIR-131: per-bank occupancy of the BUILD buffer, for first-write-wins
+    // on each half of the pair independently.
+    wire [19:0] bld_qe = build_sel ? disp_q1e : disp_q0e;
+    wire [19:0] bld_qo = build_sel ? disp_q1o : disp_q0o;
+    wire        bld_fp = build_sel ? built_fp1 : built_fp0;
+    wire [7:0]  bld_ly = build_sel ? built_ly1 : built_ly0;
+    wire occ_e = (bld_qe[19:11] == {bld_fp, bld_ly}) && (bld_qe[3:0] != 4'd0);
+    wire occ_o = (bld_qo[19:11] == {bld_fp, bld_ly}) && (bld_qo[3:0] != 4'd0);
 
     assign disp_pen   = build_sel ? disp_q0[7:0] : disp_q1[7:0];
     assign disp_prio  = build_sel ? disp_q0[9:8] : disp_q1[9:8];
@@ -180,12 +231,13 @@ module escape_mob (
     // probe read and the wr_x/wr_en registers both sample blit_x in the same
     // cycle, and the buffer write commits one cycle later, so this is exactly
     // "what is already at wr_x, before this write".
-    wire bld_occupied = build_sel ? occ1 : occ0;
+    // MOPAIR-131: bld_occupied is per-bank now (occ_e / occ_o above).
 
-    // write port
-    reg  [8:0]  wr_x;
-    reg  [19:0] wr_data;
-    reg         wr_en;
+    // write ports: one per bank, sharing everything but the pen nibble
+    reg  [7:0]  wr_xe, wr_xo;
+    reg  [15:0] wr_hi;                  // {fpar, ly, special, prio, color}
+    reg  [3:0]  wr_pen_e, wr_pen_o;
+    reg         wr_en_e, wr_en_o;
 
     // GFXDASH-3: SELF-CLEARING READOUT - the thing the real MOHLB does, and
     // the thing LANE3n's comment above says it does instead of tagging.
@@ -226,16 +278,25 @@ module escape_mob (
     // starts from an empty buffer, and staleness is impossible by construction
     // rather than by an argument about tag width. The tags stay anyway - they
     // still cover the reset state and cost nothing.
+    // MOPAIR-131: the clear sweeps pair addresses - both banks zeroed at
+    // (disp_x-1)>>1 each clock, so every pair is cleared twice per line (a
+    // harmless double zero). The in-flight display read is at (disp_x+1)>>1,
+    // which differs from the clear address by exactly one always, so the old
+    // no-read-during-write guarantee is preserved bank-for-bank.
     reg [8:0] clr_x;
     always @(posedge clk) clr_x <= disp_x;
 
     always @(posedge clk) begin
         if(build_sel) begin
-            if(wr_en && !bld_occupied) buf1[wr_x] <= wr_data;
-            buf0[clr_x] <= 20'd0;
+            if(wr_en_e && !occ_e) buf1e[wr_xe] <= {wr_hi, wr_pen_e};
+            if(wr_en_o && !occ_o) buf1o[wr_xo] <= {wr_hi, wr_pen_o};
+            buf0e[clr_x[8:1]] <= 20'd0;
+            buf0o[clr_x[8:1]] <= 20'd0;
         end else begin
-            if(wr_en && !bld_occupied) buf0[wr_x] <= wr_data;
-            buf1[clr_x] <= 20'd0;
+            if(wr_en_e && !occ_e) buf0e[wr_xe] <= {wr_hi, wr_pen_e};
+            if(wr_en_o && !occ_o) buf0o[wr_xo] <= {wr_hi, wr_pen_o};
+            buf1e[clr_x[8:1]] <= 20'd0;
+            buf1o[clr_x[8:1]] <= 20'd0;
         end
     end
 
@@ -512,6 +573,20 @@ module escape_mob (
            && (q_cnt != 3'd0 || (sstate != SC_DONE && sstate != SC_IDLE))
            && tel_trunc != 8'hFF)
             tel_trunc <= tel_trunc + 8'd1;
+        // MOTEL-131: TIME truncation. The v85 line trigger aborts a build
+        // that is still walking - work remains but no budget was exhausted,
+        // so the counter above never saw it. The crowd fixture (pre-MOPAIR)
+        // measured 85 such lines per frame with dbg_trunc reading ZERO: this
+        // was the dropout mechanism, invisible to the old counter. Count a
+        // line trigger only when UNCONSUMED entries remain - the scout still
+        // walking the list, or matched entries parked unblitted. A walk merely
+        // finishing its final stamp has drawn everything it was asked to and
+        // is not a truncation.
+        if(x_count == 10'd0 && y_count >= vbporch - 10'd1
+           && y_count < vbporch + vactive - 10'd1
+           && (q_cnt != 3'd0 || (sstate != SC_DONE && sstate != SC_IDLE))
+           && tel_trunc != 8'hFF)
+            tel_trunc <= tel_trunc + 8'd1;
     end
 
     reg [9:0]  cur_line_latch;
@@ -683,14 +758,25 @@ module escape_mob (
     wire       spr_dead  = (spr_left >= 9'd344) && (spr_right <= 10'd511);
 
     // chunky pixel extract with hflip (declared before use for iverilog)
-    wire [2:0] pn = hflip ? (3'd7 - blit_n[2:0]) : blit_n[2:0];
-    reg  [3:0] pix_val;
+    // MOPAIR-131: TWO pixels per blit cycle - pix_val for screen x = blit_x
+    // (tile column blit_n), pix_val_b for x = blit_x+1 (column blit_n+1).
+    // hflip mirrors the column index exactly as before, per pixel.
+    wire [2:0] pn   = hflip ? (3'd7 - blit_n[2:0]) : blit_n[2:0];
+    wire [2:0] pn_b = hflip ? (3'd7 - (blit_n[2:0] + 3'd1))
+                            : (blit_n[2:0] + 3'd1);
+    reg  [3:0] pix_val, pix_val_b;
     always @(*) begin
         case(pn)
             3'd0: pix_val = rowdata[31:28]; 3'd1: pix_val = rowdata[27:24];
             3'd2: pix_val = rowdata[23:20]; 3'd3: pix_val = rowdata[19:16];
             3'd4: pix_val = rowdata[15:12]; 3'd5: pix_val = rowdata[11:8];
             3'd6: pix_val = rowdata[7:4];   default: pix_val = rowdata[3:0];
+        endcase
+        case(pn_b)
+            3'd0: pix_val_b = rowdata[31:28]; 3'd1: pix_val_b = rowdata[27:24];
+            3'd2: pix_val_b = rowdata[23:20]; 3'd3: pix_val_b = rowdata[19:16];
+            3'd4: pix_val_b = rowdata[15:12]; 3'd5: pix_val_b = rowdata[11:8];
+            3'd6: pix_val_b = rowdata[7:4];   default: pix_val_b = rowdata[3:0];
         endcase
     end
 
@@ -705,12 +791,12 @@ module escape_mob (
             pf_hit <= 0; pf_got <= 0; tch_v <= 16'd0; tx_f <= 4'd0;
             greq <= 4'd0;
             pend <= 4'd0; infl <= 4'd0; disc <= 4'd0;
-            wr_en <= 0;
+            wr_en_e <= 0; wr_en_o <= 0;
             build_sel <= 0;
             built_ly0 <= 8'hFF; built_ly1 <= 8'hFF;
             gfx_done_last <= 4'd0;
         end else begin
-            wr_en <= 0;
+            wr_en_e <= 0; wr_en_o <= 0;
             gfx_done_last <= gfx_done;
             // completions can land while blitting: LATCH them (an edge is
             // visible for one cycle only - depth-2 lost edges without this)
@@ -762,7 +848,7 @@ module escape_mob (
                     built_ly1 <= (y_count - vbporch + 10'd1 + {1'b0, yscroll}) & 10'h0FF;
                     built_fp1 <= fpar;
                 end
-                wr_en <= 0;
+                wr_en_e <= 0; wr_en_o <= 0;
                 // v87: RESYNC the gfx handshakes on restart (see history)
                 gfx_done_last <= gfx_done;
                 pend <= 4'd0;
@@ -1022,7 +1108,9 @@ module escape_mob (
                     // handoff intact, and the single write it attempts is
                     // rejected by S_BLIT's own blit_x < 344 clip - so not one
                     // line-buffer write changes, only the cycles spent.
-                    blit_n  <= tile_dead ? 4'd7 : 4'd0;
+                    // MOPAIR-131: the dead-tile shortcut parks on the LAST
+                    // pair (>= 6 ends the tile after one clipped pair write).
+                    blit_n  <= tile_dead ? 4'd6 : 4'd0;
                     state <= S_BLIT;
                 end
             end
@@ -1048,14 +1136,29 @@ module escape_mob (
                 // hands its marker bits to the compositor. Nothing else changes:
                 // the fetch budget, ring walk, blit loop and handshakes are
                 // untouched, so timing and throughput are exactly as before.
-                if(pix_val != 4'd0 && blit_x < 9'd336+9'd0+9'd8) begin
-                    wr_x    <= blit_x;
-                    wr_data <= {fpar, ly[7:0], spr_prio[2], spr_prio[1:0],
-                                spr_color, pix_val};
-                    wr_en   <= 1;
+                // MOPAIR-131: two pixels per cycle. The even-x member of the
+                // pair goes to bank E, the odd-x member to bank O; each half
+                // clips and drops pen 0 independently, so the written set is
+                // bit-identical to the old one-per-cycle loop.
+                wr_hi <= {fpar, ly[7:0], spr_prio[2], spr_prio[1:0],
+                          spr_color};
+                if(blit_x[0] == 1'b0) begin
+                    if(pix_val != 4'd0 && blit_x < 9'd344) begin
+                        wr_xe <= blit_x[8:1]; wr_pen_e <= pix_val; wr_en_e <= 1;
+                    end
+                    if(pix_val_b != 4'd0 && blit_xb < 9'd344) begin
+                        wr_xo <= blit_xb[8:1]; wr_pen_o <= pix_val_b; wr_en_o <= 1;
+                    end
+                end else begin
+                    if(pix_val != 4'd0 && blit_x < 9'd344) begin
+                        wr_xo <= blit_x[8:1]; wr_pen_o <= pix_val; wr_en_o <= 1;
+                    end
+                    if(pix_val_b != 4'd0 && blit_xb < 9'd344) begin
+                        wr_xe <= blit_xb[8:1]; wr_pen_e <= pix_val_b; wr_en_e <= 1;
+                    end
                 end
-                blit_x <= (blit_x + 9'd1) & 9'h1FF;
-                if(blit_n == 4'd7) begin
+                blit_x <= (blit_x + 9'd2) & 9'h1FF;
+                if(blit_n >= 4'd6) begin
                     if(tx == width_t) state <= S_NEXT;
                     // the next tile was never issued and the budget is spent,
                     // so nothing will ever land for it: end the sprite rather
@@ -1068,7 +1171,7 @@ module escape_mob (
                         state  <= S_PRIME;
                     end
                 end else begin
-                    blit_n <= blit_n + 4'd1;
+                    blit_n <= blit_n + 4'd2;
                 end
             end
 
