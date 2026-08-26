@@ -28,7 +28,12 @@ fi
 FAIL=0
 
 run_mode() {   # $1=mode  $2=label  $3=clk_ns (optional, default 27.936508)
-  CLKNS="${3:-27.936508}"
+  # LOWLAT-124: allow the whole gate to be run at a different clock, because
+  # the JEDEC minimums are checked in NANOSECONDS but satisfied in CLOCKS - a
+  # controller that is legal at one clock can violate at another. SDRAM_CLK_NS
+  # sets the default for every mode; a per-mode 3rd argument still wins (modes
+  # 4 and 5 deliberately use a fast clock to PROVOKE violations).
+  CLKNS="${3:-${SDRAM_CLK_NS:-27.936508}}"
   echo "=== MODE $1: $2   (clk=${CLKNS} ns) ==="
   # Never grade a stale artefact: remove the vvp before rebuilding.
   rm -f "sim/build/tb_sdram_model_$1.vvp"
