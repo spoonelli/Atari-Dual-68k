@@ -97,6 +97,11 @@ module escape_mo_cache #(
     output reg  [15:0]  hit_cnt,
     output reg  [15:0]  miss_cnt
 );
+    // MOCIDX-130: tile-row addresses stride by 4 bytes (addr[1:0] == 0 always
+    // on this interface), so indexing from bit 0 uses a QUARTER of the sets -
+    // measured 16% hit rate on the crowd fixture where 56% of fetches are
+    // duplicates. Index from bit 2; the two dead bits join the tag, which
+    // keeps the arithmetic honest even if an unaligned address ever appears.
     localparam integer TAGBITS = ADDRBITS - IDXBITS;
 
     // Storage. MLAB, not M10K - see the header note about the 299/308 fit.
@@ -162,12 +167,12 @@ module escape_mo_cache #(
                     mo_wait[i]   <= 1'b1;
                     mo_wait_a[i] <= mo_addr[i*24 +: ADDRBITS];
                 end else if(req_edge[i] && !pend_busy[i]) begin
-                    if(c_val[mo_addr[i*24 +: IDXBITS]] &&
-                       c_tag[mo_addr[i*24 +: IDXBITS]] ==
-                           mo_addr[i*24 + IDXBITS +: TAGBITS]) begin
+                    if(c_val[mo_addr[i*24+2 +: IDXBITS]] &&
+                       c_tag[mo_addr[i*24+2 +: IDXBITS]] ==
+                           {mo_addr[i*24+IDXBITS+2 +: ADDRBITS-IDXBITS-2], mo_addr[i*24 +: 2]}) begin
                         // HIT: answer next clock, no bus transaction at all.
                         mo_data[i*32 +: 32] <=
-                            c_data[mo_addr[i*24 +: IDXBITS]];
+                            c_data[mo_addr[i*24+2 +: IDXBITS]];
                         mo_done[i] <= ~mo_done[i];
                         if(hit_cnt != 16'hFFFF) hit_cnt <= hit_cnt + 16'd1;
                     end else begin
@@ -190,8 +195,8 @@ module escape_mo_cache #(
                     pf_busy[i] <= 1'b0;
                     if(!fill_en) begin
                         fill_en  <= 1'b1;
-                        fill_idx <= pf_addr[i][IDXBITS-1:0];
-                        fill_tag <= pf_addr[i][ADDRBITS-1:IDXBITS];
+                        fill_idx <= pf_addr[i][2 +: IDXBITS];
+                        fill_tag <= {pf_addr[i][ADDRBITS-1:IDXBITS+2], pf_addr[i][1:0]};
                         fill_dat <= mem_data[i*32 +: 32];
                     end
                     if(mo_wait[i]) begin
@@ -210,7 +215,7 @@ module escape_mo_cache #(
                     // Launch the sibling row, only if nothing else wants this
                     // channel and the sibling is not already cached.
                     if(PREFETCH && !mo_wait[i] &&
-                       !(c_val[(pend_addr[i] ^ 3'd4) % ENTRIES])) begin
+                       !(c_val[((pend_addr[i] ^ 3'd4) >> 2) % ENTRIES])) begin
                         pf_busy[i] <= 1'b1;
                         pf_addr[i] <= pend_addr[i] ^ {{(ADDRBITS-3){1'b0}}, 3'd4};
                         mem_addr[i*24 +: ADDRBITS] <=
@@ -220,8 +225,8 @@ module escape_mo_cache #(
                     // Populate, if the single fill port is free this clock.
                     if(!fill_en) begin
                         fill_en  <= 1'b1;
-                        fill_idx <= pend_addr[i][IDXBITS-1:0];
-                        fill_tag <= pend_addr[i][ADDRBITS-1:IDXBITS];
+                        fill_idx <= pend_addr[i][2 +: IDXBITS];
+                        fill_tag <= {pend_addr[i][ADDRBITS-1:IDXBITS+2], pend_addr[i][1:0]};
                         fill_dat <= mem_data[i*32 +: 32];
                     end
                 end

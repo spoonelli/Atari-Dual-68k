@@ -294,15 +294,18 @@ escape_prio uprio (
                      {gfx[addr_l[0]], gfx[addr_l[0]+1], gfx[addr_l[0]+2], gfx[addr_l[0]+3]});
         done0_d = gfx_done[0];
         if(dut.state == 4'd12 && state_d != 4'd12) n_blitst = n_blitst + 1;
-        if(dut.wr_en) n_wren = n_wren + 1;
+        if(dut.wr_en_e) n_wren = n_wren + 1;   // MOPAIR-131: count each half
+        if(dut.wr_en_o) n_wren = n_wren + 1;
         if(dut.state == 4'd11 && dut.blit_n < 4'd8 && dut.pix_val != 0 && dut.blit_x >= 9'd344)
             n_wren_off = n_wren_off + 1;
-        if(dumping && dut.wr_en && n_wren < 30)
-            $display("WR line=%0d ly=%0d x=%0d pen=%02x", y_count, dut.ly, dut.wr_x, dut.wr_data[7:0]);
+        if(dumping && (dut.wr_en_e || dut.wr_en_o) && n_wren < 30)
+            $display("WR line=%0d ly=%0d xe=%0d(%b) xo=%0d(%b)", y_count, dut.ly,
+                     {dut.wr_xe, 1'b0}, dut.wr_en_e, {dut.wr_xo, 1'b1}, dut.wr_en_o);
     end
 
     // ---------------- frame dump
     integer fd, px_seen, reqs;
+    integer n_abort = 0;
     reg [3:0] req_cnt_d = 4'd0;
     always @(posedge clk) begin
         for(k = 0; k < NCH; k = k + 1)
@@ -348,6 +351,7 @@ escape_prio uprio (
         $fclose(fdp);
         $fclose(fds);
         $display("TB_MOB DONE: %0d pixels, %0d gfx reqs, %0d special pixels", px_seen, reqs, n_spec);
+        $display("MOTEL dbg_trunc=%0d dbg_maxlat=%0d abort_busy=%0d", dut.dbg_trunc, dut.dbg_maxlat, n_abort);
         $display("DBG3 mo_win=%0d shade=%0d m7=%0d occluded=%0d",
                  n_mowin, n_shade, n_m7, n_occl);
         $display("DBG slips=%0d entries=%0d ymatch=%0d fetch=%0d wren=%0d offscreen_px=%0d",
@@ -357,14 +361,26 @@ escape_prio uprio (
                  occ_rej, occ_ok, (occ_rej+occ_ok)>0 ? 100.0*occ_rej/(occ_rej+occ_ok) : 0.0, spc_seen, spc_rej);
         $finish;
     end
+    always @(posedge clk)
+        if(x_count == 10'd0 && y_count >= VID_V_BPORCH - 10'd1
+           && y_count < VID_V_BPORCH + VID_V_ACTIVE - 10'd1
+           && (dut.state != 4'd0 || dut.q_cnt != 3'd0))
+            n_abort = n_abort + 1;
     always @(posedge clk) begin
         if(dumping
-           && x_count >= VID_H_BPORCH+1 && x_count < VID_H_BPORCH+VID_H_ACTIVE+1
+           && x_count >= VID_H_BPORCH && x_count < VID_H_BPORCH+VID_H_ACTIVE
            && y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE) begin
             // MOALIGN-129: the DUT now reads its display buffer at disp_x+1, so
             // delivery aligns with consumption and the old "visible_x - 1"
             // logging compensation is GONE. Gates passing unchanged with both
             // edits proves the RTL change is a pure one-pixel alignment.
+            // MOEDGE-130: the window is [BPORCH, BPORCH+ACTIVE) - the +1 shift
+            // left over from the compensation era silently dropped visible_x=0
+            // (and logged a nonexistent x=336): the flash-window fixture was
+            // the first with a sprite column at exactly x=0, and its 19
+            // "missing" pixels were this bench window, not the engine - proven
+            // by tracing disp_valid=1 pen DB at x_count=BPORCH on the device
+            // path while the log stayed empty.
             if(disp_valid) begin
                 $fwrite(fd, "%0d %0d %h %0d\n", visible_x, visible_y,
                         disp_pen, disp_prio);
