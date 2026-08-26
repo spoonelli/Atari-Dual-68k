@@ -31,7 +31,7 @@
 
 module tb_pfline;
     localparam [9:0] V_BPORCH = 10'd12,  V_ACTIVE = 10'd240;
-    localparam [9:0] H_BPORCH = 10'd62,  H_ACTIVE = 10'd336;   // PFWRAP-125: matches device
+    localparam [9:0] H_BPORCH = 10'd60,  H_ACTIVE = 10'd336;
     localparam [9:0] H_TOTAL  = 10'd456, V_TOTAL  = 10'd262;
 
     parameter [8:0] XSCROLL = 9'd0;

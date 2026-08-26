@@ -514,19 +514,16 @@ assign video_hs = vidout_hs;
     localparam  VID_V_BPORCH = 'd12;
     localparam  VID_V_ACTIVE = 'd240;
     localparam  VID_V_TOTAL = 'd262;
-    // PFWRAP-125: 60 -> 62. Measured directly against MAME on the identical
-    // static screen (native-resolution snapshot vs de-scaled capture): EVERY
-    // layer - playfield AND alpha - sat 2 px right of MAME's window, with a
-    // sharp correlation minimum at exactly dx=-2. So the visible window opened
-    // 2 px early in the raster, and the leftmost 2 columns showed content LEFT
-    // of the intended window: for the playfield that is the 512-px tilemap
-    // wrapping to its FAR-RIGHT columns - the "left-edge strip" of stale-scene
-    // content, live-updating, latency-immune, invisible in MAME. Six fetch-side
-    // fixes (lead, ring depth, rp offset, channels, resync, tile cache) failed
-    // because the fetch was never wrong: the WINDOW was. The owner called it:
-    // "is that line just phase shifted from the other side?" - it is, from the
-    // tilemap's other side, by exactly this constant.
-    localparam  VID_H_BPORCH = 'd62;
+    // PFWRAP-126: BACK to 60. Build 125 tried 62 and it was conceptually wrong:
+    // window content is F(x_count - BPORCH) and the window opens at
+    // x_count = BPORCH, so screen column s shows F(s) REGARDLESS of BPORCH -
+    // moving it cannot shift content within the window. What it did move was
+    // everything anchored to absolute x_count (the MO engine's scheduling, the
+    // pf hblank events), which put the MO/stain layer ~2 px off against the
+    // playfield - field-confirmed at frame 1332 (stain flipped sides) plus
+    // sprite/floor misalignment. The real defect is DE-vs-data latency: see
+    // the active-window comparison below.
+    localparam  VID_H_BPORCH = 'd60;
     localparam  VID_H_ACTIVE = 'd336;
     localparam  VID_H_TOTAL = 'd456;
 
@@ -592,7 +589,23 @@ always @(posedge clk_sys_7159 or negedge reset_n) begin
         // inactive screen areas are black
         vidout_rgb <= 24'h0;
         // generate active video
-        if(x_count >= VID_H_BPORCH && x_count < VID_H_ACTIVE+VID_H_BPORCH) begin
+        // PFWRAP-126: the ACTIVE WINDOW opens 2 clocks late, on purpose.
+        //
+        // Measured against MAME on the identical static screen, every layer
+        // sat 2 px right of the window (sharp correlation minimum at dx=-2,
+        // playfield and alpha alike), and the leftmost 2 columns showed the
+        // playfield pipe's HBLANK residue - the tilemap's far-right columns,
+        // at every scroll value. The layer generators deliver pixel data for
+        // visible_x = N about two clk_sys stages after x_count passes N; DE
+        // used to open exactly at x_count == BPORCH, so the first two emitted
+        // columns carried whatever the pipes computed during blanking, and
+        // everything real landed 2 px right of where MAME puts it.
+        //
+        // Opening DE (and this RGB mux) 2 counts later aligns the window with
+        // the data. visible_x and every pipeline stay on the BPORCH=60 origin,
+        // so - unlike build 125's BPORCH move - nothing anchored to absolute
+        // x_count shifts and the MO/playfield alignment is untouched.
+        if(x_count >= VID_H_BPORCH+2 && x_count < VID_H_ACTIVE+VID_H_BPORCH+2) begin
 
             if(y_count >= VID_V_BPORCH && y_count < VID_V_ACTIVE+VID_V_BPORCH) begin
                 // data enable. this is the active region of the line
@@ -2376,7 +2389,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3125;   // window +2px (left-edge strip fix, MAME-measured) on the 6x base - screen shows '25'
+    localparam [15:0] BUILD_ID = 16'h3126;   // DE window delayed 2 clks (real strip fix); BPORCH back to 60 - screen shows '26'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
