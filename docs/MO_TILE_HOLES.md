@@ -245,3 +245,8 @@ vis_x+1 content (its off-screen/wrap tile, the grey), visible only where the
 playfield is flat. The clean fix is to EQUALISE layer latencies (one register
 stage on the alpha path) rather than move DE again; "there is no 2.5-clock DE
 setting" is exactly right.
+
+Further owner evidence for that troubleshoot, when it happens: frame 4896 of
+the same capture (Genki 2026-08-26 160136) shows the right column with NO
+distortion during gameplay - the leak needs a flat/static field to be visible,
+consistent with alpha's off-screen wrap tile only contrasting there.
