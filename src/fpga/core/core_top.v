@@ -1460,6 +1460,24 @@ psram #(.CLOCK_SPEED(42.954546)) cram0 (
     // address (the engine holds gfx_addr stable until the completion returns).
     wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
     reg        mo_pend_q;
+    // MOARB-130: during ACTIVE video lines, a pending MO fetch outranks NEW
+    // speculative fastpath fills. Rationale, with the measurements behind it:
+    // the MO engine's work is hard real time (one line's budget, no second
+    // chance - the walk's own truncation counter is dbg_trunc), while a
+    // fastpath fill is SPECULATIVE by construction and the CPU it serves
+    // falls back to the never-wedge arb path (16-clk watchdog) unharmed. The
+    // old comment above the MO arm claimed "MO keeps >=40% of the bus even
+    // with both CPUs streaming" - an estimate, never a measurement, and the
+    // device's stamp drops under peak load are the counter-evidence. The
+    // CPU ARB fetch keeps outranking MO even here: that is the liveness
+    // fallback and must never queue behind display work.
+    // Registered single bit, same pre-decode discipline as mo_pend_q, so the
+    // grant chain grows by one flop input, not a logic cone.
+    localparam MOARB_EN = 1;
+    wire mo_window_px = (y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE);
+    wire mo_window_s;
+synch_3 s_mowin(mo_window_px, mo_window_s, clk_sdram);
+    reg        mo_first_q;
     reg [1:0]  mo_nch_q;
     reg [23:0] mo_naddr_q;
     always @(posedge clk_sdram) begin
@@ -1469,6 +1487,7 @@ psram #(.CLOCK_SPEED(42.954546)) cram0 (
         // one-cycle stale "pending" across the release as the engine zeroes
         // its request toggles.
         mo_pend_q  <= core_rstn_sd && (|mg_pend_w);
+        mo_first_q <= core_rstn_sd && (MOARB_EN != 0) && (|mg_pend_w) && mo_window_s;
         mo_nch_q   <= mg_pend_w[0] ? 2'd0 : mg_pend_w[1] ? 2'd1
                     : mg_pend_w[2] ? 2'd2 : 2'd3;
         mo_naddr_q <= mg_pend_w[0] ? mo_gfx_addr[23:0]
@@ -1732,7 +1751,8 @@ always @(posedge clk_sdram) begin
         // every other read client below excludes fp wants/owners.
         if((fpv_want || fpe_want)
            && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner
-           && !fpv_owner && !fpe_owner) begin
+           && !fpv_owner && !fpe_owner
+           && !mo_first_q) begin            // MOARB-130: yield to pending MO in window
             if(fpv_want && (!fpe_want || !fp_last_v)) begin
                 fpv_tag   <= fpv_addr_s;
                 fpv_valid <= 0;
@@ -1818,7 +1838,12 @@ always @(posedge clk_sdram) begin
         if(!vidkill_sd && mo_pend_q
            && !(core_rom_req_s && !core_rom_ack_85)
            && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner
-           && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want) begin
+           && !fpv_owner && !fpe_owner
+           // MOARB-130: when prioritised, ignore fastpath WANTS (the fastpath
+           // arm is blocked by mo_first_q this clock, so the two arms remain
+           // mutually exclusive - still one grant per clock). Owners are
+           // still honoured: an in-flight fill always completes.
+           && (mo_first_q || (!fpv_want && !fpe_want))) begin
             mg_req_last[mo_nch_q] <= mg_req_s[mo_nch_q];
             rd_addr_q <= {1'b0, mo_naddr_q};
             mo_sd_ch  <= mo_nch_q;
@@ -2423,7 +2448,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3129;   // MO/stain 1px alignment + MOTEL telemetry page 6 - screen shows '29'
+    localparam [15:0] BUILD_ID = 16'h3130;   // + MO-over-fastpath arbitration in active lines - screen shows '30'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
