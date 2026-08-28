@@ -124,6 +124,13 @@ module escape_mister (
     // escape_core only between bus cycles.  See Arcade-Escape.sv CONF_STR.
     input  wire        vshad3_on,
 
+    // MISTER-132: OSD audio sliders (CONF_STR options, default-max via the
+    // inverted-sense convention documented there) and the credits overlay
+    // page from the mappable Credits button (0 = off).
+    input  wire [2:0]  uvol_ym,
+    input  wire [2:0]  uvol_tms,
+    input  wire [1:0]  credits_page,
+
     // ---- status -----------------------------------------------------------
     output wire        rom_ready    // SDRAM up, image loaded, self-check done
 );
@@ -621,7 +628,18 @@ always @(posedge clk_sdram) begin
             && !(core_rom_req_s && !core_rom_ack_85)
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
             && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want) begin
-            if (pf_pend_q && (!mo_pend_q || vid_last_pf == 1'b0)) begin
+            // MISTER-132: PF STRICT over MO, replacing the round-robin.  On
+            // this platform the playfield shares the one SDRAM with the MO
+            // engine (the Pocket serves PF from PSRAM), and MOPAIR-131 doubled
+            // MO consumption: under crowd load the round-robin handed MO half
+            // the video-tier slots and PF fetches began missing their scanout
+            // deadline - the red garbage patches in the owner's 131 capture,
+            // worst in busy scenes.  PF has a hard realtime deadline and no
+            // recovery path; MO degrades gracefully through its own fetch
+            // budget and line truncation (MOTEL counts it).  So PF always
+            // wins; MO takes every slot PF leaves, which MOPAIR's halved
+            // occupancy makes far more useful than it was at 130.
+            if (pf_pend_q) begin
                 vg_req_last[pf_nch_q] <= vg_req_s[pf_nch_q];
                 rd_addr_q   <= {1'b0, pf_naddr_q};
                 pf_sd_ch    <= pf_nch_q;
@@ -1089,6 +1107,24 @@ wire [7:0]  pal_r = (r_m[10:2] > 9'd255) ? 8'd255 : r_m[9:2];
 wire [7:0]  pal_g = (g_m[10:2] > 9'd255) ? 8'd255 : g_m[9:2];
 wire [7:0]  pal_b = (b_m[10:2] > 9'd255) ? 8'd255 : b_m[9:2];
 
+// ---- MISTER-132: core-credits overlay -------------------------------------
+// Drawn here, in the core's own video path, because the CONF_STR submenu
+// pages this replaces render EMPTY on some framework builds (see
+// Arcade-Escape.sv).  escape_credits is pipelined to the same two-clock depth
+// as the colour path, so its pixel lands on the pixel it belongs to.
+wire cr_on, cr_px;
+escape_credits #(
+    .H_BPORCH ( VID_H_BPORCH ), .V_BPORCH ( VID_V_BPORCH ),
+    .H_ACTIVE ( VID_H_ACTIVE ), .V_ACTIVE ( VID_V_ACTIVE )
+) u_credits (
+    .clk     ( clk_sys ),
+    .page    ( credits_page ),
+    .x_count ( x_count ),
+    .y_count ( y_count ),
+    .ov_on   ( cr_on ),
+    .ov_px   ( cr_px )
+);
+
 // ---- video output registers ----------------------------------------------
 // The colour path is two clocks behind the raster counters (color_vaddr is
 // registered, then the colour RAM read is registered), so the sync/blank
@@ -1107,6 +1143,12 @@ always @(posedge clk_sys) begin
     VBlank <= vb_d[1];
     if (hb_d[1] || vb_d[1] || evideo_off) begin
         VGA_R <= 8'd0; VGA_G <= 8'd0; VGA_B <= 8'd0;
+    end else if (cr_on) begin
+        // credits overlay: lit text white, everything else the game picture
+        // dimmed to a quarter so the page reads over any scene
+        VGA_R <= cr_px ? 8'hFF : {2'b00, pal_r[7:2]};
+        VGA_G <= cr_px ? 8'hFF : {2'b00, pal_g[7:2]};
+        VGA_B <= cr_px ? 8'hFF : {2'b00, pal_b[7:2]};
     end else begin
         VGA_R <= pal_r; VGA_G <= pal_g; VGA_B <= pal_b;
     end
@@ -1223,8 +1265,8 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .skip_test  ( skip_s ),
     .irq_strict ( 1'b0 ),
     .vshad3_on  ( vshad3_s ),
-    .uvol_ym    ( 3'b111 ),
-    .uvol_tms   ( 3'b111 ),
+    .uvol_ym    ( uvol_ym ),
+    .uvol_tms   ( uvol_tms ),
     .uvol_fm    ( 24'hFFFFFF ),
     .audio_l    ( audio_l ),
     .audio_r    ( audio_r ),

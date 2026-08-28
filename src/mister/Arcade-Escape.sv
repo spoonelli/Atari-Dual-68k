@@ -162,76 +162,22 @@ localparam CONF_STR = {
 	"R[0],Reset;",
 	"-;",
 	// ---------------------------------------------------------------------
-	// About / credits pages.
+	// MISTER-132: the About/Credits CONF_STR submenu pages that lived here
+	// rendered EMPTY on the owner's framework build ("Pn-,text;" text lines
+	// are not drawn by every menu renderer), so the attributions moved into
+	// the CORE's own video path: escape_credits.v draws them as an overlay,
+	// cycled by the mappable Credits button (page 1 -> page 2 -> off).  The
+	// full unabridged attribution text stays in docs/MISTER.md and in
+	// support/gen_credits_overlay.py, which generates the overlay bitmap.
 	//
-	// MECHANIC: this is the stock MiSTer framework facility, not a hand-rolled
-	// screen.  CONF_STR is a passive byte ROM that hps_io streams to the ARM
-	// side (hps_io.sv command 0x14); the HPS menu renderer does all parsing and
-	// drawing, and sys/osd.v is only a bitmap framebuffer.  So a credits screen
-	// is pure CONF_STR: "Pn,Title;" declares submenu page n, and "Pn-,text;"
-	// puts a non-selectable text line on it.  Same grammar the vendored
-	// third_party/Arcade-Atari-system1_MiSTer uses for its "-;" separators -
-	// a "-" entry with a label is just the non-empty form of the same entry.
-	// No sys/ change, no extra RTL, no new ports.
-	//
-	// FORMAT LIMITS, and what they cost us: sys/osd.v is OSD_WIDTH = 256 px
-	// with an 8 px font = 32 columns, less the selection gutter, so lines are
-	// kept to <= ~26 characters and wrap by hand.  CONF_STR uses ',' as its
-	// field separator and ';' as its terminator, so NEITHER can appear inside
-	// a label - that is the only reason the "Thanks" line below is not comma
-	// separated.  docs/MISTER.md carries the full, unabridged attributions
-	// with the punctuation and the URLs intact; nothing is dropped here.
-	"P1,About;",
-	"P1-;",
-	"P1-,Atari Dual 68k - EPROM;",
-	"P1-;",
-	"P1-,@spoonelli_dev;",
-	"P1-;",
-	"P1-,Escape from the Planet;",
-	"P1-,of the Robot Monsters;",
-	"P1-,Atari Games 1989;",
-	"P1-;",
-	"P1-,Core is GPL-3.0.;",
-	"P1-,Requires your own MAME;",
-	"P1-,eprom romset. No ROM;",
-	"P1-,data is included.;",
-	"P2,Credits 1/2;",
-	"P2-;",
-	"P2-,Thanks:;",
-	"P2-,LMSS DJS LCS TBPL EG;",
-	"P2-;",
-	"P2-,RTL base (GPL-3.0):;",
-	"P2-,MiSTer-devel;",
-	"P2-,Arcade-Atari-system1;",
-	"P2-,by d18c7db (Alex);",
-	"P2-,incl. TMS5220 speech;",
-	"P2-;",
-	"P2-,Both 68000s: TG68K.C;",
-	"P2-,Tobias Gubener;",
-	"P2-,(TobiFlex) LGPL-3.0;",
-	"P2-,patches by MikeJ;",
-	"P2-,Till Harbaum and;",
-	"P2-,Rok Krajnc + others;",
-	"P3,Credits 2/2;",
-	"P3-;",
-	"P3-,JSA-I 6502: T65 by;",
-	"P3-,Daniel Wallner;",
-	"P3-;",
-	"P3-,YM2151: jt51 by Jose;",
-	"P3-,Tejada (jotego);",
-	"P3-,GPL-3.0;",
-	"P3-;",
-	"P3-,Behavioral reference;",
-	"P3-,only: MAME and Aaron;",
-	"P3-,Giles (eprom.cpp;",
-	"P3-,BSD-3-Clause). No;",
-	"P3-,MAME source copied.;",
-	"P3-;",
-	"P3-,Pocket framework:;",
-	"P3-,openFPGA + Analogue;",
+	// Audio sliders: SENSE IS INVERTED like ROM Shadow above - status powers
+	// up 0 and bit-clear must be the default, so the labels count DOWN and
+	// the wires are driven ~status[].  Default (status 0) = "7" = full volume.
+	"O[11:9],Music Volume,7,6,5,4,3,2,1,0;",
+	"O[14:12],Speech Volume,7,6,5,4,3,2,1,0;",
 	"-;",
-	"J1,Jump,Fire,Duck,Bomb,Start,Coin;",
-	"jn,A,B,X,Y,Start,Select;",
+	"J1,Jump,Fire,Duck,Bomb,Start,Coin,Credits;",
+	"jn,A,B,X,Y,Start,Select,R;",
 	"V,v",`BUILD_DATE
 };
 
@@ -337,6 +283,19 @@ wire        rom_ready;
 
 wire reset = RESET | status[0] | buttons[1] | ioctl_download;
 
+// MISTER-132: Credits button (joy bit 10, either player) cycles the core's
+// credits overlay: off -> page 1 -> page 2 -> off.  Synchronised and
+// edge-detected in clk_sys; reset returns to off.
+reg  [1:0] credits_page = 2'd0;
+reg  [2:0] cr_btn_sync = 3'd0;
+always @(posedge clk_sys) begin
+	cr_btn_sync <= {cr_btn_sync[1:0], joystick_0[10] | joystick_1[10]};
+	if (reset) credits_page <= 2'd0;
+	else if (cr_btn_sync[1] && !cr_btn_sync[2])
+		credits_page <= (credits_page == 2'd2) ? 2'd0 : credits_page + 2'd1;
+end
+
+
 escape_mister machine
 (
 	.clk_sys        (clk_sys),
@@ -407,6 +366,11 @@ escape_mister machine
 	// Inverted: see the CONF_STR comment. 0 (power-up / no saved config) =
 	// shadow ON, which is the default the Pocket ships.
 	.vshad3_on  (~status[8]),
+
+	// MISTER-132: inverted-sense sliders (see CONF_STR comment) + overlay page
+	.uvol_ym      (~status[11:9]),
+	.uvol_tms     (~status[14:12]),
+	.credits_page (credits_page),
 
 	.rom_ready  (rom_ready)
 );
