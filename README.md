@@ -24,28 +24,31 @@ Development continues on visual polish and final timing feel.
 | ROM loading (data slot → SDRAM + CRAM + BRAM shadows) | ✅ verified, self-checked |
 | Dual 68000s + shared RAM + mailbox handshake | ✅ genuinely concurrent on hardware |
 | Hot-code BRAM shadows + speculative prefetch | ✅ shipped — shadow hit rate 61% video / 37% extra CPU |
-| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ components pixel-verified vs MAME scene replay (compositor itself has no bench) |
-| Sound (JSA-I: 6502 + YM2151 + **TMS5220 speech**) | ✅ full pipeline, bench-verified; no audio bus-trace diff vs MAME |
+| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay — crowd, door, spawn-flash and factory-map fixtures all at 100.0000% agreement *and* coverage, draw order proven order-compatible |
+| Sound (JSA-I: 6502 + YM2151 + **TMS5220 speech**) | ✅ full pipeline, bench-verified; no audio bus-trace diff vs MAME; liveness watchdog self-heals a wedged sound CPU |
 | Inputs (buttons, hall-stick via ADC0809, dock analog) | ✅ incl. in-game calibration screens |
-| Watchdog, freeze-rescue, on-device forensics HUD | ✅ 6 debug pages behind L / R — **off by default**, all builds |
+| Watchdog, freeze-rescue, on-device forensics HUD | ✅ 7 debug pages behind L / R — **off by default**, all builds; page 6 is a video-decodable frame counter so slowdown is measurable from any capture |
 | EEPROM (2804) | ✅ high scores and settings persist across a power cycle |
 
-**Known issues:** dense sprite crowds can drop scanlines (bandwidth work in
-progress); speech phrase tails clip slightly; some scenes run marginally under
-arcade speed (video-CPU cadence median 0.973 vs MAME 0.9977 — the gap is in
-the tail, not the median). A non-integer 240→1080 scale draws every 1-pixel
-feature 4 or 5 pixels thick, causing visible shimmer on this game's diagonals:
-that is in the Pocket's scaler and **no RTL change can fix it**. Hold-timing
-margin is at a structural floor (~+0.10 ns) and any edit re-rolls it. The
-measured gap list is [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md) §D, not the
-issue tracker.
+**Known issues:** speech phrase tails clip slightly. A non-integer 240→1080
+scale draws every 1-pixel feature 4 or 5 pixels thick, causing visible shimmer
+on this game's diagonals: that is in the Pocket's scaler and **no RTL change
+can fix it**. Hold-timing margin is at a structural floor (~+0.10 ns) and any
+edit re-rolls it. A rare (once in hours, not yet root-caused) sound-CPU wedge
+is fenced by a liveness watchdog: sound self-heals in under a second and the
+diagnostic HUD latches the 6502 address it died at. The measured gap list is
+[`docs/DEVIATIONS.md`](docs/DEVIATIONS.md) §D, not the issue tracker.
 
-> Previously listed here: "occasional small sprite artifacts". Three
-> independent detectors failed to reproduce it (enclosed-black: 0 ours vs 11
-> MAME; hole rate indistinguishable across builds). It may still be real — a
-> sprite fetching wrong-but-plausible data defeats every statistical shape
-> test — but it is an unreproduced observation, not a measured defect. See
-> §D3.
+> Previously listed here: *"dense sprite crowds can drop scanlines"* and
+> *"some scenes run marginally under arcade speed."* Both are resolved, and
+> both resolutions came from measurement rather than tuning: the crowd
+> dropouts were an **architectural fill-rate deficit** — the real board's
+> line buffer is a *pair* of LB customs filling two pixels per clock (SP-332
+> sheet 9), which this engine now matches (crowd-scene fixture went from 527
+> missing pixels to 0) — and the speed gap dissolved under an end-to-end
+> benchmark: a full attract cycle runs within 0.35% of MAME's frame count,
+> with the residual being MAME slowing *more* than this core under load (see
+> **Accuracy**).
 
 **Core identity:** the core currently installs as `spoonelli.ataridual68k`.
 Renaming it to `spoonelli.eprom` is proposed but **not done** — see
@@ -90,10 +93,15 @@ into a core image even to try.
 
 ## Related: the MiSTer port
 
-A MiSTer port of this core exists on the `mister-port` branch. It boots, but it
-has had **far less hardware validation** than the Pocket core and is not part of
-this release. Some fixes are still in flight there. Treat it as work in
-progress rather than something to install alongside this.
+A MiSTer (DE10-Nano) port exists and is under active hardware bring-up on the
+`mister-*` branches. It plays, with its own platform work now landed: the
+playfield holds top priority on the single shared SDRAM (the Pocket gives it a
+separate PSRAM, MiSTer has no second RAM), fetch-return crossings carry the
+same settle-stage arrangement the Pocket uses, an on-screen build stamp shows
+at every core load, credits render as a core-drawn overlay (mappable button or
+keyboard C), and the OSD has music/speech sliders. It still trails the Pocket
+core in accumulated device hours and is released separately, not as part of
+this package. Details: [`docs/MISTER.md`](docs/MISTER.md).
 
 ## Hardware being implemented
 
@@ -121,24 +129,110 @@ cycle-exact replica. Honest classification:
 clock, all clocks derived from the board's 14.318 MHz colorburst family); raster
 geometry (456×262 total, 336×240 visible, ~59.92 Hz); complete memory map, register
 and latch semantics (sheet 16 + MAME cross-checked); genuinely concurrent dual CPUs
-(the real board's architecture — MAME time-slices); IRGB palette math with intensity;
-autovectored interrupt scheme.
+(the real board's architecture — MAME time-slices); **zero-wait ROM fetches**
+(traced pin-by-pin on sheets 4/5: neither wait-state generator takes any `/ROM`
+input, so the 4-clock fastpath is the *accurate* path, not an overclock); the
+motion-object line buffer's **two-pixels-per-clock fill** (sheet 9: a pair of LB
+customs taking MOL/MOR); IRGB palette math with intensity; autovectored
+interrupt scheme; the 128 ms / 8-vblank watchdog.
 
-**Approximate:** per-instruction CPU cycle counts (TG68K is instruction-accurate, not
-cycle-exact to a 68000); bus-cycle timing (the
-original used zero-wait parallel EPROM buses per subsystem; this core splits memory
-across SDRAM, a dedicated CRAM chip for graphics, and BRAM shadows holding hot code,
-with a speculative prefetch fastpath for everything else. **These are not zero-wait**:
-measured, a shadow fetch costs **5.015 CPU clocks** per bus cycle and a fastpath hit
-**4.015** — so on its hottest code a shadow costs the CPU a clock rather than saving
-one. Net throughput is ~0.87 of MAME's bus rate on the video CPU and ~0.92 on the
-world CPU. See [`docs/VSHAD3.md`](docs/VSHAD3.md));
-video internals (same VRAM in, same pixels out on the same raster grid, but the
-scanout is a re-architected line engine, not a gate-level MOHLB/SLAGS clone).
+**Approximate:** per-instruction CPU cycle counts (TG68K is instruction-accurate,
+not cycle-exact); bus-cycle timing off-ROM (the original gave every subsystem its
+own parallel bus; this core funnels through SDRAM + a CRAM chip + BRAM shadows —
+measured costs and consequences in [`docs/VSHAD3.md`](docs/VSHAD3.md) and
+[`docs/DEVIATIONS.md`](docs/DEVIATIONS.md)); video internals (same VRAM in, same
+pixels out on the same raster grid, but the scanout is a re-architected line
+engine, not a gate-level MOHLB/SLAGS netlist clone — its *architecture-level*
+properties, like the paired fill rate above, are taken from the schematic).
 
-Escape's game logic is IRQ- and frame-driven rather than cycle-counted, so gameplay
-behavior should be indistinguishable from the arcade. This places the core in the same
-class as most MiSTer/openFPGA arcade cores.
+**Measured end-to-end, on hardware, against references** — the claims above are
+checked rather than asserted:
+
+- **Frame-level pacing**: a full attract cycle (the only fully deterministic
+  cross-implementation content) completes in 5,992–5,994 frames on this core vs
+  6,013 in MAME — **0.35%**, with story-panel timers in exact lockstep and the
+  entire residual located in the demo, where **MAME slows down more than this
+  core does** (MAME half-rates 1.6% of demo frames; this core 0.0%).
+- **Animation cadence**: the walk cycle advances every **8 frames**, a 32-frame
+  (534 ms) cycle — identical to MAME's motion-object code stream and to
+  real-cabinet footage, whose walk-scroll rate (2.0 native px/frame) this core
+  matches exactly.
+- **Slowdown character**: in heavy crowds the *game software* drops to 30 Hz
+  updates on every platform. Measured with one estimator across sources, a MAME
+  longplay spends ~1.5× more of its crowd time slowed than this core does —
+  consistent with MAME modelling the 68000 JAMMA variant while this core
+  defaults to the 68010 the dedicated cabinet (and the reference machine used
+  throughout development) actually carries.
+- **Pixels**: motion-object output replays MAME scene dumps at **100.0000%
+  agreement and coverage** on crowd, door, spawn-flash and factory-map
+  fixtures, with draw order proven prefix-compatible by a dedicated gate.
+
+Escape's game logic is IRQ- and frame-driven rather than cycle-counted, so at
+equal frame pacing the gameplay is indistinguishable from the arcade. This
+places the core at the accurate end of the class most MiSTer/openFPGA arcade
+cores occupy.
+
+## Architectural decisions — for the cycle-accuracy conversation
+
+FPGA arcade cores get asked one question first: *is it cycle accurate?* For
+this core the honest answer needs three sentences, so here they are, followed
+by the decisions behind them.
+
+**The machine architecture is real, the timing anchors are from the original
+schematics, and the remaining gaps are enumerated and measured — not assumed
+away.** It is not a netlist reproduction: the CPUs are TG68K, the video
+scanout is a re-architected engine, and memory is funnelled through SDRAM
+where the board had parallel buses. Where those substitutions could change
+observable behavior, the difference has been measured against MAME, against
+real-cabinet footage, or against the schematic — and either closed or
+documented in [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md).
+
+The decisions, and why:
+
+- **Dual CPUs are genuinely concurrent.** The defining feature of this board
+  is two 68000-family CPUs on shared RAM with a mailbox handshake. MAME
+  time-slices them; this core runs them as parallel hardware, which is what
+  the board did — including a shared-RAM read-modify-write interlock
+  (TAS atomicity) that emulation gets for free and hardware has to earn.
+- **TG68K over fx68k, deliberately.** fx68k is the cycle-exact core, and it
+  was evaluated seriously: it is ~1,000 ALMs cheaper here, but it costs +12
+  M10K on a device where this design runs at the 308-block ceiling, its only
+  cycle-true microcode is the 68000's (no 68010 microcode dump exists
+  anywhere), and the one timing anomaly it was hoped to fix was measured and
+  shown not to be per-instruction-timing-shaped. Instruction-accurate TG68K
+  plus *measured end-to-end pacing equivalence* (see Accuracy) is the better
+  trade on this hardware — and it is the trade that keeps the 68010 variant,
+  which the dedicated cabinet actually carries.
+- **Schematics outrank MAME; measurements outrank both references.** The
+  original SP-332/TM-336 drawings corrected MAME on autovectored IRQs, the
+  SLAPSTIC's presence, the serial sound link, zero-wait ROM, and — decisive
+  for sprites — the line buffer's paired two-pixels-per-clock fill, which
+  turned a long-standing "dropout under load" into a one-word diagnosis:
+  the engine had half the board's fill rate. Where the drawings and MAME
+  agree, the core still gets checked against scene-level replays and
+  on-device captures, because both references have been wrong before.
+- **One SDRAM instead of per-subsystem buses is the platform's constraint,
+  and it is armored, not ignored.** The board gave the CPUs zero-wait EPROMs
+  and the video its own RAM; the Pocket offers one SDRAM, one small PSRAM
+  and limited BRAM. The consequences were paid deliberately: hot-code BRAM
+  shadows, a speculative fastpath (measured at the schematic's 4-clock ROM
+  timing), precharge-all read armor born of a wrong-row-serve hunt that took
+  thirty builds to corner, and priority tiers set by which client has a hard
+  realtime deadline. Every one of those exists because a measurement said
+  so, and the measurement is written down.
+- **Verification is the product.** The repo carries pixel-level replay gates
+  against MAME's own renderer (agreement *and* coverage, plus a draw-order
+  prefix proof), boot/march/IRQ/handshake benches that run the real ROM
+  routines, a per-frame video-decodable frame counter so any screen capture
+  becomes a pacing measurement, and an on-device forensics HUD. Claims in
+  this README link to the numbers they rest on; when a claim inverted (the
+  CPU-type saga, chronicled above), the inversion history stays visible.
+
+If "cycle accurate" means *every bus cycle lands on the same clock edge as a
+1989 board*, this is not that, and does not claim to be. If it means *the
+machine's architecture, timing anchors, pixel output and pacing are the
+board's, with the differences known, measured and shrinking* — that is what
+this is, and the evidence is one link deep.
 
 ## Repo layout
 
@@ -202,9 +296,11 @@ No local FPGA toolchain needed — GitHub Actions compiles the bitstream for you
    [`docs/ROMS.md`](docs/ROMS.md) and place it at `Assets/eprom/common/` on the SD.
 7. Unzip the package onto the SD, launch **Atari Dual 68k** on the Pocket.
 
-Every build shows a small cyan build number in the bottom-right corner — check it
-matches the zip you flashed. The diagnostic HUD is **off by default**; press **L1**
-to bring it up, **R1** to cycle its 6 pages (0-5), **L2** to toggle the trace view.
+Every build shows a small cyan build number in the bottom-right corner while the
+HUD is up — check it matches the zip you flashed. The diagnostic HUD is **off by
+default** and additionally gated behind the 'Developer HUD' menu toggle; with it
+enabled, press **L1** to bring it up, **R1** to cycle its 7 pages (0-6; page 6
+carries a video-decodable frame counter), **L2** to toggle the trace view.
 While the HUD is up, **R1/L2/R2 held** are layer-isolation and video-kill probes;
 they do nothing with the HUD off.
 
