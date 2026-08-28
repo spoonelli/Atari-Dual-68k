@@ -2448,7 +2448,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3131;   // + MOPAIR 2px/clock MO blit (schematic MOL/MOR pairing) - screen shows '31'
+    localparam [15:0] BUILD_ID = 16'h3132;   // + MOPF2 scout tile-1 prefetch + ALPHAEQ layer equalisation - screen shows '32'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2739,9 +2739,26 @@ escape_stain ustain (
     // playfield 512..767 = {3'b010,color4,pix4}; SHADE moves the playfield into
     // the alternate bank 768..1023 (CRA9), matching CRA9 = SHADE*CL10 + CL9.
     // The stain then moves whatever won into the 1024..2047 bank.
+    // ALPHAEQ-132: the alpha layer led the playfield/MO path by ONE clock.
+    // PFWRAP-127 calibrated DE to the slowest pipe (pf, latency 3); alpha at
+    // ~2 then showed pixel N+1 at position N - the whole text layer sat 1 px
+    // left of true, and at the right edge the last column sampled alpha's
+    // OFF-SCREEN wrap tile: the transient grey column on flat screens (owner
+    // frames 616-620/646, logged in MO_TILE_HOLES.md with exactly this fix
+    // prescribed: equalise the latencies, do not move DE again). One register
+    // stage on the alpha contribution; the inject diagnostic path below gains
+    // the same stage so the test text stays aligned with itself.
+    reg        alpha_vis_d;
+    reg [5:0]  act_color_d;
+    reg [1:0]  pix_ad;
+    always @(posedge clk_sys_7159) begin
+        alpha_vis_d <= alpha_vis;
+        act_color_d <= act_color;
+        pix_ad      <= pix;
+    end
     always @(posedge clk_sys_7159)
-        color_vaddr <= (alpha_vis ? {3'b000, act_color, pix}
-                                  : pr_pen) | {stain_now, 10'd0};
+        color_vaddr <= (alpha_vis_d ? {3'b000, act_color_d, pix_ad}
+                                    : pr_pen) | {stain_now, 10'd0};
 
     // palette: IRGB4444 with intensity: i=(I+1)*(4-intensity), ch8 = ch4*i/4
     wire [3:0] ints   = (eintensity > 4'd4) ? 4'd4 : eintensity;
@@ -2752,16 +2769,17 @@ escape_stain ustain (
     wire [7:0] pal_r  = (r_m[10:2] > 9'd255) ? 8'd255 : r_m[9:2];
     wire [7:0] pal_g  = (g_m[10:2] > 9'd255) ? 8'd255 : g_m[9:2];
     wire [7:0] pal_b  = (b_m[10:2] > 9'd255) ? 8'd255 : b_m[9:2];
-    reg  inj_px1, inj_px2;   // align inject flag with the 2-cycle color path
+    reg  inj_px1, inj_px2, inj_px3;  // align inject with the colour path
     always @(posedge clk_sys_7159) begin
         inj_px1 <= (pxn == 3'd0) ? a_inject : r_inject;
         inj_px2 <= inj_px1;
+        inj_px3 <= inj_px2;              // ALPHAEQ-132: +1 with the alpha delay
     end
     reg  [1:0] pix_d1;
-    always @(posedge clk_sys_7159) pix_d1 <= pix;
+    always @(posedge clk_sys_7159) pix_d1 <= pix_ad;
     wire [23:0] inj_rgb = (pix_d1 != 2'b00) ? 24'hFFFFFF : 24'h202020;
     wire [23:0] alpha_rgb = evideo_off ? 24'h000000 :
-                            inj_px2    ? inj_rgb    : {pal_r, pal_g, pal_b};
+                            inj_px3    ? inj_rgb    : {pal_r, pal_g, pal_b};
 
     wire dbg_v_pc_fetch, dbg_e_running, dbg_alpha_wr;
     wire [15:0] dbg_mbox_cmd, dbg_mbox_resp, dbg_mbox_ramr, dbg_mbox_sum;

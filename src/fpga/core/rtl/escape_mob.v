@@ -486,6 +486,21 @@ module escape_mob (
     // row into the slot costs 32 bits and hands the channel straight back.
     reg [31:0] q_dat  [0:QDEPTH-1];
     reg        q_got  [0:QDEPTH-1];     // ...and the row is here, not in a channel
+    // MOPF2-132: a SECOND prefetch lane per slot, for the sprite's tile 1.
+    // The mo-harvest instrumentation said it plainly: 99.85% of fetch stall is
+    // waiting on memory for a fetch already issued, and 71% of steady state is
+    // ONE SPRITE'S SECOND TILE - the pump cannot ask for tile 1 until the
+    // blitter has LOADED the sprite (pump_live), so tile 0 blits (4 cycles
+    // since MOPAIR) while tile 1 is still a full round trip away. The scout
+    // already holds everything needed to ask earlier: q_code+1 is tile 1's
+    // row. Lane 2 fills only after every parked tile 0 is in flight, only for
+    // sprites wider than one tile, through the same single issue port, same
+    // free list, same harvest - so every structural argument (deadlock
+    // freedom, draw order, one-issuer) carries over unchanged.
+    reg        q_pf2  [0:QDEPTH-1];     // tile 1 is already in flight...
+    reg [1:0]  q_ch2  [0:QDEPTH-1];     // ...on this channel
+    reg [31:0] q_dat2 [0:QDEPTH-1];
+    reg        q_got2 [0:QDEPTH-1];
     reg [2:0]  q_cnt;                   // 0..QDEPTH
     integer    qi;
 
@@ -497,6 +512,12 @@ module escape_mob (
     reg        pf_hit;                  // tile 0 was prefetched, do not re-issue
     reg        pf_got;                  // ...and its row was harvested into
     reg [31:0] pf_dat;                  // ...here, so no channel holds it
+    // MOPF2-132: same trio for tile 1; its channel is tch_v[3:2], written at
+    // the pop exactly like tile 0's.
+    reg        pf2_hit;
+    reg        pf2_got;
+    reg [31:0] pf2_dat;
+    wire [1:0] pf_ch2 = tch_v[3:2];
 
     integer    ci;                      // MOCHAN-4: per-channel loop index
     reg [3:0]  state;
@@ -639,14 +660,18 @@ module escape_mob (
     // map it is stale until the issue happens, so S_PRIME is told explicitly
     // that the tile it is waiting for exists. (tx==0 with pf_hit is issued too:
     // the scout put it in flight before this sprite was even loaded.)
-    wire       tile_live = (tx_f > {1'b0, tx}) || ((tx == 3'd0) && pf_hit);
+    wire       tile_live = (tx_f > {1'b0, tx}) || ((tx == 3'd0) && pf_hit)
+                        || ((tx == 3'd1) && pf2_hit);   // MOPF2-132
 
     // MODEPTH-2: tile 0 of a prefetched sprite may already have been harvested
     // out of its channel, in which case it comes from pf_dat and there is no
     // pend bit to clear. Every other tile is read straight off its channel.
     wire        t0_harvested = (tx == 3'd0) && pf_got;
-    wire        tile_rdy = t0_harvested || (tile_live && pend_cur);
-    wire [31:0] tile_dat = t0_harvested ? pf_dat : data_cur;
+    wire        t1_harvested = (tx == 3'd1) && pf2_got;   // MOPF2-132
+    wire        tile_rdy = t0_harvested || t1_harvested
+                         || (tile_live && pend_cur);
+    wire [31:0] tile_dat = t0_harvested ? pf_dat
+                         : t1_harvested ? pf2_dat : data_cur;
 
     // A prefetch whose row has landed but not been harvested yet. Harvesting
     // every slot in the same cycle is safe: the free list guarantees the
@@ -654,11 +679,20 @@ module escape_mob (
     wire [QDEPTH-1:0] hv;
     wire [31:0] hv_dat [0:QDEPTH-1];
     genvar gq;
+    wire [QDEPTH-1:0] hv2;                       // MOPF2-132 lane-2 harvest
+    wire [31:0] hv_dat2 [0:QDEPTH-1];
     generate for(gq = 0; gq < QDEPTH; gq = gq + 1) begin : HARVEST
         wire [1:0] c = q_ch[gq];
         assign hv_dat[gq] = c[1] ? (c[0] ? gdata3 : gdata2)
                                  : (c[0] ? gdata1 : gdata0);
         assign hv[gq] = (q_cnt > gq) && q_pf[gq] && !q_got[gq] && pend[c];
+        // Lane 2, same shape. The free list guarantees the two lanes' live
+        // prefetches sit on DIFFERENT channels, so both harvests landing in
+        // one cycle touch disjoint pend bits.
+        wire [1:0] c2 = q_ch2[gq];
+        assign hv_dat2[gq] = c2[1] ? (c2[0] ? gdata3 : gdata2)
+                                   : (c2[0] ? gdata1 : gdata0);
+        assign hv2[gq] = (q_cnt > gq) && q_pf2[gq] && !q_got2[gq] && pend[c2];
     end endgenerate
 
     // THE ISSUE PORT. There is exactly ONE fetch issuer in this module now.
@@ -684,7 +718,10 @@ module escape_mob (
     // tile 0 was already put in flight by the scout: charge its budget slot
     // and step tx_f past it, but do NOT issue it again.
     wire pump_pref  = pump_ready && (tx_f == 4'd0) && pf_hit;
-    wire pump_want  = pump_ready && !pump_pref && ch_any;
+    // MOPF2-132: tile 1 already in flight from the scout - step past it
+    // exactly like tile 0, charging budget without re-issuing.
+    wire pump_pref2 = pump_ready && (tx_f == 4'd1) && pf2_hit;
+    wire pump_want  = pump_ready && !pump_pref && !pump_pref2 && ch_any;
 
     // The SCOUT's prefetch, one per queue slot, head slot first (it is needed
     // soonest). MOCHAN-4 could only issue this once every tile of the sprite in
@@ -702,11 +739,21 @@ module escape_mob (
     // the blitter will reach soonest, so it is the one worth asking for first
     reg  [2:0] sc_sel;
     reg        sc_want;
+    reg        sc_lane2;    // MOPF2-132: this request is for the slot's tile 1
     always @(*) begin
-        sc_sel = 3'd0; sc_want = 1'b0;
+        sc_sel = 3'd0; sc_want = 1'b0; sc_lane2 = 1'b0;
+        // Lane 2 scans first so the loop's LAST match wins overall priority:
+        // any slot still missing its tile 0 outranks every tile-1 request
+        // (tile 0 is needed strictly sooner), and within a lane the slot
+        // nearest the head wins, exactly as before.
+        for(qi = QDEPTH-1; qi >= 0; qi = qi - 1)
+            if((q_cnt > qi) && q_pf[qi] && !q_pf2[qi]
+               && (q_w3[qi][6:4] != 3'd0)) begin
+                sc_sel = qi[2:0]; sc_want = 1'b1; sc_lane2 = 1'b1;
+            end
         for(qi = QDEPTH-1; qi >= 0; qi = qi - 1)
             if((q_cnt > qi) && !q_pf[qi]) begin
-                sc_sel = qi[2:0]; sc_want = 1'b1;
+                sc_sel = qi[2:0]; sc_want = 1'b1; sc_lane2 = 1'b0;
             end
     end
     wire sc_may_pf = sc_want && (fetch_budget != 7'd0)
@@ -716,7 +763,8 @@ module escape_mob (
     wire        iss_scout = !pump_want && sc_may_pf;
     wire        iss_en    = pump_want || iss_scout;
     wire [14:0] iss_code  = pump_want ? (code_row + {11'b0, tx_f})
-                                      : q_code[sc_sel];
+                                      : (q_code[sc_sel]
+                                         + {14'b0, sc_lane2});   // MOPF2-132
     wire [2:0]  iss_row   = pump_want ? row_in_tile : q_row[sc_sel];
     wire [23:0] iss_addr = 24'h120000 + {iss_code, 5'd0} + {iss_row, 2'd0};
 
@@ -787,8 +835,10 @@ module escape_mob (
             q_cnt <= 3'd0;
             for(qi = 0; qi < QDEPTH; qi = qi + 1) begin
                 q_pf[qi] <= 1'b0; q_got[qi] <= 1'b0;
+                q_pf2[qi] <= 1'b0; q_got2[qi] <= 1'b0;
             end
-            pf_hit <= 0; pf_got <= 0; tch_v <= 16'd0; tx_f <= 4'd0;
+            pf_hit <= 0; pf_got <= 0; pf2_hit <= 0; pf2_got <= 0;
+            tch_v <= 16'd0; tx_f <= 4'd0;
             greq <= 4'd0;
             pend <= 4'd0; infl <= 4'd0; disc <= 4'd0;
             wr_en_e <= 0; wr_en_o <= 0;
@@ -816,12 +866,20 @@ module escape_mob (
             // consumes below (the free list never lends out a channel that
             // still holds an unconsumed row), so this and S_PRIME can never
             // write the same pend bit in the same cycle.
-            for(qi = 0; qi < QDEPTH; qi = qi + 1)
+            for(qi = 0; qi < QDEPTH; qi = qi + 1) begin
                 if(hv[qi]) begin
                     q_dat[qi] <= hv_dat[qi];
                     q_got[qi] <= 1'b1;
                     pend[q_ch[qi]] <= 1'b0;
                 end
+                // MOPF2-132: lane 2 harvests identically; different channel
+                // by the free-list argument, so the pend bits are disjoint.
+                if(hv2[qi]) begin
+                    q_dat2[qi] <= hv_dat2[qi];
+                    q_got2[qi] <= 1'b1;
+                    pend[q_ch2[qi]] <= 1'b0;
+                end
+            end
 
             // v85: the line trigger fires from ANY state - a build stalled
             // by fetch starvation previously missed the restart and kept
@@ -868,8 +926,10 @@ module escape_mob (
                 q_cnt  <= 3'd0;
                 for(qi = 0; qi < QDEPTH; qi = qi + 1) begin
                     q_pf[qi] <= 1'b0; q_got[qi] <= 1'b0;
+                    q_pf2[qi] <= 1'b0; q_got2[qi] <= 1'b0;
                 end
-                pf_hit <= 1'b0; pf_got <= 1'b0; tx_f  <= 4'd0;
+                pf_hit <= 1'b0; pf_got <= 1'b0;
+                pf2_hit <= 1'b0; pf2_got <= 1'b0; tx_f  <= 4'd0;
                 state <= S_CLEAR;
             end else begin
 
@@ -1032,6 +1092,11 @@ module escape_mob (
                 pf_got      <= q_got[0] | hv[0];
                 pf_dat      <= hv[0] ? hv_dat[0] : q_dat[0];
                 tch_v[1:0]  <= q_ch[0];
+                // MOPF2-132: tile 1's prefetch comes over the same way
+                pf2_hit     <= q_pf2[0];
+                pf2_got     <= q_got2[0] | hv2[0];
+                pf2_dat     <= hv2[0] ? hv_dat2[0] : q_dat2[0];
+                tch_v[3:2]  <= q_ch2[0];
                 state <= S_WAIT;
             end
 
@@ -1080,6 +1145,15 @@ module escape_mob (
                     else                                 pend[pf_ch] <= 1'b0;
                     pf_hit <= 1'b0;
                 end
+                // MOPF2-132: and its tile 1, on its own channel (free list
+                // guarantees the two are different, so these writes are
+                // disjoint from the tile-0 swallow above).
+                if(spr_dead && pf2_hit) begin
+                    if(pf2_got)                          pf2_got <= 1'b0;
+                    else if(infl[pf_ch2] && !done_edge[pf_ch2]) disc[pf_ch2] <= 1'b1;
+                    else                                 pend[pf_ch2] <= 1'b0;
+                    pf2_hit <= 1'b0;
+                end
                 state <= spr_dead ? S_NEXT : S_PRIME;
             end
 
@@ -1099,8 +1173,9 @@ module escape_mob (
                     // tile tx's row: off its channel, or - for a prefetched
                     // tile 0 - out of the slot it was harvested into
                     rowdata <= tile_dat;
-                    if(!t0_harvested) pend[ch_cur] <= 1'b0;
-                    pf_got <= 1'b0;
+                    if(!t0_harvested && !t1_harvested) pend[ch_cur] <= 1'b0;
+                    if(tx == 3'd0) pf_got  <= 1'b0;
+                    if(tx == 3'd1) pf2_got <= 1'b0;     // MOPF2-132
                     blit_x  <= blit_x_new;
                     // MOFETCH-4: a tile-row that lands wholly in the clipped
                     // 344..504 window costs one cycle instead of eight. Jumping
@@ -1216,8 +1291,14 @@ module escape_mob (
             // the pop cycle and a freshly pushed slot is never the prefetch
             // target), so the queue block below can safely have the last word.
             if(pump_want) tch_v[{tx_f[2:0], 1'b0} +: 2] <= ch_pick;
-            if(iss_scout) begin q_pf[sc_sel] <= 1'b1; q_ch[sc_sel] <= ch_pick; end
-            if(pump_want || pump_pref) begin
+            if(iss_scout) begin
+                if(sc_lane2) begin
+                    q_pf2[sc_sel] <= 1'b1; q_ch2[sc_sel] <= ch_pick;
+                end else begin
+                    q_pf[sc_sel]  <= 1'b1; q_ch[sc_sel]  <= ch_pick;
+                end
+            end
+            if(pump_want || pump_pref || pump_pref2) begin
                 tx_f         <= tx_f + 4'd1;
                 fetch_budget <= fetch_budget - 7'd1;
             end
@@ -1239,6 +1320,10 @@ module escape_mob (
                     q_pf[qi]   <= q_pf[qi+1];    q_ch[qi]  <= q_ch[qi+1];
                     q_got[qi]  <= hv[qi+1] ? 1'b1      : q_got[qi+1];
                     q_dat[qi]  <= hv[qi+1] ? hv_dat[qi+1] : q_dat[qi+1];
+                    // MOPF2-132: lane 2 travels with its slot, harvest included
+                    q_pf2[qi]  <= q_pf2[qi+1];   q_ch2[qi] <= q_ch2[qi+1];
+                    q_got2[qi] <= hv2[qi+1] ? 1'b1       : q_got2[qi+1];
+                    q_dat2[qi] <= hv2[qi+1] ? hv_dat2[qi+1] : q_dat2[qi+1];
                 end
             end
             // ...and the push lands at the tail AFTER that slide, so a push and
@@ -1252,6 +1337,8 @@ module escape_mob (
                 q_row[q_tl]  <= s_ydiff[2:0];
                 q_pf[q_tl]   <= 1'b0;
                 q_got[q_tl]  <= 1'b0;
+                q_pf2[q_tl]  <= 1'b0;    // MOPF2-132
+                q_got2[q_tl] <= 1'b0;
             end
             if(q_push != q_pop)
                 q_cnt <= q_push ? (q_cnt + 3'd1) : (q_cnt - 3'd1);
