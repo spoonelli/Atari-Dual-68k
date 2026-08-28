@@ -29,14 +29,14 @@ Two sequencing facts drive the order:
 | A5 | Debug HUD gated behind a menu toggle, default off | **DONE (build 114)** | `interact.json` id 38 'Developer HUD', default unchecked. With it clear, `diag_on` is forced low, so L1/R1/R/L2 do nothing and no debug path reaches video. RTL still compiled in -- see **section F**; the `DIAG_EN` compile-time half remains open. |
 | A6 | Save-path device test on real hardware | TODO | Gates the alpha/RC tag. |
 | A7 | Clean-boot look on real hardware | TODO | Gates the alpha/RC tag. |
-| A8 | **Tile-shaped holes in motion objects** | TODO | **The one consistent blocker to alpha.** Sprites drawn correctly but with a rectangular chunk missing. Field evidence, ruled-out causes and the diagnostic plan: [`MO_TILE_HOLES.md`](MO_TILE_HOLES.md). Frame 5629 vs 5636 (same sprite, wrong then right) is the key pair. |
+| A8 | **Tile-shaped holes in motion objects** | **DONE (build 131)** | Root cause was ARCHITECTURAL: the MO fill path ran at half the real board's rate (SP-332 sheet 9 shows paired LB customs filling 2 px/clock). MOPAIR-131 pairs the line buffers; crowd fixture went 527 missing px -> 0, owner confirms no dropouts on device. Residual: door hold-open edge bars sparse under load (MO-list tail truncation, cosmetic) - next lever is the 4-word SDRAM burst documented in `escape_mo_cache.v`. |
 
 ## B. Identity, metadata, and store presence
 
 | # | Item | State | Note |
 |---|---|---|---|
 | B1 | Pocket game label -> "Escape from the Planet of the Robot Monsters" | TODO | **Two separate fields**: core name in `core.json`, platform name in `Platforms/eprom.json`. 44 characters will likely truncate on device — check the display limit and plan a short form plus full name. |
-| B2 | Version scheme | TODO | Tag <-> `BUILD_ID` <-> `core.json` version must agree. Today `BUILD_ID` is `0x3113` and shows `13`. |
+| B2 | Version scheme | TODO | Tag <-> `BUILD_ID` <-> `core.json` version must agree. Today `BUILD_ID` is `0x3131` and shows `31`; `core.json` still says 0.0.1. |
 | B3 | pupdate / openFPGA inventory listing | TODO | Community inventory is `joshcampbell191/openfpga-cores-inventory`. Needs a **public** repo, Releases, consistent zip naming, correct `core.json` platform metadata. Research exact submission format. |
 | B4 | Public vs private decision | TODO | Going private would instantly cut public access to the marquee blob (0 forks, so airtight) **but B3 requires public**. The purge resolves this: once the blob is gone, public is fine and no GitHub Support ticket is needed. |
 | B5 | `video.json` out-of-box look (aspect, scaler) | TODO | Most players never open settings. |
