@@ -517,7 +517,7 @@ always @(posedge clk_sdram) begin
     pf_naddr_q <= vg_pend_w[0] ? vg_addrA_px : vg_addrB_px;
 end
 
-reg  vid_last_pf = 1'b0;      // round-robin between the two video clients
+reg  vid_last_pf = 1'b0;      // retired by MISTER-135 (PF is strict-highest); kept to avoid port churn
 
 // ---- char ROM DMA + SDRAM self-check --------------------------------------
 reg [3:0]  chk_state = 4'd0;
@@ -567,7 +567,31 @@ always @(posedge clk_sdram) begin
     4'd10: begin
         // ---- steady state: strict-priority read arbiter -------------------
         // fastpath fills > legacy CPU fetch > {PF, MO} round-robin.
-        if ((fpv_want || fpe_want)
+        // MISTER-135: PF OUTRANKS THE CPUs. The 134 splash proved the new
+        // rbf runs, and the streaks survived both PF-over-MO (132) and the
+        // precharge armor (133) - so they are not MO contention and not
+        // wrong-row serves. The remaining shape fits exactly: streaks are
+        // row-shaped, worst in the TOP rows (fetched right after vblank,
+        // when the game's per-frame CPU burst peaks) and in busy scenes -
+        // PF fetches missing their scanline deadline behind CPU traffic.
+        // On the Pocket PF lives on PSRAM and never meets the CPUs; here
+        // they share one controller and the CPUs outranked it. PF has the
+        // only hard realtime deadline in the system, and its demand is
+        // bounded (two fetches per 8-px cell), so the CPUs wait at most
+        // ~two reads - the attract-cycle benchmark has the game running
+        // slightly FASTER than MAME, so that headroom exists.
+        if (pf_pend_q
+            && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
+            && !fpv_owner && !fpe_owner) begin
+            vg_req_last[pf_nch_q] <= vg_req_s[pf_nch_q];
+            rd_addr_q   <= {1'b0, pf_naddr_q};
+            pf_sd_ch    <= pf_nch_q;
+            rd_pre_q    <= 1'b1;
+            sd_rd_req   <= 1'b1;
+            pf_owner    <= 1'b1;
+        end
+
+        if ((fpv_want || fpe_want) && !pf_pend_q
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
             && !fpv_owner && !fpe_owner) begin
             if (fpv_want && (!fpe_want || !fp_last_v)) begin
@@ -600,7 +624,8 @@ always @(posedge clk_sdram) begin
         if (fpe_vpre) begin fpe_valid <= 1'b1; fpe_vpre <= 1'b0; end
 
         // legacy CPU fetch (the never-wedge fallback behind the fastpath)
-        if (core_rom_req_s && !core_rom_ack_85 && !sd_rd_req && !sd_rd_ack
+        if (core_rom_req_s && !core_rom_ack_85 && !pf_pend_q
+            && !sd_rd_req && !sd_rd_ack
             && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want
             && !mo_owner && !pf_owner) begin
             sd_rd_req <= 1'b1;
@@ -625,48 +650,20 @@ always @(posedge clk_sdram) begin
         // mux select to the shared grant, not a tree of comparators.
         // v14-v19 lesson: ONE if, ONE arm - two grant arms firing on the same
         // clock is last-writer-wins address corruption.
-        if ((pf_pend_q || mo_pend_q)
+        // MO: below the CPUs, as before; PF has its own top-priority arm
+        // above. One if, one arm - the single-grant invariant is untouched.
+        if (mo_pend_q && !pf_pend_q
             && !(core_rom_req_s && !core_rom_ack_85)
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
             && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want) begin
-            // MISTER-132: PF STRICT over MO, replacing the round-robin.  On
-            // this platform the playfield shares the one SDRAM with the MO
-            // engine (the Pocket serves PF from PSRAM), and MOPAIR-131 doubled
-            // MO consumption: under crowd load the round-robin handed MO half
-            // the video-tier slots and PF fetches began missing their scanout
-            // deadline - the red garbage patches in the owner's 131 capture,
-            // worst in busy scenes.  PF has a hard realtime deadline and no
-            // recovery path; MO degrades gracefully through its own fetch
-            // budget and line truncation (MOTEL counts it).  So PF always
-            // wins; MO takes every slot PF leaves, which MOPAIR's halved
-            // occupancy makes far more useful than it was at 130.
-            if (pf_pend_q) begin
-                vg_req_last[pf_nch_q] <= vg_req_s[pf_nch_q];
-                rd_addr_q   <= {1'b0, pf_naddr_q};
-                pf_sd_ch    <= pf_nch_q;
-                // MISTER-133: PF now carries the precharge-all armor too.
-                // Note 3's bet - "a wrong-row serve on a PF read is one wrong
-                // tile row for one frame" - LOST on the device: the owner's
-                // 131/132 captures show transient tile-row garbage over the
-                // playfield in every session, PF-only because PF was the ONE
-                // unarmored client (CPU parity-retries, MO kept rd_pre=1).
-                // Cost is 15 vs 12 clocks per PF read; PF-first arbitration
-                // (MISTER-132) guarantees the deadline and MOPAIR gives MO
-                // the headroom to absorb what is left.
-                rd_pre_q    <= 1'b1;
-                sd_rd_req   <= 1'b1;
-                pf_owner    <= 1'b1;
-                vid_last_pf <= 1'b1;
-            end else begin
-                mg_req_last[mo_nch_q] <= mg_req_s[mo_nch_q];
-                rd_addr_q   <= {1'b0, mo_naddr_q};
-                mo_sd_ch    <= mo_nch_q;
-                rd_pre_q    <= 1'b1;        // MO keeps the Pocket's armor
-                sd_rd_req   <= 1'b1;
-                mo_owner    <= 1'b1;
-                vid_last_pf <= 1'b0;
-            end
+            mg_req_last[mo_nch_q] <= mg_req_s[mo_nch_q];
+            rd_addr_q   <= {1'b0, mo_naddr_q};
+            mo_sd_ch    <= mo_nch_q;
+            rd_pre_q    <= 1'b1;        // MO keeps the Pocket's armor
+            sd_rd_req   <= 1'b1;
+            mo_owner    <= 1'b1;
         end
+
         if (pf_owner && sd_rd_req && sd_rd_ack) begin
             sd_rd_req <= 1'b0;
             pf_owner  <= 1'b0;
