@@ -36,7 +36,7 @@ Two sequencing facts drive the order:
 | # | Item | State | Note |
 |---|---|---|---|
 | B1 | Pocket game label -> "Escape from the Planet of the Robot Monsters" | TODO | **Two separate fields**: core name in `core.json`, platform name in `Platforms/eprom.json`. 44 characters will likely truncate on device — check the display limit and plan a short form plus full name. |
-| B2 | Version scheme | TODO | Tag <-> `BUILD_ID` <-> `core.json` version must agree. Today `BUILD_ID` is `0x3113` and shows `13`. |
+| B2 | Version scheme | **DONE** | Scheme fixed (2026-08-28, owner call): `core.json` version and the git tag move in lockstep — `v0.1.0` = first public RC, `0.x.y` during field-testing, `1.0.0` only when every section-A blocker is closed; patch bumps for fixes, minor bumps for features (eprom2). `BUILD_ID` stays the internal on-HUD build counter, and RELEASE_NOTES records the mapping (v0.1.0 = build 133) so a HUD photo identifies a release exactly. MiSTer versions independently (`mister-v0.x.y`). `core.json` set to 0.1.0. |
 | B3 | pupdate / openFPGA inventory listing | TODO | Community inventory is `joshcampbell191/openfpga-cores-inventory`. Needs a **public** repo, Releases, consistent zip naming, correct `core.json` platform metadata. Research exact submission format. |
 | B4 | Public vs private decision | TODO | Going private would instantly cut public access to the marquee blob (0 forks, so airtight) **but B3 requires public**. The purge resolves this: once the blob is gone, public is fine and no GitHub Support ticket is needed. |
 | B5 | `video.json` out-of-box look (aspect, scaler) | TODO | Most players never open settings. |
