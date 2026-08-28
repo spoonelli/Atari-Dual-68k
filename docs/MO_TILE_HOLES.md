@@ -251,6 +251,21 @@ the same capture (Genki 2026-08-26 160136) shows the right column with NO
 distortion during gameplay - the leak needs a flat/static field to be visible,
 consistent with alpha's off-screen wrap tile only contrasting there.
 
+RESOLVED (ALPHAEQ-132): exactly the prescribed fix - one register stage on the
+alpha contribution into color_vaddr (plus the inject diagnostic path), leaving
+DE and every other pipe untouched. This also corrects the whole alpha layer
+sitting 1 px LEFT of true, which the DE+3 calibration had silently introduced.
+Device verification pending build 132.
+
+Also in 132, the LOAD-DEPENDENT TAIL LOSS (door hold-open edge bars, the last
+objects of crowded lines) got its instrumented fix: MOPF2-132 gives the scout a
+second prefetch lane so a parked sprite's TILE 1 is already in flight when the
+blitter loads it - the mo-harvest data showed 71% of steady-state stall was
+precisely that tile. Crowd-fixture missing pixels: LAT16 153->34 (-78%),
+LAT24 671->304, LAT31 1335->938, JIT48 2003->1597; all scene fixtures stay
+100.0000% at device-realistic latency, draw order prefix-compatible on every
+order-gate cell.
+
 ## Map grey-out: CORRECTED SEMANTICS (owner)
 
 The between-levels map is a PATH SELECTION display, not a traversal record:

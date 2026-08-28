@@ -583,6 +583,23 @@ architecture rtl of escape_core is
     signal jsa_shad_ack   : std_logic := '0';
     signal jsa_cmd_full, jsa_resp_full, jsa_snd_irq : std_logic;
     signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
+    -- JSAWDG-133: sound-engine liveness watchdog. Field evidence (owner
+    -- capture 2026-08-28 163737, t=62.8): the 6502 stopped mid-tune - music
+    -- decayed to a sustained YM drone - and neither a new level nor the
+    -- menu soft reset brought sound back; only a full reconfig did. The
+    -- wedge did not reproduce. Root cause unknown, so this converts the
+    -- next occurrence into data plus a sub-second self-heal: a live
+    -- firmware drains a latched command in microseconds, so CMD_FULL held
+    -- continuously for ~0.75 s means the 6502 is no longer consuming.
+    -- Response: pulse the same sound-reset path the 68k's own 360020 write
+    -- uses (6502 + TMS combo reset + WRIO-driven YM reset), count it, and
+    -- freeze the FIRST wedge's 6502 address into dbg_jsa_pc (first-fault
+    -- convention, like crash_pc). HUD page 1: link nibble [11:8] = wedge
+    -- count; a frozen pc field names where the firmware died.
+    signal jsa_wdg_ctr : unsigned(22 downto 0) := (others => '0');
+    signal jsa_wedges  : unsigned(3 downto 0)  := (others => '0');
+    signal jsa_wpc     : std_logic_vector(15 downto 0) := (others => '0');
+    signal jsa_wdg_kick : std_logic := '0';
     -- v61 coin-chain probe state
     signal resp_rd_d  : std_logic := '0';
     signal resp_reads : unsigned(7 downto 0) := (others => '0');
@@ -2129,9 +2146,41 @@ begin
                             and v_addr(5 downto 4)="11"
                             and v_addr(3 downto 1)="000" and v_lds_n='0' else '0';
 
+    -- JSAWDG-133 (see the signal block comment). 5,400,000 clocks at
+    -- 7.159 MHz = ~0.754 s of continuously-held CMD_FULL before the kick;
+    -- three orders of magnitude above any legitimate service time, so a
+    -- false kick is not a realistic event - and its cost would only be one
+    -- authentic sound reset.
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            jsa_wdg_kick <= '0';
+            if reset_n = '0' then
+                jsa_wdg_ctr <= (others => '0');
+                jsa_wedges  <= (others => '0');
+            elsif jsa_cmd_full = '1' then
+                if jsa_wdg_ctr = to_unsigned(5400000, 23) then
+                    jsa_wdg_ctr  <= (others => '0');
+                    jsa_wdg_kick <= '1';
+                    if jsa_wedges = 0 then
+                        jsa_wpc <= jsa_cpu_addr;
+                    end if;
+                    if jsa_wedges /= x"F" then
+                        jsa_wedges <= jsa_wedges + 1;
+                    end if;
+                else
+                    jsa_wdg_ctr <= jsa_wdg_ctr + 1;
+                end if;
+            else
+                jsa_wdg_ctr <= (others => '0');
+            end if;
+        end if;
+    end process;
+
     jsa : entity work.escape_jsa
         generic map ( YM_ENABLE => (YM_ENABLE = 1) )
-        port map ( clk=>clk, reset_n=>reset_n, snd_res=>snd_res_p,
+        port map ( clk=>clk, reset_n=>reset_n,
+                   snd_res=>snd_res_p or jsa_wdg_kick,
                    rom_addr=>jsa_rom_addr, rom_data=>jsa_rom_data32,
                    rom_req=>jsa_rom_req, rom_ack=>jsa_shad_ack,
                    cmd_data=>v_do(7 downto 0), cmd_we=>snd_cmd_we,
@@ -2156,8 +2205,10 @@ begin
         end if;
     end process;
     dbg_jsa_link <= jsa_cmd_full & jsa_resp_full & jsa_snd_irq & '0'
-                    & x"0" & jsa_last_cmd;
-    dbg_jsa_pc   <= jsa_cpu_addr;
+                    & std_logic_vector(jsa_wedges) & jsa_last_cmd;
+    -- first-fault: after any wedge the pc field stays frozen at the address
+    -- the 6502 died at, exactly like the 68k crash_pc convention
+    dbg_jsa_pc   <= jsa_wpc when jsa_wedges /= 0 else jsa_cpu_addr;
 
     -- v61 coin-chain probes: count 68k response reads (frozen while
     -- resp_full is up = the game stopped listening to the JSA), latch the

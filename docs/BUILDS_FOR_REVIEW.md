@@ -12,6 +12,7 @@ feel.
 | **129** | + MO/stain ONE-PIXEL ALIGNMENT + telemetry page 6 | map specks GONE; pad-shedding gone; stain-page deficit unchanged-or-better |
 | **130** | + MO-over-fastpath ARBITRATION in active lines | page 6 truncation count in crowds; page 4 stain deficit; page 5 cadence cost, if any |
 | **131** | + **MOPAIR: 2px/clock MO blit** (the schematic answer) + honest trunc counter | **the headline build** — crowd dropout/blink/door plain-walls should collapse; see below |
+| **132** | + MOPF2 scout tile-1 prefetch (door-bar/tail-loss fix) + ALPHAEQ alpha-layer equalisation (right-edge column fix + 1px alpha placement) | door hold-open bars solid under load; right-edge column gone on flat screens; alpha text shifts 1px right (toward true) |
 | **mister-130** | alignment + stain timing + cache bypass (no clock change) | parity check on the DE10 (packaged: AtariDual68k-mister-130.zip, setup +0.761 / hold +0.246) |
 
 ## Why 131 exists (found while you were away)
