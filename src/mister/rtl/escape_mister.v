@@ -417,6 +417,20 @@ wire [3:0]   mo_gfx_req;
 wire [95:0]  mo_gfx_addr;              // 4 x 24
 reg  [3:0]   mg_req_last;
 reg  [3:0]   mg_done_85 = 4'd0;
+// CDCSET-136: DONE-RETURN SETTLE STAGES. The completion used to write the
+// data register and flip the done toggle on the SAME clk_sdram edge; the
+// 7.159 side syncs the toggle through ONE flop, and with the two clocks
+// phase-locked 5:1 its capture edge can land ~0 ns behind the data bus
+// (the documented near-zero hold cluster) - the consumer then reads the
+// crossing bus mid-transition. That is the fixed-sprite garble (tile data
+// arriving as bit soup) and, before PF-first hid it, part of the playfield
+// static. The Pocket pays ~400 ns of deliberate done-return delay for
+// exactly this reason (SDSCHED-74); these two-edge delay lines are that
+// arrangement, ported: data lands, TWO clk_sdram periods pass (55.9 ns,
+// two full clk_sys setup margins), then the toggle flips.
+reg  [3:0]   mg_done_set_d1 = 4'd0, mg_done_set_d2 = 4'd0;
+reg  [1:0]   vg_done_set_d1 = 2'd0, vg_done_set_d2 = 2'd0;
+reg  [1:0]   rom_ack_dly = 2'd0;
 reg  [127:0] mg_data;                  // 4 x 32
 reg          mo_owner = 1'b0;
 reg  [1:0]   mo_sd_ch = 2'd0;
@@ -567,6 +581,18 @@ always @(posedge clk_sdram) begin
     4'd10: begin
         // ---- steady state: strict-priority read arbiter -------------------
         // fastpath fills > legacy CPU fetch > {PF, MO} round-robin.
+        // CDCSET-136: the two-edge delay lines and the actual toggles.
+        // d1 is set in the completion cycle below (data lands), d2 one
+        // period later, and the toggle flips on the edge after that.
+        vg_done_set_d2 <= vg_done_set_d1;  vg_done_set_d1 <= 2'd0;
+        mg_done_set_d2 <= mg_done_set_d1;  mg_done_set_d1 <= 4'd0;
+        if (vg_done_set_d2[0]) vg_done_85[0] <= ~vg_done_85[0];
+        if (vg_done_set_d2[1]) vg_done_85[1] <= ~vg_done_85[1];
+        if (mg_done_set_d2[0]) mg_done_85[0] <= ~mg_done_85[0];
+        if (mg_done_set_d2[1]) mg_done_85[1] <= ~mg_done_85[1];
+        if (mg_done_set_d2[2]) mg_done_85[2] <= ~mg_done_85[2];
+        if (mg_done_set_d2[3]) mg_done_85[3] <= ~mg_done_85[3];
+
         // MISTER-135: PF OUTRANKS THE CPUs. The 134 splash proved the new
         // rbf runs, and the streaks survived both PF-over-MO (132) and the
         // precharge armor (133) - so they are not MO contention and not
@@ -640,7 +666,11 @@ always @(posedge clk_sdram) begin
             core_rom_par  <= ^sd_rd_data;
             core_rom_par4 <= {^sd_rd_data[31:24], ^sd_rd_data[23:16],
                               ^sd_rd_data[15:8],  ^sd_rd_data[7:0]};
-            core_rom_ack_85 <= 1'b1;
+            rom_ack_dly <= 2'b01;                 // CDCSET-136: ack later
+        end
+        if (rom_ack_dly == 2'b01) rom_ack_dly <= 2'b10;
+        else if (rom_ack_dly == 2'b10) begin
+            core_rom_ack_85 <= 1'b1; rom_ack_dly <= 2'b00;
         end
         if (!core_rom_req_s) core_rom_ack_85 <= 1'b0;
 
@@ -668,13 +698,13 @@ always @(posedge clk_sdram) begin
             sd_rd_req <= 1'b0;
             pf_owner  <= 1'b0;
             vg_data[pf_sd_ch*32 +: 32] <= sd_rd_data;
-            vg_done_85[pf_sd_ch]       <= ~vg_done_85[pf_sd_ch];
+            vg_done_set_d1[pf_sd_ch]   <= 1'b1;   // CDCSET-136: toggle later
         end
         if (mo_owner && sd_rd_req && sd_rd_ack) begin
             sd_rd_req <= 1'b0;
             mo_owner  <= 1'b0;
             mg_data[mo_sd_ch*32 +: 32] <= sd_rd_data;
-            mg_done_85[mo_sd_ch]       <= ~mg_done_85[mo_sd_ch];
+            mg_done_set_d1[mo_sd_ch]   <= 1'b1;   // CDCSET-136: toggle later
         end
 
         // SDRAM canary: while the deep probe fails, re-probe + re-DMA
