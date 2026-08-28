@@ -36,11 +36,12 @@
 //    playfield now competes for a bus that was already the tightest resource
 //    in the design.  THIS IS THE #1 THING TO WATCH ON FIRST FLASH.
 //
-// 3. PF reads are issued with rd_pre = 0 (the controller's documented
-//    "video read" fast path).  CPU and MO reads keep rd_pre = 1, exactly as
-//    the Pocket ships them.  A wrong-row serve on a PF read is one wrong tile
-//    row for one frame; on a CPU read it is a wrong instruction, which is why
-//    the CPU path keeps its armor.
+// 3. ALL reads carry rd_pre = 1 (precharge-all armor) since MISTER-133.
+//    PF originally used the rd_pre = 0 fast path on the theory that "a
+//    wrong-row serve on a PF read is one wrong tile row for one frame" -
+//    device captures (131/132) showed those serves are frequent enough to
+//    be constant visible garbage, and PF was the one client without armor,
+//    which is exactly why only the playfield showed it.
 //
 // 4. No debug HUD, no Interact menu, no test-tone, no layer isolation.  The
 //    Pocket's forensics tooling is deliberately absent.
@@ -643,7 +644,16 @@ always @(posedge clk_sdram) begin
                 vg_req_last[pf_nch_q] <= vg_req_s[pf_nch_q];
                 rd_addr_q   <= {1'b0, pf_naddr_q};
                 pf_sd_ch    <= pf_nch_q;
-                rd_pre_q    <= 1'b0;        // video fast path (see header note 3)
+                // MISTER-133: PF now carries the precharge-all armor too.
+                // Note 3's bet - "a wrong-row serve on a PF read is one wrong
+                // tile row for one frame" - LOST on the device: the owner's
+                // 131/132 captures show transient tile-row garbage over the
+                // playfield in every session, PF-only because PF was the ONE
+                // unarmored client (CPU parity-retries, MO kept rd_pre=1).
+                // Cost is 15 vs 12 clocks per PF read; PF-first arbitration
+                // (MISTER-132) guarantees the deadline and MOPAIR gives MO
+                // the headroom to absorb what is left.
+                rd_pre_q    <= 1'b1;
                 sd_rd_req   <= 1'b1;
                 pf_owner    <= 1'b1;
                 vid_last_pf <= 1'b1;

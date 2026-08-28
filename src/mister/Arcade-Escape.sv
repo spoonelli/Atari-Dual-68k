@@ -251,7 +251,7 @@ wire rom_wr = ioctl_wr && ioctl_download && (ioctl_index == 16'd0);
 
 /////////////////////////   KEYBOARD   ///////////////////////////
 reg kb_up1, kb_dn1, kb_lf1, kb_rt1, kb_jump1, kb_fire1, kb_duck1, kb_bomb1;
-reg kb_start1, kb_coin1, kb_start2, kb_coin2;
+reg kb_start1, kb_coin1, kb_start2, kb_coin2, kb_creds;
 wire pressed = ps2_key[9];
 always @(posedge clk_sys) begin
 	reg old_state;
@@ -270,6 +270,7 @@ always @(posedge clk_sys) begin
 			9'h01E: kb_start2 <= pressed;   // 2
 			9'h02E: kb_coin1  <= pressed;   // 5
 			9'h036: kb_coin2  <= pressed;   // 6
+			9'h021: kb_creds  <= pressed;   // C - credits overlay (MISTER-133)
 			default: ;
 		endcase
 	end
@@ -289,7 +290,10 @@ wire reset = RESET | status[0] | buttons[1] | ioctl_download;
 reg  [1:0] credits_page = 2'd0;
 reg  [2:0] cr_btn_sync = 3'd0;
 always @(posedge clk_sys) begin
-	cr_btn_sync <= {cr_btn_sync[1:0], joystick_0[10] | joystick_1[10]};
+	// MISTER-133: keyboard C works with no button mapping at all - a fresh
+	// install has no saved per-core map, so the joystick Credits button only
+	// exists after "Define eprom buttons" has been run once.
+	cr_btn_sync <= {cr_btn_sync[1:0], joystick_0[10] | joystick_1[10] | kb_creds};
 	if (reset) credits_page <= 2'd0;
 	else if (cr_btn_sync[1] && !cr_btn_sync[2])
 		credits_page <= (credits_page == 2'd2) ? 2'd0 : credits_page + 2'd1;
