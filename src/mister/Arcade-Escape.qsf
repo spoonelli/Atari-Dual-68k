@@ -51,7 +51,7 @@ set_global_assignment -name ECO_OPTIMIZE_TIMING ON
 set_global_assignment -name PERIPHERY_TO_CORE_PLACEMENT_AND_ROUTING_OPTIMIZATION ON
 set_global_assignment -name PHYSICAL_SYNTHESIS_ASYNCHRONOUS_SIGNAL_PIPELINING ON
 set_global_assignment -name ALM_REGISTER_PACKING_EFFORT MEDIUM
-set_global_assignment -name SEED 1
+set_global_assignment -name SEED 3
 
 # v78 (Pocket): capture SDRAM read data in the IO cell itself so the DQ input
 # timing is placement-invariant.  The shifting per-build corruption the Pocket
