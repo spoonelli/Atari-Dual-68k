@@ -488,6 +488,13 @@ escape_mo_cache #(.ENTRIES(32), .IDXBITS(5)) u_mo_cache (
 // only ADDS pending bits, and the engine holds gfx_addr stable until the
 // completion returns.
 wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
+// MOARB-137: active-video window + first-class MO flag, clk_sdram domain.
+// VBlank is a slow signal; two flops make the crossing unconditional.
+reg [1:0] vb_sd_sync = 2'b11;
+always @(posedge clk_sdram) vb_sd_sync <= {vb_sd_sync[0], VBlank};
+reg mo_first_q = 1'b0;
+always @(posedge clk_sdram)
+    mo_first_q <= core_rstn_sd && (|mg_pend_w) && !vb_sd_sync[1];
 reg        mo_pend_q  = 1'b0;
 reg [1:0]  mo_nch_q   = 2'd0;
 reg [23:0] mo_naddr_q = 24'd0;
@@ -593,6 +600,17 @@ always @(posedge clk_sdram) begin
         if (mg_done_set_d2[2]) mg_done_85[2] <= ~mg_done_85[2];
         if (mg_done_set_d2[3]) mg_done_85[3] <= ~mg_done_85[3];
 
+        // MOARB-137 (ported from Pocket MOARB-130): during ACTIVE video,
+        // a pending MO fetch outranks NEW SPECULATIVE fastpath fills - the
+        // legacy CPU path (the never-wedge demand fetch) keeps its rank.
+        // Same rationale as the Pocket: speculative fills are the one bus
+        // consumer with no deadline and no correctness stake; MO is bounded
+        // per line by its fetch budget. On this platform the pressure is
+        // worse than the Pocket ever saw - PF-first (needed) plus both CPU
+        // tiers left MO the scraps, and big late-list machines shredded
+        // into fragments frame-by-frame (owner 136 capture, t=24.4: the
+        // conveyor flashing whole/fragmented). Pocket measurement showed
+        // no cadence cost; the legacy path's rank is untouched.
         // MISTER-135: PF OUTRANKS THE CPUs. The 134 splash proved the new
         // rbf runs, and the streaks survived both PF-over-MO (132) and the
         // precharge armor (133) - so they are not MO contention and not
@@ -617,7 +635,7 @@ always @(posedge clk_sdram) begin
             pf_owner    <= 1'b1;
         end
 
-        if ((fpv_want || fpe_want) && !pf_pend_q
+        if ((fpv_want || fpe_want) && !pf_pend_q && !mo_first_q
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
             && !fpv_owner && !fpe_owner) begin
             if (fpv_want && (!fpe_want || !fp_last_v)) begin
@@ -685,7 +703,8 @@ always @(posedge clk_sdram) begin
         if (mo_pend_q && !pf_pend_q
             && !(core_rom_req_s && !core_rom_ack_85)
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
-            && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want) begin
+            && !fpv_owner && !fpe_owner
+            && (mo_first_q || (!fpv_want && !fpe_want))) begin
             mg_req_last[mo_nch_q] <= mg_req_s[mo_nch_q];
             rd_addr_q   <= {1'b0, mo_naddr_q};
             mo_sd_ch    <= mo_nch_q;
