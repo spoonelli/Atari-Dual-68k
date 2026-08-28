@@ -1122,13 +1122,30 @@ wire [7:0]  pal_b = (b_m[10:2] > 9'd255) ? 8'd255 : b_m[9:2];
 // pages this replaces render EMPTY on some framework builds (see
 // Arcade-Escape.sv).  escape_credits is pipelined to the same two-clock depth
 // as the colour path, so its pixel lands on the pixel it belongs to.
+// MISTER-134: BOOT SPLASH. The Pocket rule - every build shows its number on
+// screen - finally reaches MiSTer: the credits page (whose second line is the
+// build number, support/gen_credits_overlay.py - BUMP THEM TOGETHER) is
+// forced on for the first ~3.5 s after reset, so "is the new rbf actually
+// running?" is answered by the screen instead of by faith. The Credits
+// button's own page overrides the splash; it never returns until reset.
+reg [8:0] splash_ctr = 9'd0;
+reg       vb_spl_d = 1'b0;
+always @(posedge clk_sys) begin
+    vb_spl_d <= VBlank;
+    if (reset) splash_ctr <= 9'd0;
+    else if (VBlank && !vb_spl_d && splash_ctr != 9'd210)
+        splash_ctr <= splash_ctr + 9'd1;
+end
+wire [1:0] cr_page_eff = (credits_page != 2'd0) ? credits_page
+                       : (splash_ctr != 9'd210) ? 2'd1 : 2'd0;
+
 wire cr_on, cr_px;
 escape_credits #(
     .H_BPORCH ( VID_H_BPORCH ), .V_BPORCH ( VID_V_BPORCH ),
     .H_ACTIVE ( VID_H_ACTIVE ), .V_ACTIVE ( VID_V_ACTIVE )
 ) u_credits (
     .clk     ( clk_sys ),
-    .page    ( credits_page ),
+    .page    ( cr_page_eff ),
     .x_count ( x_count ),
     .y_count ( y_count ),
     .ov_on   ( cr_on ),

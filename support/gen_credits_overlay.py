@@ -20,6 +20,9 @@ W, H = 336, 240
 PAGES = [
     [
         "ATARI DUAL 68K - EPROM",
+        "MISTER BUILD 134",          # BUMP with every MiSTer build: this line
+                                      # doubles as the boot-splash stamp, the
+                                      # only on-device proof of which rbf runs
         "@spoonelli_dev",
         "",
         "Escape from the Planet",
