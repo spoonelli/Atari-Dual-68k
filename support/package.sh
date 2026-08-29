@@ -58,11 +58,12 @@ data.json declares it as a required slot and the Pocket asks for that filename.
 
 Build it from your own verified dumps of the MAME 'eprom' set. The tool is
 included at the top level of this zip (and in the project source at
-support/build_rom.py):
+support/build_rom.py). From the folder you unzipped this package into:
 
-  python3 build_rom.py /path/to/eprom.zip atari_escape.rom
+  python3 build_rom.py /path/to/eprom.zip
 
-then place atari_escape.rom in this folder.
+It writes atari_escape.rom directly into this folder -- then copy the
+package's folders onto the SD card as usual.
 
 Python 3 is the only requirement. Every chip is CRC32-checked against MAME's
 known-good values; a wrong or incomplete set is refused rather than half-built.
