@@ -19,6 +19,17 @@ a bug in `src/fpga/core/rtl/`, both platforms get it.
 > boost (137→139; the Pocket's blanket rule starves this bus's CPUs — see
 > `DEVIATIONS.md` §F2). The history sections below are kept as the port
 > record; where they disagree with this note, this note wins.
+>
+> **Gates for the first tagged MiSTer release** (owner-set, 2026-08-29):
+>
+> 1. **Retire the boot splash.** It exists as the debug build-identity check
+>    while field-testing; for release, credits become menu/button-only (the
+>    Credits button and keyboard C already work) with the build number on the
+>    credits page. The framework's `P1-,text;` CONF_STR pages rendered empty
+>    on the owner's framework build, so the overlay stays the mechanism.
+> 2. **`.rbf` naming per MiSTer convention** — `escape_YYYYMMDD.rbf`
+>    (`CoreName_YYYYMMDD.rbf`). CI stages the dated name already; the
+>    `.mra`'s `<rbf>escape</rbf>` matches it by prefix, no manifest change.
 
 ---
 
