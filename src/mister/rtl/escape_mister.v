@@ -488,13 +488,33 @@ escape_mo_cache #(.ENTRIES(32), .IDXBITS(5)) u_mo_cache (
 // only ADDS pending bits, and the engine holds gfx_addr stable until the
 // completion returns.
 wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
-// MOARB-137: active-video window + first-class MO flag, clk_sdram domain.
-// VBlank is a slow signal; two flops make the crossing unconditional.
+// MOARB-138: AGE-BOUNDED first-class MO, clk_sdram domain.
+// The 137 port copied the Pocket's blanket rule - MO outranks speculative
+// fastpath fills whenever it pends during active video - and it was
+// catastrophic here (owner: "unbelievably slow refresh", even the boot
+// self-test crawled). The platform difference the port missed: on the
+// Pocket, MO is the only client sharing the bus with the CPUs, so blocking
+// the fastpath interleaves MO/CPU one-for-one. On MiSTer, PF already owns
+// the top of this arbiter and eats half the active-line bus - a blanket MO
+// boost left the CPUs almost no active-video service at all, and the 68ks
+// ran essentially in blanking only.
+// The fix keeps the intent (MO must not STARVE) and drops the dominance:
+// MO gets first-class rank only after its oldest pending fetch has waited
+// AGE_BOOST clk_sdram cycles (~0.9 us - several CPU fetches' worth). Under
+// light load the boost never engages and the CPUs see the 136 arbiter;
+// under crowd load MO's wait is bounded at AGE_BOOST + one PF/CPU
+// transaction instead of a whole line.
+localparam [5:0] AGE_BOOST = 6'd32;
 reg [1:0] vb_sd_sync = 2'b11;
 always @(posedge clk_sdram) vb_sd_sync <= {vb_sd_sync[0], VBlank};
+reg [5:0] mo_age = 6'd0;
 reg mo_first_q = 1'b0;
-always @(posedge clk_sdram)
-    mo_first_q <= core_rstn_sd && (|mg_pend_w) && !vb_sd_sync[1];
+always @(posedge clk_sdram) begin
+    if (!core_rstn_sd || !(|mg_pend_w)) mo_age <= 6'd0;
+    else if (mo_age != 6'h3F)           mo_age <= mo_age + 6'd1;
+    mo_first_q <= core_rstn_sd && (|mg_pend_w) && !vb_sd_sync[1]
+                  && (mo_age >= AGE_BOOST);
+end
 reg        mo_pend_q  = 1'b0;
 reg [1:0]  mo_nch_q   = 2'd0;
 reg [23:0] mo_naddr_q = 24'd0;
