@@ -510,36 +510,26 @@ wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
 // aging period. Worst-case MO wait is unchanged (AGE_BOOST + one
 // transaction); worst-case CPU share is now bounded at ~2/3 of the
 // non-PF bus instead of zero.
-// MOARB-145: BURST credits. The one-shot boost (139/140/144) serves one MO
-// slot per aging period; measured on the crowd bench (tb_mister_moarb, 144
-// baseline) that is 36.45 tiles/line against the ~40 a dense line needs,
-// with avg fetch latency 41 clks - dominated by the 32-clk age wait itself.
-// That 10% shortfall is the field dropout. The blanket rule (137/143) fixes
-// MO and kills the CPUs. Bounded middle: when the age trips, MO earns
-// MO_BURST consecutive slots, then re-ages from zero - the fastpath keeps a
-// guaranteed window every period, so the 143 input regression cannot recur,
-// and MO throughput scales ~4x.
-localparam [5:0] AGE_BOOST = 6'd32;
-localparam [2:0] MO_BURST  = 3'd4;
+// MOARB-146: ONE-FOR-ONE INTERLEAVE, no blocking. Every prior boost
+// (137 blanket, 139/140/144 one-shot, 145 burst) worked by BLOCKING the
+// fastpath while MO pends - and escape_core gives a blocked fastpath only
+// 16 CPU clocks (v_fast_to/e_fast_to) before every ROM fetch degenerates
+// into timeout-plus-legacy-fallback: the 68ks crawl and the engine reads
+// as input-dead (the 143 and 145 field regressions). 144 survived only
+// because its pulses were shorter than the timeout - and it under-serves
+// dense lines (36.45 tiles/line on tb_mister_moarb vs ~40 needed).
+// The Pocket never had this problem because its rule produces a strict
+// MO/CPU alternation on a two-client bus. Reproduce THAT, not the
+// blocking: a turn bit arbitrates only the cycles where MO and the
+// fastpath are both hungry - each grant hands the next contested cycle
+// to the other side. MO gets ~half the non-playfield bus under load
+// (>100 tiles/line), the fastpath's ready latency stays a few CPU
+// clocks - far inside the timeout - and no starvation window exists in
+// either direction. The legacy demand arm returns to its pre-140 form:
+// with the fastpath never blocked, the 140 standoff cannot form.
 reg [1:0] vb_sd_sync = 2'b11;
 always @(posedge clk_sdram) vb_sd_sync <= {vb_sd_sync[0], VBlank};
-reg [5:0] mo_age    = 6'd0;
-reg [2:0] mo_credit = 3'd0;
-reg       mo_own_d145 = 1'b0;
-reg mo_first_q = 1'b0;
-always @(posedge clk_sdram) begin
-    mo_own_d145 <= mo_owner;
-    if (!core_rstn_sd || !(|mg_pend_w)) begin
-        mo_age <= 6'd0; mo_credit <= 3'd0;
-    end else if (mo_credit != 3'd0) begin
-        mo_age <= 6'd0;
-        if (mo_owner && !mo_own_d145) mo_credit <= mo_credit - 3'd1;
-    end else if (mo_age >= AGE_BOOST) begin
-        mo_credit <= MO_BURST; mo_age <= 6'd0;
-    end else mo_age <= mo_age + 6'd1;
-    mo_first_q <= core_rstn_sd && (|mg_pend_w) && !vb_sd_sync[1]
-                  && (mo_credit != 3'd0);
-end
+reg mo_turn = 1'b0;   // 1 = MO takes the next contested idle cycle
 reg        mo_pend_q  = 1'b0;
 reg [1:0]  mo_nch_q   = 2'd0;
 reg [23:0] mo_naddr_q = 24'd0;
@@ -680,9 +670,11 @@ always @(posedge clk_sdram) begin
             pf_owner    <= 1'b1;
         end
 
-        if ((fpv_want || fpe_want) && !pf_pend_q && !mo_first_q
+        if ((fpv_want || fpe_want) && !pf_pend_q
+            && !(mo_pend_q && mo_turn)
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
             && !fpv_owner && !fpe_owner) begin
+            mo_turn   <= 1'b1;              // MO gets the next contested cycle
             if (fpv_want && (!fpe_want || !fp_last_v)) begin
                 fpv_tag   <= fpv_addr_s;
                 fpv_valid <= 1'b0;
@@ -712,18 +704,13 @@ always @(posedge clk_sdram) begin
         if (fpv_vpre) begin fpv_valid <= 1'b1; fpv_vpre <= 1'b0; end
         if (fpe_vpre) begin fpe_valid <= 1'b1; fpe_vpre <= 1'b0; end
 
-        // legacy CPU fetch (the never-wedge fallback behind the fastpath)
-        // MOARB-140: while mo_first_q has the fastpath blocked, a pending
-        // demand fetch must NOT defer to fastpath want - want can never drop
-        // while the fastpath is blocked, and the MO arm defers to pending
-        // demand, so demand+want+boost was a three-way standoff that froze
-        // CPUs AND MO until vblank (the 137/138/139 slowdown-plus-flashing).
-        // Exclusive with the MO arm by construction: it requires
-        // !(core_rom_req_s && !core_rom_ack_85).
+        // legacy CPU fetch (the never-wedge fallback behind the fastpath).
+        // MOARB-146: back to plain deference - the fastpath is never blocked
+        // under the interleave, so its want always drains and the MOARB-140
+        // standoff cannot form.
         if (core_rom_req_s && !core_rom_ack_85 && !pf_pend_q
             && !sd_rd_req && !sd_rd_ack
-            && !fpv_owner && !fpe_owner
-            && (mo_first_q || (!fpv_want && !fpe_want))
+            && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want
             && !mo_owner && !pf_owner) begin
             sd_rd_req <= 1'b1;
             rd_addr_q <= {1'b0, core_rom_addr};
@@ -757,7 +744,8 @@ always @(posedge clk_sdram) begin
             && !(core_rom_req_s && !core_rom_ack_85)
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
             && !fpv_owner && !fpe_owner
-            && (mo_first_q || (!fpv_want && !fpe_want))) begin
+            && (mo_turn || (!fpv_want && !fpe_want))) begin
+            mo_turn     <= 1'b0;            // fastpath gets the next contested cycle
             mg_req_last[mo_nch_q] <= mg_req_s[mo_nch_q];
             rd_addr_q   <= {1'b0, mo_naddr_q};
             mo_sd_ch    <= mo_nch_q;
