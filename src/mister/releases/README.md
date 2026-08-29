@@ -52,6 +52,16 @@ Credits.
 - **ROM Shadow** — leave On (default); it is a performance feature, not a hack.
 - **Reset** — the machine's hard reset.
 
+## Auto-updates (update_all / Downloader)
+
+Add this once to `/media/fat/downloader.ini` and the core updates through
+your normal `update_all` run:
+
+```ini
+[spoonelli/ataridual68k]
+db_url = 'https://github.com/spoonelli/Atari-Dual-68k/releases/download/mister-db/ataridual68k_db.json.zip'
+```
+
 ## Reporting problems
 
 Include the splash's build number (a photo of the splash is ideal) and a
