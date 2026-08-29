@@ -180,6 +180,10 @@ jobs:
           cp src/mister/releases/*.mra mister-release/
           # user-facing install README; docs/MISTER.md stays the engineering record
           cp src/mister/releases/README.md mister-release/README.md
+          # licence texts must accompany the binary (GPL-3.0; NOTICE.md is
+          # the third-party inventory)
+          cp LICENSE   mister-release/LICENSE.txt
+          cp NOTICE.md mister-release/NOTICE.md
 
       - name: Release must contain no ROM data
         run: |
