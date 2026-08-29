@@ -1,7 +1,7 @@
 # Atari Dual 68k — Alpha release notes
 
 An openFPGA core for the **Analogue Pocket** that implements Atari's
-*Escape from the Planet of the Robot Monsters* (1989) — the dual-68000 arcade
+*Escape from the Planet of the Robot Monsters* (1989) — the dual-68010 arcade
 board, not an emulator port. The RTL is an independent re-implementation
 worked out from Atari's SP-332 schematic package, with MAME's `eprom.cpp`
 driver as a behavioural cross-check.
@@ -54,7 +54,7 @@ Full on-device notes, including the diagnostic HUD:
 
 ## What works
 
-**The whole game.** It boots the full dual-68000 program, runs the complete
+**The whole game.** It boots the full dual-CPU program, runs the complete
 attract cycle — story pages, TMS5220 announcer speech, high-score table, demo
 play — takes coins, starts, and plays. Jake walks, robots swarm, the JSA-I
 sound board delivers music, effects and speech in real time.
