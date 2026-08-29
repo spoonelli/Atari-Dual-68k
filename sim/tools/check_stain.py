@@ -12,7 +12,7 @@ reference/eprom.cpp would have produced. Two independent things are diffed:
 
 This check is designed to be able to fail, and is verified to fail: run it
 against the RTL as of BUILD 107 and cases D and E both mismatch (see
-docs/GFX_DASH_ARTIFACT.md). It also refuses to certify a run in which the
+docs/investigations/GFX_DASH_ARTIFACT.md). It also refuses to certify a run in which the
 bench saw no markers, no stained pixels, or fewer frames than the scene has -
 the three ways a broken fixture turns a diff clean.
 

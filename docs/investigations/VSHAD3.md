@@ -2,7 +2,7 @@
 
 The question: BUILD 107 runs the **video CPU at 22,203 bus cycles/frame against
 MAME's 25,630 (0.866)** and the **extra CPU at 20,509 against 22,244 (0.922)**
-(`docs/GFX_DASH_ARTIFACT.md` section 8, 173 decoded HUD frames). The structural
+(`docs/investigations/GFX_DASH_ARTIFACT.md` section 8, 173 decoded HUD frames). The structural
 difference between the two CPUs is how much of their hot code is *shadowed*:
 80 KB for the video CPU, 20 KB for the extra. Since the zero-wait fastpath
 landed, that is the wrong way round.
@@ -85,7 +85,7 @@ vs MAME                             = 0.929                     (from 0.866)
 
 In cadence terms, which is what the owner actually feels. MAME's video logic
 body is 61.7% of the frame budget mean, 83.3% at p99, 86.0% at p99.9
-(`docs/PERF_CADENCE.md`). Scaling by our speed ratio:
+(`docs/investigations/PERF_CADENCE.md`). Scaling by our speed ratio:
 
 | | mean | p99 | p99.9 |
 |---|---|---|---|
@@ -121,7 +121,7 @@ one risk I cannot measure and one methodological point.
   fill latency past one CPU clock, section 1's table says the change is neutral
   at best and negative past two. And the cost would land on the graphics path.
 * **The methodological point.** This branch also fixes a real graphics bug
-  (`docs/GFX_DASH_ARTIFACT.md`). Shipping a memory-system gamble in the same
+  (`docs/investigations/GFX_DASH_ARTIFACT.md`). Shipping a memory-system gamble in the same
   bitstream would make any change the owner sees unattributable.
 
 ## 5. How to evaluate it on hardware, in one build
@@ -144,7 +144,7 @@ one risk I cannot measure and one methodological point.
 ## 6. HUD page 5: the cadence readout (CADENCE-107)
 
 Every speed number this core has ever reported is a proxy: it says how fast the
-processors run, not whether the game met its deadline. `docs/PERF_CADENCE.md`
+processors run, not whether the game met its deadline. `docs/investigations/PERF_CADENCE.md`
 measures the original in the units that matter — **logic updates per video
 frame**, 0.9977 video / 0.9999 world in MAME — by tapping the re-entrancy flag
 each vblank ISR writes: `$50` to `$16CCD4` (main/video) and `$16CCD6`
@@ -386,9 +386,9 @@ or decode path this change touches.
 
 ## 7. MEASURED: the fill-rate input to the SDRAM analysis is still unmeasured
 
-`docs/SDRAM_ARCH.md` models the baseline partly on the video CPU issuing fills on
+`docs/investigations/SDRAM_ARCH.md` models the baseline partly on the video CPU issuing fills on
 **~70%** of its bus cycles with the vshad3 shadow off (vs ~39% on). That pair
-comes from `docs/VSHAD3.md:115`, which is honest about its neighbour being "an
+comes from `docs/investigations/VSHAD3.md:115`, which is honest about its neighbour being "an
 estimate, not a measurement" - but the pair itself was then used as an INPUT to a
 memory-system decision. `sim/tb/tb_vfill.vhd` was written to replace it with a
 count. It could not, and the reason matters more than the number would have.

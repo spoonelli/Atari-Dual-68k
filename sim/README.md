@@ -85,7 +85,7 @@ loops a hard-coded 500,000 clocks (5 ms) and then reports, *ignoring the
 main's boot flow does not reach the 360011 release write inside 5 ms (the
 extra's POST alone is ~1 s on device), so all three of `extra_release`,
 `extra read mailbox` and `extra wrote` come back false.
-[`../docs/NIGHT-ANALYSIS.md`](../docs/NIGHT-ANALYSIS.md) (the note above the
+[`../docs/investigations/NIGHT-ANALYSIS.md`](../docs/investigations/NIGHT-ANALYSIS.md) (the note above the
 "Build 92 content" heading) recorded this as a bench-budget artifact; the bench
 is kept for long-stoptime nightly use, which means raising the loop bound in
 the bench itself, not the command line.

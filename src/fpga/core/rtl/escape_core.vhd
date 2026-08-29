@@ -30,7 +30,7 @@ entity escape_core is
         -- shadow-off is 3.6-3.9x worse for sprite dropouts, because
         -- un-shadowing takes the video CPU from issuing fills on ~39% of its
         -- bus cycles to ~70% and the motion-object engine is the LOWEST
-        -- priority SDRAM client. docs/VSHAD3.md predicted exactly that.
+        -- priority SDRAM client. docs/investigations/VSHAD3.md predicted exactly that.
         --
         -- VSHAD3-112: the shadow is now HALF SIZE - 16 KB at 0x54000-0x57FFF,
         -- awidth 13 - which halves the BRAM cost while keeping the busier
@@ -40,7 +40,7 @@ entity escape_core is
         -- almost all of that in page 0x56000 - which is exactly where the
         -- video CPU's per-frame body goes (0x4052E: jsr $5673E / jsr $56120).
         -- Pages 0x50000/0x51000/0x52000 are read ZERO times during gameplay.
-        -- Method and numbers: docs/VSHAD3.md section 8. The generic is the
+        -- Method and numbers: docs/investigations/VSHAD3.md section 8. The generic is the
         -- COMPILE-TIME control: 1 =
         -- instantiate the 16 KB BRAM and its decode, 0 = remove it entirely.
         -- The RUNTIME control is the vshad3_on port below, which gates the
@@ -61,7 +61,7 @@ entity escape_core is
         -- before, speculative prefetch included.
         FASTPATH_EN : integer := 1;
         -- ZEROWAIT-92: extra-CPU vblank IRQ semantics. The 87-91 saga's
-        -- root cause (worldwake bench, docs/NIGHT-ANALYSIS.md): the real
+        -- root cause (worldwake bench, docs/investigations/NIGHT-ANALYSIS.md): the real
         -- extra ROM boots IRQ-MASKED into a multi-frame POST and its
         -- vblank ISR (0x908, no 360000 store) writes through RAM state
         -- that only runtime init makes valid - so a vblank latched across
@@ -319,7 +319,7 @@ entity escape_core is
         -- CADENCE-107: the game's OWN logic cadence, not a proxy for it.
         -- Every bus-cycle figure this core reports is a proxy: it says how
         -- fast the processors run, not whether the game met its deadline.
-        -- docs/PERF_CADENCE.md measures the original in the units that
+        -- docs/investigations/PERF_CADENCE.md measures the original in the units that
         -- matter - LOGIC UPDATES PER VIDEO FRAME, 0.9977 video / 0.9999
         -- world in MAME - by tapping the two re-entrancy flags each ISR
         -- writes: $50 to $16CCD4 (main/video) and $16CCD6 (extra/world)

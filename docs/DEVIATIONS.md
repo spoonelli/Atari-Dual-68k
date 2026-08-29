@@ -48,11 +48,14 @@ None of them are "wrong", but all of them are places where our timing can differ
 
 ## D. Known remaining gaps — measured, not yet closed
 
+Two of the original rows are **closed** and kept below (struck) so the history of the
+claim stays visible; D4 and D5 remain open.
+
 | # | Gap | Measured | Notes |
 |---|---|---|---|
-| D1 | **Video-CPU cadence tail** | median **0.973** vs MAME **0.9977**; p10 **0.703**, min **0.313** | The median is nearly right; the whole gap is in the tail. This is the perceived sluggishness in crowds. BUILD 109 (`VSHAD3_EN=0`) is the A/B against it. **Ruled out as causes:** CPU type — 68010 loop mode would save **0.0000%** here (ceiling over all `DBcc` loops 0.137%, vs a 2.5% gap), so the 0.9977 target is not too low on that account; and if anything the real board is *slower* than MAME, which models none of the ~0.8-1.9%/frame common-bus arbitration stalls. A constant few-percent term cannot produce a p10 of 0.703 anyway — the tail shape is the thing to explain. See [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md). |
+| D1 | ~~Video-CPU cadence tail~~ **CLOSED (MOPAIR-131 / MOPF2-132)** | Attract-loop period on device **5992–5994** frames vs MAME **6013** (**0.35%**, and in the *faster* direction); the demo scene MAME half-rates by 1.6% runs at **0.0%** drop on device; the heaviest crowd scene slows **23–34%** on device vs **39–51%** in MAME's longplay (same scroll-velocity estimator on both) | The pre-131 figures this row used to carry (median 0.973, p10 0.703) measured the single-bank MO engine, whose line-buffer fill was eating the bus the video CPU needed. The paired line buffers (MOPAIR-131) and the tile-1 prefetch lane (MOPF2-132) removed the contention; the residual slowdown is *smaller than MAME's own 68000 model*, consistent with the 68010 this cab runs. The core never runs faster than authentic. Walk-cycle cadence locks the frame rate: exactly **8 frames/phase** against all four reference-cab captures. Original tail analysis preserved in [`investigations/PERF_CADENCE.md`](investigations/PERF_CADENCE.md). |
 | D2 | World-CPU cadence | **0.984** vs MAME **0.9999** | Near-authentic. The original uses only 48% of its cycle budget; this gap is not worth chasing. |
-| D3 | **Sprite "blocks that did not write"** | Not reproduced by three independent detectors | Enclosed-black: **0 ours vs 11 MAME**. Hole rate indistinguishable across builds. Fetch-latency knee refuted three ways. **A sprite fetching wrong-but-plausibly-coloured data cannot be caught by any statistical shape test** — needs a scene dump of the exact failing moment. |
+| D3 | ~~Sprite "blocks that did not write"~~ **CLOSED (MOPAIR-131 / MOPF2-132)** | Crowd fixture missing pixels **527 → 0**; worst-case 16-line fetch latency **153 → 34**; device captures across two full playthroughs show no dropouts | The statistical detectors were right that the *shipped* builds' holes wouldn't reproduce on the bench — the failure needed real-traffic fetch latency. The schematic answer (SP-332 sheet 9: the real board fills **paired** line buffers, 2 px/DCLK) became MOPAIR-131; 71% of the remaining steady-state stall was one sprite's second tile, which the MOPF2-132 prefetch lane removed. Hunt record: [`investigations/MO_TILE_HOLES.md`](investigations/MO_TILE_HOLES.md). |
 | D4 | 33-pixel VS-MAME deviation at scroll 50/157 | Identical on 105/106/107 | Pre-existing, not a regression. Likely an un-wrapped `spr_right` in off-screen rejection. |
 | D5 | Hold-slack margin | Structurally thin on the playfield fetch-ring CDC (`vg_dataB[27] -> pfring0..3[27]`, launch gpll[2] 35.8 MHz, latch gpll[0] 7.159 MHz). Across six builds worst-case Fast-0C hold has ranged **+0.005 to +0.103 ns, and once to -0.054 (gate failure)** | Placement perturbation, not our logic: `BUILD_ID` alone has moved it **0.088 ns** (BUILD 108) and **0.157 ns** (BUILD 110). The margin is smaller than the perturbation sensitivity, so any edit re-rolls it. Root cause: gpll[2] is exactly 5x gpll[0] and the PLL outputs are phase-aligned, so every fifth SDRAM edge coincides with a pixel edge and the hold relationship is **0.002 ns** - hold is decided purely by routing skew. SDSCHED-73 groups all four PLL outputs synchronous on purpose, and this is its price. **BUILD 110 passes at +0.103 by luck, not by fix**, and the restored per-path reporter shows its *binding* path is not this row's CDC at all but **jt51 FM audio on a same-domain gpll[0] path** - the worst 20 at Fast 0C span just 0.103-0.124 and are 10 playfield CDC / 9 jt51 FM / 1 APF bridge. This is a **cluster at the floor across three unrelated subsystems**, all latching on gpll[0], not one thin path: BUILD 107's worst was TMS5220 speech, 108's the playfield CDC, 110's jt51 FM. A CDC-only `set_multicycle_path -hold` is proposed but NOT shipped and would not widen 110's margin, though it does remove ~4,200 paths from the lottery. **SHIPPABLE: hold passes all four corners (+0.295/+0.284/+0.124/+0.103), and the fast corners ARE the hold-worst corners** - fastest silicon at the voltage/temperature extremes, with Cyclone V OCV derating applied - so there is no operating condition worse for hold than the one signed off. Unlike setup, hold margin does not erode with droop or aging. The risk is the NEXT EDIT re-rolling placement negative (as `cpu-68010` did at -0.054, caught by the gate), not the device. Global levers costed and **rejected**: gpll[0] is already a promoted Global Clock (GCLK8) carrying **9,717 loads** vs 1,366 for gpll[2], so there is no promotion left; `set_max_skew` cannot re-route a fixed GCLK spine; and the cluster's position looks to be Quartus's hold-fixing stopping criterion rather than a design property - BUILD 110's binding path is internal to **vendored jt51 IP** (a shift stage into its own `altshift_taps`), so improving skew would just mean the fitter pads less. Treat +0.10 as this design's structural floor. **The gate failure has now been reproduced and its registers named:** all 8 negative paths over 4 endpoints were `vg_dataA/B[19] -> pfring0..3[19]` - the CDC family - with the per-endpoint TNS arithmetic closing exactly at both corners (-0.201, -0.118). So the CDC family is the one that actually loses (BUILD 108's worst path, and the entire failing set at -0.054), even though jt51 happens to bind in BUILD 110. That makes a payload-only `set_multicycle_path -hold` the one worthwhile change - it would have prevented the failure - but it will **not** raise the reported worst-case slack, and the `vg_done*` control paths must stay timed. Proposed, NOT applied; apply after alpha if at all. Full analysis, the stability proof, the control-path caveat, the corrected inference and the lever costing: [`TIMING.md`](TIMING.md). |
 
@@ -90,11 +93,22 @@ each justified by hand arithmetic and none by measurement:
 | `tas-atomic` (Pocket) | 160 | kept (48) | "5.81 µs worst" | **6.258 µs** (224 clk) | **PASS** — 80.1% of budget |
 
 Limit: MT48LC16M16A2, 8192 rows / 64 ms = **7.8125 µs** per row = 279.7 clocks at
-35.795455 MHz (27.936508 ns). The SDRAM domain is 35.795455 MHz on **both** platforms —
-verified from the PLL IP on each, not from comments: Pocket
-`src/fpga/core/mf_pllbase/mf_pllbase_0002.v` `output_clock_frequency2`, MiSTer
-`src/mister/rtl/pll/pll_0002.v` `output_clock_frequency1`. Both also use an identical
-+6984 ps chip clock. Different reference clocks (74.25 vs 50.0 MHz), same output.
+35.795455 MHz (27.936508 ns). When this reconciliation was done the SDRAM domain was
+35.795455 MHz on **both** platforms, verified from the PLL IP on each, not from
+comments: Pocket `src/fpga/core/mf_pllbase/mf_pllbase_0002.v`
+`output_clock_frequency2`, MiSTer `src/mister/rtl/pll/pll_0002.v`
+`output_clock_frequency1`. Both also used an identical +6984 ps chip clock.
+Different reference clocks (74.25 vs 50.0 MHz), same output.
+
+**Since LOWLAT-124 the platforms run different SDRAM clocks and the POLICY, not the
+number, is the shared thing.** The Pocket moved to the open-row controller
+(`sdram_openrow.v`) at 42.954546 MHz (exactly 6× pixel clock; the PLL IP above now
+reads 42.954546) and scales the same policy by the clock ratio: interval 160×1.2 = 192,
+defer cap 48×1.2 = 58, worst case 250 clocks = **5.82 µs = 74.5% of budget** — the same
+`INTERVAL + DEFER_CAP + 16`-shaped bound, re-derived at 23.280 ns/clock in the
+`core_top.v` controller-select comment. The MiSTer keeps `sdram_simple` at
+35.795455 MHz with 160/48 as tabled above. A future edit to either platform's
+interval must re-run `sim/run_sdram_refresh_tb.sh`, not inherit either number.
 
 **Everyone's arithmetic was wrong in the same safe-looking direction.** All three
 branches assumed `worst case = INTERVAL + DEFER_CAP`. Measured against the real FSM the
@@ -160,16 +174,32 @@ of the gap. Only a **bursty** adversary (`READ_PRESSURE=3`) — an undelayed ref
 followed by a maximally delayed one — reaches the true worst case. Two earlier, weaker
 adversaries are kept in the bench precisely because they are the trap.
 
-### F2. Still divergent — `mister-port` carries a live CLKFIX-106 regression
+### F2. Deliberately divergent — the SDRAM controller and its arbiter
 
-`origin/mister-port`'s `src/fpga/core/core_top.v:1080` still reads
-`psram #(.CLOCK_SPEED(85.909)) cram0`. That branch carries **both** project trees, and
-while the MiSTer build (`src/mister/Arcade-Escape.qsf` → `files.qip`, top `sys_top`)
-does not compile `core_top.v` or `psram.sv` at all, the **Pocket** build on that same
-branch (`src/fpga/ap_core.qsf:741`, `:813`) does. So the Pocket `.rbf` built from
-`mister-port` still has the BUILD 106 bug: 7-cycle PSRAM waits where 3 suffice, on every
-playfield fetch. Not fixed here — this branch is off `tas-atomic` — but it must be
-fixed before `mister-port` merges or ships anything Pocket-side.
+(An earlier F2 tracked a live CLKFIX-106 regression on the `mister-port` branch; that
+branch was deleted in the pre-release prune and the regression died with it. The
+current `mister` branch is a different lineage and never carried it.)
+
+The one place the platforms are *allowed* to differ is the SDRAM subsystem, because
+the bus topology genuinely differs: on the Pocket the playfield fetches from PSRAM,
+so SDRAM is shared by the CPUs and the motion objects only; on MiSTer the playfield
+is on the same SDRAM as everything else. Consequences, each measured on device:
+
+- **Controller**: Pocket runs `sdram_openrow` at 42.95 MHz (6× pixel clock);
+  MiSTer runs `sdram_simple` at 35.795 MHz (5×, phase-locked, near-zero-hold CDC
+  cluster — see [`TIMING.md`](TIMING.md)).
+- **Arbiter rank**: on MiSTer the playfield outranks the CPUs (fixed-sprite streaks
+  in builds ≤134 were PF scanline-deadline starvation behind CPU vblank-burst
+  traffic); on the Pocket no PF client exists on this bus, so the CPUs own the top.
+- **MO anti-starvation**: the Pocket's blanket "MO outranks speculative CPU fills"
+  rule is correct there (one-for-one interleave) and was catastrophic when ported
+  to MiSTer (builds 137/138 — with PF also on the bus it starved the CPUs to
+  blanking-only). MiSTer instead uses a one-shot age boost: an MO fetch that has
+  waited 32 SDRAM clocks jumps the queue once, then re-ages.
+
+The rule this section exists for: **a bus-priority change proven on one platform is
+a hypothesis, not a fix, on the other.** Port the intent, re-derive the mechanism
+against that platform's client set, and re-verify on device.
 
 ## G. How to keep this honest
 

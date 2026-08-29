@@ -88,7 +88,7 @@
 // row policy and shortening the waits at the same time would confound any
 // hardware A/B. They are PARAMETERS IN CLOCKS so a clock change scales them
 // explicitly rather than silently - which is the failure mode that put refresh
-// 6.6% outside JEDEC spec for months (docs/RETROSPECTIVE.md section 5).
+// 6.6% outside JEDEC spec for months (docs/investigations/RETROSPECTIVE.md section 5).
 //
 // tRAS(max) is the one new obligation an open-row policy takes on: a row may
 // not stay open longer than 120 us. Refresh precharges all banks and runs

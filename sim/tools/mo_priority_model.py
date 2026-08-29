@@ -6,7 +6,7 @@ reference/eprom.cpp (screen_update_eprom, ~lines 300-500) together with the
 MAME merge loop that consumes them.  It exists so the RTL compositor in
 src/fpga/core/core_top.v can be checked pixel-for-pixel against the spec.
 
-Pen formats (derived from MAME, see docs/mo_priority.md for the citation):
+Pen formats (derived from MAME, see docs/investigations/mo_priority.md for the citation):
 
   MO   pen = (mopriority << 12) | 0x100 | (mocolor << 4) | mopix
   PF   pen = 0x200 | (pfcolor << 4) | pfpix

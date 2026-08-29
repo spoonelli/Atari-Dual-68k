@@ -121,7 +121,7 @@ There is **no separate video clock**; video runs on `clk_sys_7159`.
 > `sdram_simple.v:110-118`. `sim/tb/tb_psram_timing.v` exists specifically to catch
 > this class of error, and carries two separate knobs (`DECLARED_CLOCK_MHZ`,
 > `ACTUAL_CLOCK_MHZ`) so a mismatch is a test case rather than a silent property.
-> The story is in [`RETROSPECTIVE.md`](RETROSPECTIVE.md) §5.
+> The story is in [`RETROSPECTIVE.md`](investigations/RETROSPECTIVE.md) §5.
 
 ### Frame rate
 
@@ -299,7 +299,7 @@ else and a fetch costs about 4 clocks, always.
 This core funnels all of it through one SDRAM, one PSRAM and a block-RAM budget that
 is fully spent. **That substitution — not the CPUs, not the sound chips — is the
 design.** Roughly three-quarters of the project's builds went into it
-([`LESSONS.md`](LESSONS.md)). Two consequences are structural and permanent:
+([`LESSONS.md`](investigations/LESSONS.md)). Two consequences are structural and permanent:
 
 - **Memory speed is part of the machine.** The game's frame architecture assumes
   ~4-clock fetches. Starving it does not produce a memory error; it produces behaviour
@@ -322,7 +322,7 @@ design.** Roughly three-quarters of the project's builds went into it
 
 The two external buses are genuinely separate, which is the point: it is the closest
 available approximation to the PCB's own topology. This was the `cram-gfx` contender
-in [`BAKEOFF.md`](BAKEOFF.md), and it won. Note that motion objects were *moved off*
+in [`BAKEOFF.md`](investigations/BAKEOFF.md), and it won. Note that motion objects were *moved off*
 CRAM onto SDRAM later (`core_top.v:1532-1533`) — CRAM now belongs to the playfield.
 
 On-FPGA memories in `escape_core.vhd` (all ×16 bits):
@@ -971,6 +971,23 @@ are blind to.
 side reads the other. Everything it does must fit in 456 clocks. Instantiated at
 `core_top.v:2378-2402`.
 
+> **Updated by MOPAIR-131 and MOPF2-132.** Two things below changed in build 131/132;
+> the scout/blitter split, the park queue, and the free-list channels are unchanged.
+>
+> 1. **The line buffers are banked even/odd** (four 256×20 M10Ks, not two 512-wide
+>    buffers) and the blitter writes a **pixel pair per clock** — matching SP-332
+>    sheet 9, where the real board's paired LB customs (MOL/MOR) fill two pixels per
+>    14 MHz DCLK. An 8-pixel tile row now blits in 4 cycles, so the per-tile floor in
+>    the arithmetic below is `max(4, round_trip/NCH)`: the engine is fetch-bound, and
+>    fetch latency, not blit rate, is the thing to protect.
+> 2. **The scout prefetches tile 1, not just tile 0** (MOPF2-132: a second prefetch
+>    lane, harvested by the blitter mid-sprite). Measured on real traffic, 71% of the
+>    remaining steady-state stall was one sprite's *second* tile; the lane took the
+>    crowd fixture's worst-case 16-line fetch latency from 153 to 34 and its missing
+>    pixels from 527 to 0.
+
+
+
 #### Data structures
 
 MO RAM (`0x3F2000-0x3F3FFF`) holds 4-word entries; SLIP pointers (cfg words
@@ -1032,8 +1049,9 @@ time and neither `link` nor `ent_count` advances mid-entry, so a yield costs cyc
 nothing else. Yielding `S_WAIT` as well was tried and cost 8,140 scout cycles a frame.
 
 **The BLITTER** (`state`, `escape_mob.v:224-237`) pops sprites from the queue head,
-decodes `w2` for colour, X and **priority** in `S_MATCH`, and paints tile rows 8 pixels
-at a time in `S_BLIT`. Priority stays blitter-side on purpose: only `w1`, which carries
+decodes `w2` for colour, X and **priority** in `S_MATCH`, and paints tile rows in
+`S_BLIT` — a pixel pair per clock into the even/odd banks since MOPAIR-131, so 4
+cycles per 8-pixel row. Priority stays blitter-side on purpose: only `w1`, which carries
 no priority information at all, moved to the scout, which is what makes the prefetch
 compatible with the priority decode landing where `escape_prio` expects it.
 
@@ -1241,7 +1259,7 @@ automaton — the C loop does the same. It is, however, the amplifier that turne
 dropped line-buffer write into a screen-wide artifact: when the *terminator* marker's
 write is refused, the stain runs from the marker's world-anchored left edge to the last
 screen column. That was the scrolling-dashes artifact
-([`GFX_DASH_ARTIFACT.md`](GFX_DASH_ARTIFACT.md)), fixed by §5.4's self-clearing readout.
+([`GFX_DASH_ARTIFACT.md`](investigations/GFX_DASH_ARTIFACT.md)), fixed by §5.4's self-clearing readout.
 
 > **Two status corrections.**
 >
@@ -1413,7 +1431,7 @@ with the gate, so the doc and the RTL differ here on purpose.
 | the memory controller | `src/fpga/core/rtl/sdram_simple.v` |
 | what the ROM image looks like | `support/build_rom.py` + `docs/ROMMAP.md` |
 | the MiSTer port | `git show origin/mister-port:docs/MISTER.md` |
-| how any of this was arrived at | [`RETROSPECTIVE.md`](RETROSPECTIVE.md), [`HISTORY.md`](HISTORY.md), [`LESSONS.md`](LESSONS.md) |
+| how any of this was arrived at | [`RETROSPECTIVE.md`](investigations/RETROSPECTIVE.md), [`HISTORY.md`](investigations/HISTORY.md), [`LESSONS.md`](investigations/LESSONS.md) |
 
 The codebase carries no `TODO`/`FIXME` markers in first-party RTL. It uses tagged
 change-IDs instead — `MOCHAN-4`, `MODEPTH-1/2`, `MOFETCH-1..5`, `MOPLACE-1/2/3`,

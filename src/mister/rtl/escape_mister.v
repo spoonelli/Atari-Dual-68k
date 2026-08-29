@@ -453,7 +453,7 @@ wire [3:0] mg_done_s = mg_done_s_q;
 // is unchanged. ramstyle=MLAB inside, so it takes no block RAM.
 //
 // STATUS: correct and transparent in simulation; its BENEFIT is not proven -
-// see the Pocket-side note and docs/MO_TILE_HOLES.md. Shipped so the MiSTer
+// see the Pocket-side note and docs/investigations/MO_TILE_HOLES.md. Shipped so the MiSTer
 // build stays in step with Pocket rather than silently diverging.
 wire [3:0]   moc_req;
 wire [95:0]  moc_addr;
@@ -960,7 +960,7 @@ always @(posedge clk_sys) begin
         // with ring[wp] hands cell 0 cell 1's data. Measured on Pocket
         // hardware: cols 0-1 went from 62-69 distinct colours down the column
         // to exactly one flat value, which is the signature of a constant
-        // wrong slot. See docs/MO_TILE_HOLES.md.
+        // wrong slot. See docs/investigations/MO_TILE_HOLES.md.
         case (pf_wp - 2'd1)
             2'd0: pf_show <= pfring0;  2'd1: pf_show <= pfring1;
             2'd2: pf_show <= pfring2;  default: pf_show <= pfring3;
@@ -1116,7 +1116,7 @@ wire [5:0]  act_color  = (pxn == 3'd0) ? a_color   : r_color;
 wire        act_opaque = (pxn == 3'd0) ? a_word[15]: r_opaque;
 wire        alpha_vis  = (pix != 2'b00) || act_opaque;
 
-// MO / playfield priority comparator (docs/mo_priority.md)
+// MO / playfield priority comparator (docs/investigations/mo_priority.md)
 wire        pr_mo_win, pr_shade, pr_m7, pr_pfm, pr_forcemc0;
 wire [10:0] pr_pen;
 escape_prio uprio (
@@ -1321,7 +1321,7 @@ wire [3:0] p2_btn = {p2_duck | p2_bomb, 1'b0, p2_fire | p2_bomb, p2_jump | p2_bo
 //       property of this ROM's access pattern, not of the memory system.
 //       94.5% of main-CPU traffic in that range lands in 0x54000-0x57FFF and
 //       pages 0x50000/0x51000/0x52000 are read zero times during gameplay
-//       (docs/VSHAD3.md section 8), and the CPUs run the same code here.
+//       (docs/investigations/VSHAD3.md section 8), and the CPUs run the same code here.
 //
 //   CPU_TYPE = 1   68010, the dedicated cabinet. Both schematic sets specify
 //       U68010 and the owner's board is a photographed MC68010P8; the JAMMA

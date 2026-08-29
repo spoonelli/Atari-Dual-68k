@@ -9,6 +9,14 @@ Everything below is either a schematic citation, a measurement with the command
 that produced it, or an explicitly-labelled model. Where a claim is inferred, it
 says so. Where it needs the physical board, it says that too.
 
+> **2026-08 status.** The "cadence tail" this doc repeatedly references (median
+> 0.973, p10 0.703) was the motivating symptom when it was written. It has since
+> been **closed** — the cause was motion-object line-buffer fill contention, not
+> anything CPU-side, fixed by MOPAIR-131/MOPF2-132; current device-vs-MAME
+> figures are in [`DEVIATIONS.md`](DEVIATIONS.md) §D1. The analyses here (loop
+> mode is worth 0.0000%, MAME models no bus arbitration, the two-boards answer)
+> are measurements about the *CPUs* and stand unchanged.
+
 > **2026-08-24 — Question 1 is answered: the board is a 68010.** The owner
 > photographed the part on his dedicated-cabinet board: **`MC68010P8`**,
 > Motorola, date code **`A71R8813`**. The schematic agreed all along. §1.1 was
@@ -89,7 +97,7 @@ Co-Authored-By: Claude Fable 5
 ```
 
 That commit is the origin of every downstream restatement (`README.md`,
-`docs/ARCHITECTURE.md:87`, `docs/HISTORY.md:12`, the two `escape_core.vhd`
+`docs/ARCHITECTURE.md:87`, `docs/investigations/HISTORY.md:12`, the two `escape_core.vhd`
 comments, and the `DEVIATIONS.md` C5 row written on top of them). All have now
 been corrected.
 
@@ -108,7 +116,7 @@ regardless of the schematic label" is a claim about *all* production, from a
 sample of one board, and `DEVIATIONS.md` C5's framing ("the one recorded case
 where MAME wins") presents a contested point as settled.
 
-Worse, `docs/HISTORY.md:12` recorded it as "**photo-verified**" — a photograph
+Worse, `docs/investigations/HISTORY.md:12` recorded it as "**photo-verified**" — a photograph
 that did not exist. That single word is what made the claim look unassailable
 for two weeks.
 
@@ -326,7 +334,7 @@ Loop mode cannot help it at all, regardless of what executes.
 **Dynamic occupancy — the number that settles it.** Two independent methods,
 both over 60 s / 3,596 frames of scripted one-player level-1 play, both scoped to
 the video CPU's per-frame logic body (bracketed by the `$50`/`$00` writes to
-`$16CCD4`, per `docs/PERF_CADENCE.md`):
+`$16CCD4`, per `docs/investigations/PERF_CADENCE.md`):
 
 *Method A — per-site fetch counting.* Only **two** of the 79 DBcc sites execute
 inside the body at all: `$001308` (disp `-20`, a 9-word body) and `$002978`
@@ -682,7 +690,7 @@ shared RAM. 73.6 % of the video CPU's COMRAM traffic falls inside its logic body
 
 Sanity check against the project's own published figures: this run's mean logic
 bodies are 69,452 clocks (video) and 55,332 (world), against
-`docs/PERF_CADENCE.md`'s 73,724 / 57,376 for 1-player play. Consistent.
+`docs/investigations/PERF_CADENCE.md`'s 73,724 / 57,376 for 1-player play. Consistent.
 
 **The model** — and it *is* a model, flagged as such. A frame is 119,318 CPU
 clocks. Treating each common-bus access as occupying the bus for one 68000 bus
@@ -717,7 +725,7 @@ Yes, it is buildable — that was never the question. The costs:
 **M10K: zero saving.** The shared RAM is 32768 × 16 = 524,288 bits. On Cyclone V
 the M10K's usable depth is set by width mode, not by port count; true-dual-port
 does not halve capacity. At the project's own calibration of 8,192 usable bits
-per block (`docs/VSHAD3.md:103`), it is **64 blocks either way**. The array is
+per block (`docs/investigations/VSHAD3.md:103`), it is **64 blocks either way**. The array is
 depth-limited, not port-limited. Single-porting **does not free a single block**
 on the constraint that actually binds this design. The only saving is ALM-scale:
 the ~36 collision-bypass flops in `dpram_bytelane_syn` plus ~29 interlock flops.
@@ -862,7 +870,7 @@ common-bus access rates.
 (recursive descent under-approximates — but the dynamic result makes it moot,
 since executing any of them would have taken vector 4 and killed the CPU); the
 M10K block counts (no Quartus fitter report is committed to this repo — the
-283/308 figure exists only as prose in `docs/VSHAD3.md`); the collision counts in
+283/308 figure exists only as prose in `docs/investigations/VSHAD3.md`); the collision counts in
 §2.3, which are arithmetic on measured rates, not observed collisions.
 
 **Settled by the physical boards:** there are **two** variants, and both are

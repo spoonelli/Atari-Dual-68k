@@ -37,7 +37,7 @@
 //         which is the region escape_core actually maps it to. Its locality is
 //         therefore assumed equal to the video CPU's, not measured.
 //  MODELLED - CPU fill RATE. VFILL_PCT/EFILL_PCT set what fraction of 4-clock
-//         bus cycles produce an SDRAM fill. docs/VSHAD3.md measures ~39% with
+//         bus cycles produce an SDRAM fill. docs/investigations/VSHAD3.md measures ~39% with
 //         shadows on and ~70% with them off; both are selectable.
 //
 // THE CPU LOCALITY CAVEAT, stated plainly. The captured CPU trace covers early

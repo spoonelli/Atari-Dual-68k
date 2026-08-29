@@ -71,7 +71,7 @@ module tb_mob_perf;
     initial begin
         $readmemh("sim/work/game_mo.hex", momem);
         $readmemh("sim/work/game_cfg.hex", cfgmem);
-        // fixture guard: docs/LESSONS.md - $readmemh failure is not an error,
+        // fixture guard: docs/investigations/LESSONS.md - $readmemh failure is not an error,
         // and an all-zero MO fixture silently renders a blank layer.
         nz_code = 0; nz_slip = 0;
         for(gi = 0; gi < 1024; gi = gi + 1)

@@ -162,14 +162,18 @@ Reusable blocks (already in the System 1 core unless noted):
 
 The roadmap below was written before hardware bring-up; every step of it is
 now **done** — the core boots, renders all three video layers, speaks through
-the full JSA-I sound board, and plays. Current work is polish: sprite
-bandwidth/placement details, speech phrase tails, EEPROM persistence via the
-Pocket save system, and release packaging (`spoonelli.eprom` clean build).
+the full JSA-I sound board, and plays. The polish items that followed are done
+too: sprite bandwidth (MOPAIR-131/MOPF2-132 — see
+[`PIPELINES.md`](PIPELINES.md) §5.4), EEPROM persistence via the Pocket save
+system ([`EEPROM_SAVE.md`](EEPROM_SAVE.md)), and release packaging as
+`spoonelli.eprom` at version 0.1.0. Accuracy status lives in
+[`DEVIATIONS.md`](DEVIATIONS.md); the MiSTer port in
+[`MISTER.md`](MISTER.md).
 
 The engineering history — what the 150+ builds taught, which instruments
 cracked which bugs, and what a veteran would have done from day one — is
-distilled in [`LESSONS.md`](LESSONS.md). The on-device debug tooling
-(six forensics HUD pages, crash latches, freeze rescue, scene
+distilled in [`LESSONS.md`](investigations/LESSONS.md). The on-device debug tooling
+(seven forensics HUD pages, crash latches, freeze rescue, scene
 replay benches) is a permanent part of **every** build, release included —
 it is hidden by default and reachable with L1, not compiled out. The CRAM
 self-test checksums were retired at TASLOCK-102 and the sim benches cover

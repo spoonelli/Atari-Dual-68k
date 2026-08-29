@@ -9,7 +9,7 @@
 --            (search "TASLOCK-102").  No logic or timing change.
 --
 -- Vendored rather than patched in the submodule because submodule edits never
--- reach CI (docs/LESSONS.md).  The submodule's TG68K.vhd and
+-- reach CI (docs/investigations/LESSONS.md).  The submodule's TG68K.vhd and
 -- TG68KdotC_Kernel.vhd are excluded from src/fpga/ap_core.qsf and from the
 -- sim/*.sh file lists in favour of these copies.  If the submodule is ever
 -- updated, re-vendor both files and re-apply the two marked additions.

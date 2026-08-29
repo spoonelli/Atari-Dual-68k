@@ -19,7 +19,7 @@ and, into sim/build/:
 
 The scene changes BETWEEN FRAMES on purpose.  A line buffer that keeps stale
 pixels can only be caught by a scene where something moves, and the artifact
-this bench was written for toggles at 2-frame parity (docs/GFX_DASH_ARTIFACT.md
+this bench was written for toggles at 2-frame parity (docs/investigations/GFX_DASH_ARTIFACT.md
 sections 3c and 7), which needs at least three frames to see.
 
 RTL contract this file encodes (src/fpga/core/rtl/escape_mob.v)
@@ -141,7 +141,7 @@ class Sprite:
 # mode needs a START run with NO end bit in it, i.e. a pen-2 body terminated by
 # a SEPARATE pen-6/pen-4 column.  Losing that terminator is what turns a
 # bounded stain into a stain that runs to the last screen column, which is the
-# measured signature in docs/GFX_DASH_ARTIFACT.md section 3(c).
+# measured signature in docs/investigations/GFX_DASH_ARTIFACT.md section 3(c).
 #
 #   A  solid pen-6 marker, static           -> silhouette + one pixel
 #   B  pen-2-only marker, static            -> to the end of the line (legit)
@@ -198,7 +198,7 @@ def scene(frame):
     #    pixel live on frame 3 - it re-displays it AND refuses the marker's
     #    write - so the terminator never lands, and the stain runs from the
     #    marker's world-anchored left edge to the last screen column. That is
-    #    the shape measured on hardware in docs/GFX_DASH_ARTIFACT.md section 3c.
+    #    the shape measured on hardware in docs/investigations/GFX_DASH_ARTIFACT.md section 3c.
     #    N's rows are chosen so that the LAST line it writes in each of the
     #    two line buffers is the FIRST line the marker will write there.
     #    Anything else and the marker's own earlier line overwrites the
