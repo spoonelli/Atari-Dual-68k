@@ -82,10 +82,32 @@ Release-time checklist: upload `.rbf` + `.mra` as release assets, run
 every db URL's md5 against the db (a stale CDN copy can lag a clobber by
 ~1 minute).
 
-**Not applicable:** distribution via the official `MiSTer-devel` repos or
-the default `update_all` database list — those are curated collections;
-a custom db is the standard route for an independent core and works with
-stock tooling.
+**Roadmap — official MiSTer-devel adoption (the zero-friction tier).**
+`update_all`'s menu is a curated list (official distribution, JTCORES,
+Coin-Op Collection); independent cores cannot inject themselves into it,
+so the custom db above is the correct interim. The one path to
+zero-user-effort distribution is adoption into the MiSTer-devel org as
+`Arcade-Escape_MiSTer`, after which the official distribution aggregator
+carries the core to every stock `update_all` run automatically.
+
+Plan (deliberately sequenced after `mister-v0.1.x` stabilizes in the
+field):
+
+1. Accumulate device mileage on the tagged releases; keep the issue
+   tracker responsive.
+2. Prepare the conformance restructuring: the official aggregator
+   collects from a `releases/` folder committed in the repo (dated
+   `.rbf` files), not from GitHub Releases — a staging branch can hold
+   that layout without disturbing this repo's release flow.
+3. Submit to the MiSTer team with the accuracy record attached
+   (`DEVIATIONS.md`, the measured benchmarks, `NOTICE.md` licensing
+   inventory) — the review criteria are GPL sources, hardware maturity,
+   proper `.mra`, no ROM distribution, and an active maintainer.
+4. On adoption, the org repo becomes the MiSTer distribution point;
+   the custom db is then retired with a final db update that leaves the
+   Downloader-managed files in place for the official db to take over.
+
+Until then: the custom db is the supported auto-update route.
 
 ## Division of labour
 
