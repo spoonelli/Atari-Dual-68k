@@ -3,8 +3,8 @@
 An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68000 board
 whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**).
 
-The core implements the **`eprom` configuration only** — two 68000s and JSA-I
-audio. See [Other games on this hardware](#other-games-on-this-hardware).
+The core implements the **`eprom` configuration only** — two 68000-family
+CPUs (68010 by default, 68000 selectable) and JSA-I audio. See [Other games on this hardware](#other-games-on-this-hardware).
 
 > Built for the [Analogue Pocket](https://www.analogue.co/pocket) via the openFPGA framework.
 > This project ships **no ROMs**. You must supply your own dumps.
