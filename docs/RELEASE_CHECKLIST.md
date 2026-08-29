@@ -27,8 +27,8 @@ Two sequencing facts drive the order:
 | A3 | Single combined history rewrite (marquee blob + `output/` dirs) | BLOCKED | Rewritten mirror is prepared and verified; force-push needs approval. Pre-purge backup: `Documents/Lloyd Projects/atari-dual68k-prepurge-backup.bundle`. |
 | A4 | `input.json` vs RTL audit — **all** buttons, **both** players | **DONE (v0.1.0 prep)** | Full sweep: A/B/X/Y/Select map to cont1_key 4/5/6/7/14 exactly as the RTL consumes them, both controller blocks declared, Start-shares-Jump matches the schematic, shoulders intentionally unmapped (HUD-only). No mismatches found beyond the long-fixed P2 bomb. |
 | A5 | Debug HUD gated behind a menu toggle, default off | **DONE (build 114)** | `interact.json` id 38 'Developer HUD', default unchecked. With it clear, `diag_on` is forced low, so L1/R1/R/L2 do nothing and no debug path reaches video. RTL still compiled in -- see **section F**; the `DIAG_EN` compile-time half remains open. |
-| A6 | Save-path device test on real hardware | TODO | Gates the alpha/RC tag. |
-| A7 | Clean-boot look on real hardware | TODO | Gates the alpha/RC tag. |
+| A6 | Save-path device test on real hardware | **DONE (v0.1.0)** | Owner-verified 2026-08-29: saves carried over from the `spoonelli.ataridual68k` dev install to `spoonelli.eprom`. |
+| A7 | Clean-boot look on real hardware | **DONE (v0.1.0)** | Owner-blessed 2026-08-29 on the RC2 package (BUILD_ID 35); v0.1.0 tagged and released. |
 | A8 | **Tile-shaped holes in motion objects** | TODO | **The one consistent blocker to alpha.** Sprites drawn correctly but with a rectangular chunk missing. Field evidence, ruled-out causes and the diagnostic plan: [`MO_TILE_HOLES.md`](investigations/MO_TILE_HOLES.md). Frame 5629 vs 5636 (same sprite, wrong then right) is the key pair. |
 
 ## B. Identity, metadata, and store presence
