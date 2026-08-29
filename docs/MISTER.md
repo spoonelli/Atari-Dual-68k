@@ -20,7 +20,11 @@ a bug in `src/fpga/core/rtl/`, both platforms get it.
 > `DEVIATIONS.md` §F2). The history sections below are kept as the port
 > record; where they disagree with this note, this note wins.
 >
-> **Gates for the first tagged MiSTer release** (owner-set, 2026-08-29):
+> **Released: [`mister-v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.0)**
+> (2026-08-29, BUILD 142, `escape_20260829.rbf`) — both gates below were met:
+> the boot splash is retired (142) and the rbf naming landed in CI (141).
+>
+> **Gates for the first tagged MiSTer release** (owner-set, 2026-08-29, now met):
 >
 > 1. **Retire the boot splash.** It exists as the debug build-identity check
 >    while field-testing; for release, credits become menu/button-only (the
