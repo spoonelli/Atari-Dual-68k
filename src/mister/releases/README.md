@@ -33,10 +33,11 @@ field-testing builds.
 
 ## First boot
 
-A splash page shows for a few seconds at core load — check that its
-**MISTER BUILD number** matches the build you installed. It is the only
-guard against a cached or stale `.rbf`, and it has caught that more than
-once.
+The machine boots clean. To confirm which build is running, open **Show
+Credits** in the OSD (or press the Credits button / keyboard **C**) — the
+**MISTER BUILD number** is on page 1. Check it matches the build you
+installed; it is the only guard against a cached or stale `.rbf`, and it
+has caught that more than once.
 
 ## Controls
 
@@ -64,7 +65,7 @@ db_url = 'https://github.com/spoonelli/Atari-Dual-68k/releases/download/mister-d
 
 ## Reporting problems
 
-Include the splash's build number (a photo of the splash is ideal) and a
+Include the build number from the credits page (a photo is ideal) and a
 short video if the issue is visual. The full port record — what is verified
 on hardware, known behaviors, and how the SDRAM arrangement differs from
 the Pocket's — lives in
