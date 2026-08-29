@@ -210,6 +210,28 @@ module tb_mister_moarb;
         $display("  demand-CPU grants    : %0d", cpu_grants);
         $display("  MO grants (owner)    : %0d", mo_grants);
 
+        // ---- demand-fetch standoff probe (the 146 watchdog-reset bug) ----
+        // With the crowd forces still hot, raise a demand ROM fetch and
+        // require service within one scanline. 146 deadlocked here whenever
+        // mo_turn=1: MO deferred to the demand, the demand deferred to the
+        // fastpath's want, the fastpath was blocked by the turn - and only
+        // an MO grant clears the turn. The game watchdog turned that into a
+        // reset loop on hardware. This probe would have caught it pre-build.
+        crowd_on = 1;
+        force dut.core_rom_req_s = 1'b1;
+        force dut.core_rom_addr  = 24'h000200;
+        begin : demand_probe
+            integer dwait;
+            dwait = 0;
+            while (dut.core_rom_ack_85 !== 1'b1 && dwait < LINE_CLKS) begin
+                @(posedge clk_sdram); dwait = dwait + 1;
+            end
+            $display("  demand fetch served in %0d clks (limit %0d)", dwait, LINE_CLKS);
+            want(dut.core_rom_ack_85 === 1'b1, "demand fetch not deadlocked under crowd");
+        end
+        release dut.core_rom_req_s;
+        crowd_on = 0;
+
         // scoring gates: a policy must BOTH fill a dense line AND keep the
         // fastpath alive. 144's numbers are the recorded baseline; these
         // bounds catch only outright pathology (blanket-rule-style collapse).
