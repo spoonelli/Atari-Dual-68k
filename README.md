@@ -1,6 +1,6 @@
 # Atari Dual 68k — openFPGA core (Analogue Pocket)
 
-An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68000 board
+An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68010 board
 whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**).
 
 The core implements the **`eprom` configuration only** — two 68000-family
@@ -12,7 +12,7 @@ CPUs (68010 by default, 68000 selectable) and JSA-I audio. See [Other games on t
 ## Status
 
 🕹️ **The game is playable.** From a user-supplied ROM, the core boots the real
-dual-68000 program, runs the full attract cycle (story, announcer speech, high
+dual-CPU program, runs the full attract cycle (story, announcer speech, high
 scores, demo), takes coins, starts, and plays: Jake walks, robots swarm, the
 JSA-I sound board delivers music, effects and TMS5220 speech in real time.
 Development continues on visual polish and final timing feel.
@@ -22,7 +22,7 @@ Development continues on visual polish and final timing feel.
 | Build (CI, Quartus in Docker) | ✅ ~15 min per push, `bitstream.rbf_r` artifact |
 | Native simulation (GHDL + iverilog) | ✅ boot, march, JSA, speech-chip and sprite-scene replay benches |
 | ROM loading (data slot → SDRAM + CRAM + BRAM shadows) | ✅ verified, self-checked |
-| Dual 68000s + shared RAM + mailbox handshake | ✅ genuinely concurrent on hardware |
+| Dual 68010s + shared RAM + mailbox handshake | ✅ genuinely concurrent on hardware |
 | Hot-code BRAM shadows + speculative prefetch | ✅ shipped — shadow hit rate 61% video / 37% extra CPU |
 | Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay — crowd, door, spawn-flash and factory-map fixtures all at 100.0000% agreement *and* coverage, draw order proven order-compatible |
 | Sound (JSA-I: 6502 + YM2151 + **TMS5220 speech**) | ✅ full pipeline, bench-verified; no audio bus-trace diff vs MAME; liveness watchdog self-heals a wedged sound CPU |
@@ -77,7 +77,7 @@ others — the rows below describe what they would require, not partial support.
 Two structural differences make the Klax and Guts prototypes future work
 rather than near-misses:
 
-- **They are single-CPU.** The second 68000 is `eprom`/`eprom2` only
+- **They are single-CPU.** The second 68000-family CPU is `eprom`/`eprom2` only
   (`docs/ARCHITECTURE.md`). The shared-RAM mailbox, the TAS interlock and the
   dual-CPU arbitration — most of this project's hard-won machinery — simply go
   unused. So they are *simpler* than Escape, but they exercise a configuration
@@ -392,7 +392,7 @@ Thanks: LMSS, DJS, LCS, TBPL, EG
   fix, provenance noted in the file header).
 - **Tobias Gubener (TobiFlex)** for the **TG68K.C** 68000 soft-CPU core (LGPL-3.0,
   with patches by MikeJ, Till Harbaum, Rok Krajnc and others) — both of this core's
-  68000s are TG68K instances, via the System 1 tree.
+  68ks are TG68K instances, via the System 1 tree.
 - **Daniel Wallner**, **Mike Johnson (fpgaarcade)**, **Wolfgang Scherr** and
   **Morten Leikvoll** for the **T65** 6502 core (BSD-style licence, via OpenCores /
   the System 1 tree), reused for the JSA-I sound board's 6502. T65's licence carries
