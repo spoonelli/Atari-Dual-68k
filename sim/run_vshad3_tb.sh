@@ -25,7 +25,7 @@
 # A build that ignored the toggle fails row 2. A build that kept the old 32 KB
 # range fails row 3. A build where the decodes diverged fails row 1 on the
 # >=6.000 "served by neither" trip. There is no single behaviour that satisfies
-# all four, which is the point - see docs/VSHAD3.md section 8.4, including the
+# all four, which is the point - see docs/investigations/VSHAD3.md section 8.4, including the
 # mutation test that confirmed the gate catches a real divergence.
 #
 # Each row also asserts WHERE the loop ran (the bench reports bus cycles per

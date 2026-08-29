@@ -20,7 +20,7 @@
 // What is NOT benched here: everything else in core_top.v's compositor - the
 // MO/playfield priority merge (that is sim/run_prio_tb.sh and tb_mob.v), the
 // colour-RAM address arithmetic, the alpha overlay, and the one-pixel
-// alignment between the stain and the playfield that docs/mo_priority.md
+// alignment between the stain and the playfield that docs/investigations/mo_priority.md
 // leaves open. This bench says the stain covers the right COLUMNS of the right
 // SCANLINES; it says nothing about which palette entry they land in.
 //

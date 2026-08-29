@@ -202,7 +202,7 @@ target: [`DEVIATIONS.md`](DEVIATIONS.md).
 The core boots clean. From build 114 the diagnostic layer is behind
 **Developer HUD** in the core's menu (default off); tick it first, or L1 does
 nothing. With it on, press **L1** to bring up the on-screen HUD; press it
-again to hide it. **R1** cycles 6 pages (0–5):
+again to hide it. **R1** cycles 7 pages (0–6):
 
 | Page | Shows |
 |---|---|
@@ -212,6 +212,7 @@ again to hide it. **R1** cycles 6 pages (0–5):
 | 3 | Engine window: actor-table head, game mode bytes |
 | 4 | `apply_stain` diagnostic |
 | 5 | **Cadence** — the performance figure described above |
+| 6 | **MO telemetry** (MOTEL-129): line-end truncation count + worst 16-line fetch latency, with the frame counter |
 
 A small cyan **build number** sits in the bottom-right corner at all times,
 HUD or no HUD. Check it matches the build you installed — it is the only guard

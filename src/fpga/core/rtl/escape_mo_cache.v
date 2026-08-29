@@ -1,7 +1,7 @@
 // escape_mo_cache: a shared tile-row cache in front of the motion-object gfx
 // fetch channels.
 //
-// WHY. The tile-hole artifact (docs/MO_TILE_HOLES.md) appears at PEAK sprite
+// WHY. The tile-hole artifact (docs/investigations/MO_TILE_HOLES.md) appears at PEAK sprite
 // load - an explosion, or a crowd - and peak load on this game means MANY
 // COPIES OF THE SAME SPRITE. A dozen identical robots on one scanline fetch
 // the identical tile row a dozen times, each one a separate SDRAM transaction

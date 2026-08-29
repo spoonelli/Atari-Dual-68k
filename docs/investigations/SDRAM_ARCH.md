@@ -199,7 +199,7 @@ insensitive to the one thing that was assumed rather than measured.**
 ### 2.4 How hard is the extra CPU actually pushing? — a real qualification
 
 The one input with genuine uncertainty is `EFILL_PCT`, how often the extra CPU
-needs an SDRAM fill. 70% comes from `docs/VSHAD3.md`'s no-shadow figure, but
+needs an SDRAM fill. 70% comes from `docs/investigations/VSHAD3.md`'s no-shadow figure, but
 `docs/DEVIATIONS.md` D2 notes the world CPU *"uses only 48% of its cycle
 budget"*, so an idler extra CPU is plausible. Swept, against the baseline
 controller:
@@ -293,7 +293,7 @@ and are **left alone deliberately** — this module already changes the row
 policy, and shortening the waits at the same time would confound a hardware
 A/B. They are parameters *in clocks* so a clock change scales them explicitly
 rather than silently; that silent-scaling failure is what put refresh 6.6%
-outside JEDEC spec for months (`docs/RETROSPECTIVE.md` §5).
+outside JEDEC spec for months (`docs/investigations/RETROSPECTIVE.md` §5).
 
 At this clock the row minimums are **nearly free** (1–2 clocks). That is why
 open-row has so much timing headroom here — and it shrinks if the clock rises.

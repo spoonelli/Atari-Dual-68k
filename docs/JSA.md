@@ -110,40 +110,52 @@ CT2 unused on JSA-I.
 | `0x360031` (W, **lower byte**, D7-D0) | main→sound | command latch write; sets input-buffer-full, 6502 NMI |
 | `0x260031` (R, **lower byte**, D7-D0) | sound→main | response latch read; clears output-buffer-full and /SINT. (Byte at the odd address ⇒ D7-D0 lane — earlier "upper byte" notes were wrong; matches `docs/ARCHITECTURE.md` "260030 R D0-D7") |
 | `0x360020` (W, any data) | — | sound reset: pulses the 6502 reset, clears both latch-full flags, timed IRQ, WRIO/MIX/bank |
-| `0x260010` (R) | — | D2 = **/output-buffer-full** (0 = response waiting @260030); D3 = **/input-buffer-full** (0 = command still pending @360030). escape_core's current stub drives both 1 (idle) — matches "empty" |
+| `0x260010` (R) | — | D2 = **/output-buffer-full** (0 = response waiting @260030); D3 = **/input-buffer-full** (0 = command still pending @360030) |
 
 `escape_jsa` exposes this as latch-level ports (`cmd_data/cmd_we`,
-`resp_data/resp_rd`, `cmd_full/resp_full`, `snd_irq`, `snd_res`); core_top (or
-escape_core once the stub is replaced) drives them from the 68k bus decode.
+`resp_data/resp_rd`, `cmd_full/resp_full`, `snd_irq`, `snd_res`), driven from
+the 68k bus decode in `escape_core` (fully wired — an early stub that idled the
+flags is long gone).
 Schematic note: on the real board these travel over the serial **SCOM** link
 (sheet 2); we model the latch semantics directly, which is what the programs
 observe.
 
 ## Program ROM bus
 
-Same request/ack protocol as `escape_core`: `rom_addr` (combined-image byte
-address, here always `0x100000 + resolved 16-bit offset`, even), `rom_req`
-raised and held until `rom_ack`, data in `rom_data[31:16]` = word at addr,
-`[15:0]` = word at addr|1 ("+2" only valid when addr word-index is even — same
-SDRAM col|1 burst rule as escape_core). The 6502 is stalled by gating its
-clock-enable during a fetch; a last-word + prefetch-word cache means the
-even/odd byte pair of one word costs one SDRAM transaction and sequential code
-mostly runs from the cached pair. ROM bytes are big-endian in the 16-bit image
-words: even byte = bits 15:8.
+The 6502 exposes the same request/ack protocol as `escape_core`: `rom_addr`
+(combined-image byte address, here always `0x100000 + resolved 16-bit offset`,
+even), `rom_req` raised and held until `rom_ack`, data in `rom_data[31:16]` =
+word at addr, `[15:0]` = word at addr|1. ROM bytes are big-endian in the 16-bit
+image words: even byte = bits 15:8.
 
-core_top integration will need a third client on the ROM arbiter (or a port on
-escape_core's) serving the `0x100000` window; the 6502's ~0.9 MB/s worst-case
-fetch rate is negligible next to the 68k pair.
+**Since v63 those requests never reach SDRAM.** `escape_core` serves the
+`0x100000` window from a dedicated 32 KB dual-port BRAM shadow (`jshad`,
+`escape_core.vhd` — write side filled during ROM download, gated by
+`jshad_we` on the `0x10xxxx` address range), so 6502 fetches cost BRAM
+latency, add no SDRAM traffic, and cannot be starved by the 68k pair. The
+last-word + prefetch-word cache in `escape_jsa` still smooths sequential code.
+No third arbiter client exists or is needed.
 
-## TMS5220 stub — wiring point
+## Command-latch watchdog (JSAWDG-133)
 
-`escape_jsa` latches everything a real TMS5220 needs and outputs silence:
-`tms_data` (last /VOICE byte), `tms_ws_n`/`tms_rs_n` (WRIO D1/D2), `tms_squeak`
-(WRIO D3). To wire a real core later: feed those + a 5220 clock enable
-(3.579545×2/11 or /9 MHz per D3) into the core, drive /RDIO D4 from its /READY,
-mix its signed output at gain `mix[7:6]/3 × CT1` into both channels, replacing
-the constant-silence branch in the mixer. `rtl/atarisys1/TMS5220.vhd` in the
-System 1 tree is a candidate implementation.
+One field failure (unreproducible; survived soft reset) left the 6502 wedged
+mid-tune with the YM2151 droning at ~64.5 Hz and the command latch stuck full.
+`escape_core` now watches CMD_FULL: if the 6502 has not consumed a command for
+**0.75 s** (5,400,000 pixel clocks), it pulses the existing `snd_res` path —
+the same reset the 68k can issue at `0x360020` — and the sound program
+recovers on its own. Diagnostics ride the HUD debug bus: the wedge count in
+`dbg_jsa_link[11:8]`, and the 6502 PC frozen at the *first* wedge in
+`dbg_jsa_pc` so the faulting address survives the self-heal.
+
+## TMS5220 speech — real core, wired
+
+`escape_jsa` instantiates the real TMS5220 model (d18c7db's MAME-faithful
+core, `TMS5220.vhd` — see `NOTICE.md` for provenance): `tms_data` (last
+/VOICE byte), `tms_ws_n`/`tms_rs_n` (WRIO D1/D2), and the WRIO D3 "squeak"
+clock select (3.579545×2/11 vs /9 MHz) drive it; /RDIO D4 reads back its real
+/READY; its signed output mixes at gain `mix[7:6]/3 × CT1` into both
+channels. An earlier stub that latched the interface and output silence is
+gone (LANE3u).
 
 ## GHDL simulation vs jt51 (mixed language)
 

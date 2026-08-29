@@ -10,10 +10,10 @@
 // MOPRI-1: it also drives escape_prio.v with the real MO and playfield fields
 // and logs every priority decision to sim/build/mob_prio.txt, which
 // sim/tools/check_mob_prio.py replays through the reference model
-// (sim/tools/mo_priority_model.py). See docs/mo_priority.md.
+// (sim/tools/mo_priority_model.py). See docs/investigations/mo_priority.md.
 //
 // The other question this answers: where do in-game sprites actually land under
-// real nonzero scroll? See docs/mo_placement.md - the engine was building each
+// real nonzero scroll? See docs/investigations/mo_placement.md - the engine was building each
 // line for ly+1 and letting the LAST list entry win overlaps instead of the
 // first. Both are fixed; what remains is fetch-budget truncation.
 //
@@ -33,7 +33,7 @@ module tb_mob;
     // Why this exists: with a constant GFX_LAT every channel completes in
     // issue order with identical timing, so a defect that needs completions to
     // arrive out of the order the consumer assumes CANNOT occur here. That is
-    // the shape of the tile-hole artifact seen on device (docs/MO_TILE_HOLES.md,
+    // the shape of the tile-hole artifact seen on device (docs/investigations/MO_TILE_HOLES.md,
     // frame 5629 wrong / 5636 right - same sprite, so the cause is transient,
     // not static). All three existing detectors pass because the sprite IS
     // accepted and IS drawn; only one tile inside it is missing.

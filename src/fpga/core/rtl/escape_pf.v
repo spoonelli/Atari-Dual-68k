@@ -396,7 +396,7 @@ module escape_pf #(
             // model both fixes came from is wrong. What IS confirmed is the
             // shape: the strip is 8 - (fine scroll & 7) native pixels, 1..8
             // varying with horizontal scroll - measured 2 on a map screen and
-            // 3 in gameplay. See docs/MO_TILE_HOLES.md.
+            // 3 in gameplay. See docs/investigations/MO_TILE_HOLES.md.
         end
 
         // ---- PFRESET-111: the playfield fetch channel MUST reset with the

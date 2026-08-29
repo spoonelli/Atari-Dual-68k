@@ -10,7 +10,7 @@
 #   mo_time.hex   the pixel-clock time each of those became due
 #   cpu_addr.hex  video-CPU program-fetch addresses
 #
-# WHY THIS SCRIPT EXISTS. The Stage 1 numbers in docs/SDRAM_ARCH.md are only
+# WHY THIS SCRIPT EXISTS. The Stage 1 numbers in docs/investigations/SDRAM_ARCH.md are only
 # as good as these three files, and without a way to regenerate them the whole
 # measurement is unreproducible - someone re-running the bench on a clean
 # checkout would get the fixture guard's FAIL (or, without that guard, a

@@ -130,7 +130,7 @@ renders the same every frame; this toggles at 30 Hz.
 
 One end anchored to world content, the other end running to the end of the
 scanline, applied to playfield pixels, toggling with frame parity. That is the
-**stain pass**, and the failure mode is already named in `docs/mo_priority.md`:
+**stain pass**, and the failure mode is already named in `docs/investigations/mo_priority.md`:
 
 > A solid marker (pen 6 = both bits) stains its own silhouette plus one pixel
 > past its right edge; a **pen-2-only marker stains to the end of the line.**
@@ -146,7 +146,7 @@ A stain marker whose **END bit is lost** — pen 6 read as pen 2 — stains from
 its own position to the end of the scanline. That is exactly the measured
 shape: world-anchored left end, screen-edge right end, growing as it scrolls.
 
-Consistent with this, `docs/mo_priority.md` already records that stain coverage
+Consistent with this, `docs/investigations/mo_priority.md` already records that stain coverage
 moved 0.3% -> 3.2% -> 27% across builds 102/105/106 from **memory timing
 alone**, and concluded most of the missing stain was *corrupted sprite tile
 data*. The same corruption that loses stain elsewhere would drop an END bit
@@ -336,5 +336,5 @@ artifact they see. Everything above is simulation and CI. The mechanism
 reproduces the measured signature exactly — world-anchored left end, right end
 pinned to the last screen column, 2-frame parity — but "reproduces the
 signature" is not "is the only cause of it", and the FACTORY MAP residual
-documented in `docs/mo_priority.md` (a systematic 1-2 px right-displacement) is a
+documented in `docs/investigations/mo_priority.md` (a systematic 1-2 px right-displacement) is a
 separate, still-open question that this change does not address.

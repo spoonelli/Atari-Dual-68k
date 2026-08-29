@@ -98,7 +98,7 @@ module escape_mob (
     // frame wrote nothing - moving sprites shed trailing ghost fringes
     // and floor debris (the real MOHLB self-clears on readout instead).
     // MOPRI-1: each entry now also carries the sprite's MO priority so the
-    // compositor can run the real PF/M comparator (see docs/mo_priority.md).
+    // compositor can run the real PF/M comparator (see docs/investigations/mo_priority.md).
     // MOSTAIN-1: MPR2 ("special", mopriority&4) is now CARRIED as a flag rather
     // than being thrown away at write time. Two things needed it:
     //   1. the reference draws specials into the ONE motion-object bitmap like
@@ -248,7 +248,7 @@ module escape_mob (
     // column in that buffer since, it reads back as LIVE. LANE4q fixed the
     // one-frame ghost and left the two-frame ghost, at half the rate and with
     // a 30 Hz flicker - which is exactly the 2-frame parity measured on
-    // hardware in docs/GFX_DASH_ARTIFACT.md sections 3(c) and 7.
+    // hardware in docs/investigations/GFX_DASH_ARTIFACT.md sections 3(c) and 7.
     //
     // It costs pixels twice over. The stale entry DISPLAYS (a sprite in two
     // places at once), and - worse - it satisfies bld_occupied, so a live

@@ -19,7 +19,7 @@
 //   CRA10 = CL10 (1 if pf), CRA9 = SHADE*CL10 + CL9 (1 if mo)
 //
 // Signal mapping into this core's pixel pipeline (derived from MAME's
-// tile-info + pen construction for eprom - see docs/mo_priority.md):
+// tile-info + pen construction for eprom - see docs/investigations/mo_priority.md):
 //
 //   MPR2:MPR0  motion-object entry word 2 bits [6:4]   (config mask 0x0070)
 //   MPX7:MPX4  motion-object colour  = mo_pen[7:4]

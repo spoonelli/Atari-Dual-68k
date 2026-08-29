@@ -1,5 +1,5 @@
 // VENDORED from third_party/jt51/hdl/jt51_acc.v (submodule 985a573).
-// Project policy (docs/LESSONS.md): submodule edits do not reach CI,
+// Project policy (docs/investigations/LESSONS.md): submodule edits do not reach CI,
 // so a modified donor file must be vendored with provenance.
 // MODIFICATION: per-channel user gain (MIX-100). Upstream is otherwise
 // untouched; diff against the submodule copy to see exactly what changed.

@@ -141,7 +141,7 @@ interrupt scheme; the 128 ms / 8-vblank watchdog.
 **Approximate:** per-instruction CPU cycle counts (TG68K is instruction-accurate,
 not cycle-exact); bus-cycle timing off-ROM (the original gave every subsystem its
 own parallel bus; this core funnels through SDRAM + a CRAM chip + BRAM shadows —
-measured costs and consequences in [`docs/VSHAD3.md`](docs/VSHAD3.md) and
+measured costs and consequences in [`docs/investigations/VSHAD3.md`](docs/investigations/VSHAD3.md) and
 [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md)); video internals (same VRAM in, same
 pixels out on the same raster grid, but the scanout is a re-architected line
 engine, not a gate-level MOHLB/SLAGS netlist clone — its *architecture-level*
@@ -250,7 +250,7 @@ support/build_rom.py                     assemble user ROM dumps -> atari_escape
 support/package.sh                       build a Pocket SD-layout release zip (no ROMs)
 reference/                               MAME driver sources; schematics stay local-only
 docs/PIPELINES.md                        how the data/processing pipelines should work
-docs/RETROSPECTIVE.md                    how it was debugged, incl. the false turns
+docs/investigations/RETROSPECTIVE.md                    how it was debugged, incl. the false turns
 docs/ARCHITECTURE.md                     hardware map, roadmap, schematic findings
 docs/DEVIATIONS.md                       where this core is not the board, measured
 docs/ROMS.md, docs/POCKET_TEST.md        ROM building; on-device test guide

@@ -2180,7 +2180,7 @@ end
     //                          written for SOME pens, not for all of them.
     // field3 names the SHAPE either way: a span much shorter than 96AD with
     // field2 near 0128 means whole scanlines are being dropped rather than
-    // runs truncated. See docs/mo_priority.md.
+    // runs truncated. See docs/investigations/mo_priority.md.
     // MOSTAIN-2: widened to 3 bits for the apply_stain page (mode 4).
     reg [2:0] dbgmode = 3'd0;
     // SDSCHED-85 trace view: L2 toggles (demotes the alpha-hide bringup
@@ -2241,7 +2241,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // field2 = world-CPU ditto, field3 = the video CPU's bus cycles/frame so
     // the proxy and the thing it was proxying for can be photographed
     // together. 0100 hex = 1.0000 updates/frame; MAME's reference for the
-    // same measurement is 0.9977 video / 0.9999 world (docs/PERF_CADENCE.md),
+    // same measurement is 0.9977 video / 0.9999 world (docs/investigations/PERF_CADENCE.md),
     // i.e. 00FF/0100. Anything appreciably under 0100 is a missed deadline
     // rate, in the units the arcade board is quoted in.
     wire m_cadence    = (dbgmode == 3'd5);
@@ -2652,7 +2652,7 @@ escape_mob umob (
     // the old fixed alpha > MO > playfield ladder (robots drew in front of
     // scenery that should occlude them). escape_prio.v holds the transcribed
     // GAL equations; the playfield priority bits PFX5:PFX4 are pf_att[1:0] and
-    // PFX3 is pf_pix[3] - see docs/mo_priority.md for the derivation.
+    // PFX3 is pf_pix[3] - see docs/investigations/mo_priority.md for the derivation.
     // The alpha layer still wins outright: the reference draws it AFTER the
     // MO/PF merge, so it sits on top of whatever the comparator chose.
     wire        pr_mo_win, pr_shade, pr_m7, pr_pfm, pr_forcemc0;
@@ -2677,7 +2677,7 @@ escape_prio uprio (
     // covers. That 0x400 is colour-RAM bit 10, the top half of the 2048-entry
     // colour RAM this core has always addressed and never used: the FACTORY MAP
     // screen's route markers live entirely in that bank, which is why they came
-    // out as raw un-recoloured art (see docs/mo_priority.md).
+    // out as raw un-recoloured art (see docs/investigations/mo_priority.md).
     //
     // The reference restarts the scan at every marker pixel; the union of all
     // those scans is this one-flip-flop automaton along the scanline:
@@ -2914,7 +2914,7 @@ hall_stick hall_p2 (
 // shadow at 0x50000-0x57FFF (308/308 M10K, dropouts 3.22e-4); BUILD 109
 // turned it off for the CPU clock (283/308, never below 0.652 cadence);
 // BUILD 110's capture then measured dropouts at 1.25e-3, 3.6-3.9x worse and
-// sitting ON the real board's 95% upper bound. Mechanism in docs/VSHAD3.md:
+// sitting ON the real board's 95% upper bound. Mechanism in docs/investigations/VSHAD3.md:
 // un-shadowing moves the video CPU from issuing SDRAM fills on ~39% of its
 // bus cycles to ~70%, and motion objects are the lowest-priority client.
 // This build takes the middle: VSHAD3_EN=1 instantiates HALF the shadow -

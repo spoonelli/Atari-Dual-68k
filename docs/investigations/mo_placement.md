@@ -4,7 +4,7 @@ Sprites were misplaced whenever the world scrolled. This document records the
 placement rule as the reference defines it, the three things our engine was
 doing differently, and the per-scene agreement before and after.
 
-Companion to `docs/mo_priority.md`, which covers what happens to a sprite pixel
+Companion to `docs/investigations/mo_priority.md`, which covers what happens to a sprite pixel
 *after* it has been placed.
 
 ## The rule
@@ -199,10 +199,10 @@ pixel to a later entry instead.
 
 `sc79`'s ceiling is 95.95%, not 100% — roughly 1600 pixels of that frame differ
 even with MAME's own motion-object layer, so something outside the MO path
-(most likely the same one-frame update skew `docs/mo_priority.md` describes for
+(most likely the same one-frame update skew `docs/investigations/mo_priority.md` describes for
 `scene108p`) accounts for it. The RTL is within 0.04 points of it either way.
 
-Known deviations inherited from `docs/mo_priority.md` are unchanged: no
+Known deviations inherited from `docs/investigations/mo_priority.md` are unchanged: no
 `apply_stain` second pass, and a special (`mopriority & 4`) object does not mask
 a normal object underneath it.
 
@@ -228,7 +228,7 @@ inside `translate_off`, and the RAM summary confirms `MIF: None`.
 
 ```bash
 # 1. dump frames at a range of scrolls (SCENE_START moves the shot window;
-#    the default keeps the in-game capture docs/mo_priority.md used)
+#    the default keeps the in-game capture docs/investigations/mo_priority.md used)
 SCENE_OUT=<dir> SCENE_IDX=27 ./mame eprom -rompath <roms> -video none -sound none \
     -seconds_to_run 62 -autoboot_script sim/tools/scenedump2.lua \
     -snapshot_directory <dir>

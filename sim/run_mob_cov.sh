@@ -25,7 +25,7 @@ LATS="${LATS:-8 16 31}"
 
 git show "$BASE_REF:src/fpga/core/rtl/escape_mob.v" > sim/build/escape_mob_base.v
 
-# fixture guard: docs/LESSONS.md - this project has shipped three benches that
+# fixture guard: docs/investigations/LESSONS.md - this project has shipped three benches that
 # reported a clean pass while rendering nothing. Refuse to run without a scene.
 for f in game_mo.hex game_cfg.hex image_bytes.hex; do
   [ -s "sim/work/$f" ] || { echo "FATAL: sim/work/$f missing or empty" >&2; exit 1; }

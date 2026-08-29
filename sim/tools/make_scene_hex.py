@@ -2,7 +2,7 @@
 """Turn a MAME video-state dump into the fixtures sim/tb/tb_mob.v reads.
 
 The dump is produced by the scenedump.lua autoboot script (see
-docs/mo_priority.md): it captures one frame's MO RAM, SLIP RAM, playfield RAM,
+docs/investigations/mo_priority.md): it captures one frame's MO RAM, SLIP RAM, playfield RAM,
 playfield "palette"/extmem RAM, alpha RAM and colour RAM, plus the scroll
 registers, alongside MAME's own PNG snapshot of that exact frame.
 

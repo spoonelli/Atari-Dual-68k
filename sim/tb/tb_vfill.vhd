@@ -1,9 +1,9 @@
 -- tb_vfill: MEASURE the Video CPU's speculative-fill rate, rather than quoting it.
 --
--- WHY THIS EXISTS. docs/VSHAD3.md:115 states that un-shadowing 0x54000 moves the
+-- WHY THIS EXISTS. docs/investigations/VSHAD3.md:115 states that un-shadowing 0x54000 moves the
 -- video CPU "from issuing fills on ~39% of its bus cycles to ~70%", and that
 -- number was then taken as an INPUT to the SDRAM re-architecture analysis
--- (docs/SDRAM_ARCH.md). Its own source calls the neighbouring MO figure "an
+-- (docs/investigations/SDRAM_ARCH.md). Its own source calls the neighbouring MO figure "an
 -- estimate, not a measurement". An estimate that becomes the load model for a
 -- memory-system decision has to be measured before it decides anything, so this
 -- bench counts the real address stream instead.

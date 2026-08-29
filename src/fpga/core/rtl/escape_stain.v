@@ -37,7 +37,7 @@
 // A solid marker (pen 6 = both bits) therefore stains its own silhouette plus
 // the one pixel past its right edge, exactly like the C loop; a pen-2 marker
 // stains to the end of the line, also exactly like the C loop. That second
-// mode is the failure signature documented in docs/GFX_DASH_ARTIFACT.md: a
+// mode is the failure signature documented in docs/investigations/GFX_DASH_ARTIFACT.md: a
 // marker that loses its END pixel stains to the end of the scanline.
 module escape_stain (
     input  wire clk,

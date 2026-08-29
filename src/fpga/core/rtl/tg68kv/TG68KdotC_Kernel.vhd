@@ -11,7 +11,7 @@
 --            changed - no logic, no timing, no port order for existing ports.
 --
 -- WHY VENDORED rather than patched in place: submodule edits never reach CI,
--- which checks out pristine upstream (docs/LESSONS.md, "Submodule edits don't
+-- which checks out pristine upstream (docs/investigations/LESSONS.md, "Submodule edits don't
 -- ship").  The submodule's TG68K.vhd / TG68KdotC_Kernel.vhd are therefore
 -- EXCLUDED from src/fpga/ap_core.qsf and from the sim/*.sh file lists; these
 -- copies take their place.  Same pattern as src/fpga/core/rtl/jt51v/ and

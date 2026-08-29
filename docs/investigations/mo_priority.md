@@ -218,7 +218,7 @@ frame and diffs it against MAME 0.289's own snapshot of that exact frame:
 
 (both with `--mo-source mame`, so the comparator is judged on its own. With
 the RTL's own MO layer the same two rules read 96.45% and **96.95%** — see
-`docs/mo_placement.md` for where the remaining 2.4 points go.)
+`docs/investigations/mo_placement.md` for where the remaining 2.4 points go.)
 
 The 493 remaining pixels are one sprite — a single motion object whose entry the
 game updates outside the vblank handler, so it is one animation step ahead in the
@@ -255,7 +255,7 @@ without the line engine's own fidelity (fetch budget, links per line) in the way
 > **Corrected.** This section originally reported that the RTL's own MO layer
 > matched MAME on only ~50% of pixels and blamed the fetch budget. Both halves
 > were wrong. The bench was not running at the scene's scroll at all — see
-> `docs/mo_placement.md`, MOPLACE-0: `sim/run_mob_tb.sh` passed
+> `docs/investigations/mo_placement.md`, MOPLACE-0: `sim/run_mob_tb.sh` passed
 > `-PXSCROLL=224`, and iverilog ignores that spelling without a warning. With
 > the scroll applied and the two placement bugs found underneath it fixed, the
 > RTL layer scores 96.95% on this frame, and the fetch budget turns out not to

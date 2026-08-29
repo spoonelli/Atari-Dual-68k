@@ -10,9 +10,9 @@ or contradicted by another number in the tree, this document says so rather than
 picking the flattering one. Where a claim in the existing docs turned out to be false,
 it is named. **Nothing here is reconstructed from memory.**
 
-Companion documents: [`PIPELINES.md`](PIPELINES.md) (how it is meant to work),
+Companion documents: [`PIPELINES.md`](../PIPELINES.md) (how it is meant to work),
 [`HISTORY.md`](HISTORY.md) (the v1–v78 field log), [`LESSONS.md`](LESSONS.md) (the
-reusable methods), [`DEVIATIONS.md`](DEVIATIONS.md) (where we are not the board).
+reusable methods), [`DEVIATIONS.md`](../DEVIATIONS.md) (where we are not the board).
 
 ---
 
@@ -541,7 +541,7 @@ that settled it: all three branches justified their value with the same wrong fo
 `worst = INTERVAL + DEFER_CAP`, which omits the transaction still in flight when the
 deferral cap expires. Measured, it is `INTERVAL + DEFER_CAP + 16`. Under that correction
 `mister-port`'s 224 is **not a fix at all** — 8.046 µs measured against a 7.8125 µs
-limit. See [`DEVIATIONS.md`](DEVIATIONS.md) §F1 and `sim/run_sdram_refresh_tb.sh`.
+limit. See [`DEVIATIONS.md`](../DEVIATIONS.md) §F1 and `sim/run_sdram_refresh_tb.sh`.
 
 The one durable defence built here is `sim/tb/tb_psram_timing.v`, which carries
 `DECLARED_CLOCK_MHZ` and `ACTUAL_CLOCK_MHZ` as **separate knobs** and runs the DUT at

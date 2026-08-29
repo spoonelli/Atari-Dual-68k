@@ -112,7 +112,7 @@ diagnosed from a photo.
 With the HUD up:
 
 - **L** toggles it back off
-- **R** cycles **6 HUD pages** (0-5), shown in the rightmost digit of the hex row:
+- **R** cycles **7 HUD pages** (0-6), shown in the rightmost digit of the hex row:
   - **0** — default: JSA/sound status, coin/credit counters, extra-CPU bus-cycle length
   - **1** — second-processor window: extra-68k PC (frame-latched) + last mailbox response
   - **2** — main-CPU window: video-CPU PC, last main write address, crash forensics
@@ -120,7 +120,7 @@ With the HUD up:
   - **4** — `apply_stain` diagnostic: stained pixels, span first/last line
   - **5** — cadence page: video- and world-CPU logic frames per 256 video frames,
     plus video-CPU bus cycles/frame. `0100` hex = 1.0000 updates/frame;
-    MAME's reference is `00FF`/`0100` (see [`PERF_CADENCE.md`](PERF_CADENCE.md))
+    MAME's reference is `00FF`/`0100` (see [`PERF_CADENCE.md`](investigations/PERF_CADENCE.md))
 - **R (hold)** = hide motion objects · **L2 (hold)** = hide the alpha layer ·
   **R2 (hold)** = video-fetch kill test (screen garbles while held — a probe,
   not a fault)

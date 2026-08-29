@@ -2,7 +2,7 @@
 # Run the full gate set and record a pass/fail line per gate.
 # NOT part of the shipped gate set - a convenience runner for this branch.
 # Deliberately does NOT use && chaining between gates: an early failure must
-# not short-circuit the rest (docs/LESSONS.md).
+# not short-circuit the rest (docs/investigations/LESSONS.md).
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"

@@ -131,14 +131,14 @@ def main():
         return 1
     # MOHOLE-116: pixels the reference drew and the engine did not.
     #
-    # This is the tile-hole artifact (docs/MO_TILE_HOLES.md) and it was
+    # This is the tile-hole artifact (docs/investigations/MO_TILE_HOLES.md) and it was
     # UNGATED until now: `missing` was computed and printed, but the only
     # failure paths were `wrong` and a TOTAL wipeout, so partial pixel loss
     # always passed. It is the same shape of defect as the total-wipeout case
     # someone patched above - caught then, missed for the partial case.
     #
     # This gate is proven to fire in both directions, which is the whole point
-    # (see docs/LESSONS.md on checks that cannot fail):
+    # (see docs/investigations/LESSONS.md on checks that cannot fail):
     #   tb_mob GFX_JIT=0   -> missing=0    PASS
     #   tb_mob GFX_JIT=48  -> missing=26   FAIL
     #   tb_mob GFX_JIT=96  -> missing=832  FAIL

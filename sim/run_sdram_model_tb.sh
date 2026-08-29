@@ -7,7 +7,7 @@
 # This is a MUTATION gate, not a smoke test. Mode 0 is the only clean run; the
 # other five each inject one specific defect and the gate FAILS if the model
 # does not report that defect. An instrument that has never been observed to
-# fail is not evidence - see docs/LESSONS.md.
+# fail is not evidence - see docs/investigations/LESSONS.md.
 #
 # bash 3.2 safe (macOS): no arrays, no ${ARR[@]} under set -u.
 set -euo pipefail
@@ -45,7 +45,7 @@ run_mode() {   # $1=mode  $2=label  $3=clk_ns (optional, default 27.936508)
     | grep -v '^WARNING: The requested' | grep -v '^INFO:')"
   echo "$OUT" | grep -E 'TB_SDRAM_MODEL|SDRAM_MODEL (cmds|timing|violations|  |write-table)' || true
   # A run that produced no verdict line at all is a FAIL, not a pass. This is
-  # the "&&-chain short-circuited the grep" trap from docs/LESSONS.md.
+  # the "&&-chain short-circuited the grep" trap from docs/investigations/LESSONS.md.
   if ! printf '%s' "$OUT" | grep -q 'TB_SDRAM_MODEL RESULT'; then
     echo "  !! GATE FAIL: no RESULT line - the bench did not run to completion" >&2
     FAIL=1
