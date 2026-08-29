@@ -27,6 +27,7 @@ If you only read one file: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 | [`ROMS.md`](ROMS.md) | Building your own ROM image. No ROM data is distributed. |
 | [`CONTROLS.md`](CONTROLS.md) | Player controls, the hall-effect stick model, and the debug controls. |
 | [`EEPROM_SAVE.md`](EEPROM_SAVE.md) | How high scores persist, and what to do if they do not. |
+| [`DISTRIBUTION.md`](DISTRIBUTION.md) | Auto-update support: the Pocket cores inventory and the MiSTer custom database. |
 
 ### How it is built
 
