@@ -51,7 +51,7 @@ Two sequencing facts drive the order:
 | C3 | Decide what `main` means | **DONE** | `main` mirrors `pocket` (fast-forwarded on every pocket push); `mister` carries the port. |
 | C4 | README + support doc cleanup | **DONE (2026-08-29)** | Top-level README refreshed for release (accuracy benchmarks, architectural-decisions section); docs reorganized (investigations/ split) and accuracy-swept; READMEs synced across all three branches; 0 dead links. |
 | C5 | ROM prep end-to-end from a clean machine | TODO | `docs/ROMS.md` + `build_rom.py` with no local state. |
-| C6 | MiSTer fork: same release or separate? | TODO | Affects wording everywhere. |
+| C6 | MiSTer fork: same release or separate? | **DONE — separate** | MiSTer tags independently (`mister-v0.x.y`), zips per build from the `mister` branch. Its two release gates (retire boot splash; `escape_YYYYMMDD.rbf` naming — the latter done in CI) are recorded in [`MISTER.md`](MISTER.md)'s status note. |
 
 ## D. Documentation and the historical record
 
