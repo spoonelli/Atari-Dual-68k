@@ -172,7 +172,11 @@ jobs:
       - name: Stage release files
         run: |
           mkdir -p mister-release
-          cp src/mister/output_files/Arcade-Escape.rbf mister-release/escape.rbf
+          # MiSTer naming convention: CoreName_YYYYMMDD.rbf. The .mra's
+          # <rbf>escape</rbf> matches escape_*.rbf by prefix, so the dated
+          # name needs no manifest change.
+          cp src/mister/output_files/Arcade-Escape.rbf \
+             "mister-release/escape_$(date -u +%Y%m%d).rbf"
           cp src/mister/releases/*.mra mister-release/
           # user-facing install README; docs/MISTER.md stays the engineering record
           cp src/mister/releases/README.md mister-release/README.md

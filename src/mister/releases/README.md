@@ -7,7 +7,8 @@ joystick model. Field-testing builds — see *Reporting problems* below.
 
 ## Install
 
-1. Copy `escape.rbf` to `_Arcade/cores/` on your MiSTer SD card.
+1. Copy `escape_YYYYMMDD.rbf` (dated per MiSTer's naming convention) to
+   `_Arcade/cores/` on your MiSTer SD card.
 2. Copy `Escape from the Planet of the Robot Monsters (set 1).mra` to `_Arcade/`.
 3. Put your own MAME `eprom.zip` romset in `games/mame/`. **No ROM data is
    included** — the MRA assembles the game from your verified dumps.
