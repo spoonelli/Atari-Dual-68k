@@ -510,16 +510,35 @@ wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
 // aging period. Worst-case MO wait is unchanged (AGE_BOOST + one
 // transaction); worst-case CPU share is now bounded at ~2/3 of the
 // non-PF bus instead of zero.
+// MOARB-145: BURST credits. The one-shot boost (139/140/144) serves one MO
+// slot per aging period; measured on the crowd bench (tb_mister_moarb, 144
+// baseline) that is 36.45 tiles/line against the ~40 a dense line needs,
+// with avg fetch latency 41 clks - dominated by the 32-clk age wait itself.
+// That 10% shortfall is the field dropout. The blanket rule (137/143) fixes
+// MO and kills the CPUs. Bounded middle: when the age trips, MO earns
+// MO_BURST consecutive slots, then re-ages from zero - the fastpath keeps a
+// guaranteed window every period, so the 143 input regression cannot recur,
+// and MO throughput scales ~4x.
 localparam [5:0] AGE_BOOST = 6'd32;
+localparam [2:0] MO_BURST  = 3'd4;
 reg [1:0] vb_sd_sync = 2'b11;
 always @(posedge clk_sdram) vb_sd_sync <= {vb_sd_sync[0], VBlank};
-reg [5:0] mo_age = 6'd0;
+reg [5:0] mo_age    = 6'd0;
+reg [2:0] mo_credit = 3'd0;
+reg       mo_own_d145 = 1'b0;
 reg mo_first_q = 1'b0;
 always @(posedge clk_sdram) begin
-    if (!core_rstn_sd || !(|mg_pend_w) || mo_owner) mo_age <= 6'd0;
-    else if (mo_age != 6'h3F)           mo_age <= mo_age + 6'd1;
+    mo_own_d145 <= mo_owner;
+    if (!core_rstn_sd || !(|mg_pend_w)) begin
+        mo_age <= 6'd0; mo_credit <= 3'd0;
+    end else if (mo_credit != 3'd0) begin
+        mo_age <= 6'd0;
+        if (mo_owner && !mo_own_d145) mo_credit <= mo_credit - 3'd1;
+    end else if (mo_age >= AGE_BOOST) begin
+        mo_credit <= MO_BURST; mo_age <= 6'd0;
+    end else mo_age <= mo_age + 6'd1;
     mo_first_q <= core_rstn_sd && (|mg_pend_w) && !vb_sd_sync[1]
-                  && (mo_age >= AGE_BOOST) && !mo_owner;
+                  && (mo_credit != 3'd0);
 end
 reg        mo_pend_q  = 1'b0;
 reg [1:0]  mo_nch_q   = 2'd0;
