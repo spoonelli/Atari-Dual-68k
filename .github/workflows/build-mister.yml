@@ -192,7 +192,7 @@ jobs:
           # 1. nothing but the three expected kinds of file
           while IFS= read -r f; do
             case "$f" in
-              *.rbf|*.mra|*.md) ;;
+              *.rbf|*.mra|*.md|*/LICENSE.txt) ;;   # LICENSE.txt: the GPL text, staged since the licence-packaging fix
               *) echo "UNEXPECTED FILE IN RELEASE: $f" >&2; fail=1 ;;
             esac
           done <<EOF
