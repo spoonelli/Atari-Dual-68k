@@ -260,9 +260,17 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
 
 ## Get it
 
+| Platform | Release tag | Package |
+|---|---|---|
+| **Analogue Pocket** | [`v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/v0.1.0) (plain `v*` tags) | `AtariDual68k-pocket-v*.zip` |
+| **MiSTer (DE10-Nano)** | `mister-v*` tags — field-testing, first tag pending | `AtariDual68k-mister-*.zip` with a dated `escape_YYYYMMDD.rbf` |
+
 Download the packaged zip from the
 [**Releases page**](https://github.com/spoonelli/Atari-Dual-68k/releases).
 That is the supported route; building from source is for contributors.
+MiSTer field-testing releases are marked *pre-release*, so
+[`releases/latest`](https://github.com/spoonelli/Atari-Dual-68k/releases/latest)
+always points at the current Pocket release.
 
 1. Unzip onto your Pocket SD card — it merges `Cores/`, `Platforms/` and
    `Assets/` into the existing folders.
