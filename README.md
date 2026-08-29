@@ -69,10 +69,10 @@ others — the rows below describe what they would require, not partial support.
 | Set | Title | Status |
 |---|---|---|
 | **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
-| `eprom2` | Escape … (set 2) | **The next target.** Same machine config and same hardware; differs only in program-ROM revisions (all rev 1, plus a `.40e`/`.50e` pair set 1 lacks). Expected to be a small step — `build_rom.py` grows a second CRC table and the core is unchanged — but it has not been run yet. |
-| `klaxp1` | Klax (prototype set 1) | Not supported — **for future evaluation** (documented prototype romset). |
-| `klaxp2` | Klax (prototype set 2) | Not supported — **for future evaluation** (documented prototype romset). |
-| `guts` | Guts n' Glory (prototype) | Not supported — **for future evaluation** (documented prototype romset). |
+| `eprom2` | Escape … (set 2) | **Next target.** Identical machine configuration and hardware; differs only in program-ROM revisions (all rev 1, plus a `.40e`/`.50e` pair absent from set 1). Support requires an additional CRC table in `build_rom.py`; no RTL changes are anticipated. Not yet run or verified. |
+| `klaxp1` | Klax (prototype set 1) | Not supported. Documented prototype romset; under future evaluation. |
+| `klaxp2` | Klax (prototype set 2) | Not supported. Documented prototype romset; under future evaluation. |
+| `guts` | Guts n' Glory (prototype) | Not supported. Documented prototype romset; under future evaluation. |
 
 Two structural differences make the Klax and Guts prototypes future work
 rather than near-misses:
@@ -90,9 +90,9 @@ rather than near-misses:
 CRC32 does not match, so a Klax or Guts romset cannot currently be assembled
 into a core image even to try.
 
-**`eprom2` is the next target**; the Klax and Guts prototype romsets are
-documented and marked **for future evaluation** — a roadmap note, not a
-promise.
+**Roadmap position:** `eprom2` is the next supported-set target. The Klax and
+Guts n' Glory prototype romsets are documented above and remain under future
+evaluation; no support timeline is committed for them.
 
 ## Related: the MiSTer port
 
