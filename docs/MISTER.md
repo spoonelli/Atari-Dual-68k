@@ -6,24 +6,19 @@ that instantiates **the identical RTL the Pocket build uses** — `escape_core`,
 with MiSTer-shaped glue around it. Nothing in the machine is forked; if you fix
 a bug in `src/fpga/core/rtl/`, both platforms get it.
 
-> **Status: BUILD 105 ran on a real DE10-Nano.** It boots, plays, and renders
-> motion objects, alphanumerics and the HUD correctly — and drew a completely
-> flat playfield. That was PFRESET-107, diagnosed and fixed; see
-> [FIRST FLASH RESULT](#first-flash-result-build-105-on-real-hardware--and-what-it-actually-was).
-> **The fixed build has not itself been flashed.**
->
-> **The branch is now `mister-112`, merged with `tas-atomic` at BUILD 112** —
-> see [BUILD 112](#build-112--catching-up-to-the-pocket-line) for what came
-> across, what did not, and why. It builds green (CI `32816669942`): 370/553
-> M10K, 44 % ALM, TNS 0.000 on all eight clocks. **One thing to look at before
-> shipping it:** `pll_hdmi` setup has fallen from +0.880 ns to **+0.115 ns** —
-> still positive, still entirely inside the framework's `ascal` scaler and not
-> in this core, but thinner than this design's own placement sensitivity.
-> **Nothing in BUILD 112 has been on hardware either.** Read
-> [What is verified / what is not](#what-is-verified--what-is-not) before you
-> assume anything works, and
-> [Three things predicted to break on first flash](#three-things-predicted-to-break-on-first-flash-all-wrong--kept-for-the-record)
-> — all three of which were wrong — before you debug it.
+> **Status (2026-08, build 139): plays on a real DE10-Nano.** The port has
+> been through repeated device rounds on the owner's hardware. Landed since the
+> early-history sections below were written: the game runs from the `mister`
+> branch with a boot splash + credits overlay (keyboard **C** cycles pages),
+> Music/Speech volume sliders in the OSD, and a build number on the splash
+> ("MISTER BUILD NNN" — always check it matches the .rbf you flashed).
+> Display corruption was fixed in layers, each device-verified: fixed-sprite
+> streaks were playfield scanline-deadline starvation (135 — PF now outranks
+> the CPUs on this bus), bit-soup garble was a missing CDC settle on the
+> SDRAM done-return (136), and machine flashing led to the MO anti-starvation
+> boost (137→139; the Pocket's blanket rule starves this bus's CPUs — see
+> `DEVIATIONS.md` §F2). The history sections below are kept as the port
+> record; where they disagree with this note, this note wins.
 
 ---
 
