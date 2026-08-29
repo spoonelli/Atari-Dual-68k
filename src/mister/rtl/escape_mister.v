@@ -510,23 +510,17 @@ wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
 // aging period. Worst-case MO wait is unchanged (AGE_BOOST + one
 // transaction); worst-case CPU share is now bounded at ~2/3 of the
 // non-PF bus instead of zero.
-// MOARB-143: the Pocket's BLANKET rule at last - MO outranks speculative
-// fastpath fills whenever it pends during active video. This was build
-// 137, and 137 was catastrophic; both of the reasons it was are now gone:
-//   1. the demand/fastpath/boost standoff (fixed in MOARB-140 - a pending
-//      demand fetch no longer defers to a fastpath the boost has blocked);
-//   2. sdram_simple's ~14-clk service, which made every MO grant a big
-//      bite out of the CPUs' bus time (replaced by sdram_openrow's ~6 clk
-//      at MISTER-141 - the same controller under the Pocket's identical
-//      arrangement, where this rule is proven at full speed).
-// The 139/140 one-shot age boost under-served dense lines: one MO slot
-// per ~47 clks cannot fill a 20-robot crowd line, and the owner's field
-// video shows exactly busy-scene dropouts. Age machinery deleted with it.
+localparam [5:0] AGE_BOOST = 6'd32;
 reg [1:0] vb_sd_sync = 2'b11;
 always @(posedge clk_sdram) vb_sd_sync <= {vb_sd_sync[0], VBlank};
+reg [5:0] mo_age = 6'd0;
 reg mo_first_q = 1'b0;
-always @(posedge clk_sdram)
-    mo_first_q <= core_rstn_sd && (|mg_pend_w) && !vb_sd_sync[1];
+always @(posedge clk_sdram) begin
+    if (!core_rstn_sd || !(|mg_pend_w) || mo_owner) mo_age <= 6'd0;
+    else if (mo_age != 6'h3F)           mo_age <= mo_age + 6'd1;
+    mo_first_q <= core_rstn_sd && (|mg_pend_w) && !vb_sd_sync[1]
+                  && (mo_age >= AGE_BOOST) && !mo_owner;
+end
 reg        mo_pend_q  = 1'b0;
 reg [1:0]  mo_nch_q   = 2'd0;
 reg [23:0] mo_naddr_q = 24'd0;
