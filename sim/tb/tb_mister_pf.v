@@ -85,7 +85,11 @@ module tb_mister_pf;
     );
 
     // MERGE-117: renamed - see sim/tb/sdram_model_mem.v for why there are two.
-    sdram_model_mem #(.WORDS(25'h00A0000)) chip (
+    // MISTER-141: sdram_openrow's bank map scatters banks 2/3 to high model
+    // indices; the model must back the full 4-bank space or those reads
+    // return the DEAD marker (the chip on hardware is 32 MB - only the
+    // model was small).
+    sdram_model_mem #(.WORDS(25'h1000000)) chip (
         .clk(clk_sdram), .a(SDRAM_A), .ba(SDRAM_BA), .dq(SDRAM_DQ),
         .dqm({SDRAM_DQMH, SDRAM_DQML}),
         .cas_n(SDRAM_nCAS), .ras_n(SDRAM_nRAS), .we_n(SDRAM_nWE),
@@ -286,6 +290,5 @@ module tb_mister_pf;
         $finish;
     end
 
-endmodule
 
-`default_nettype wire
+endmodule

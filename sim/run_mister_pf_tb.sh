@@ -20,6 +20,7 @@ docker run --rm -v "$REPO":/work -w /work "$IMG" bash -c "
     src/mister/rtl/escape_mister.v \
     src/mister/rtl/escape_credits.v \
     src/fpga/core/rtl/sdram_simple.v \
+    src/fpga/core/rtl/sdram_openrow.v \
     src/fpga/core/rtl/escape_mob.v \
     src/fpga/core/rtl/escape_prio.v \
     src/fpga/core/rtl/escape_mo_cache.v \

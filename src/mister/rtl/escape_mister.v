@@ -801,7 +801,7 @@ always @(posedge clk_sdram) begin
     end
 end
 
-sdram_simple sdr (
+sdram_openrow sdr (   // MISTER-141: the Pocket's open-row controller - see commit msg
     .clk        ( clk_sdram ),
     .reset_n    ( pll_locked ),
     .dram_a     ( SDRAM_A ),
@@ -819,10 +819,16 @@ sdram_simple sdr (
     .rd_req     ( sd_rd_req ),
     .rd_ack     ( sd_rd_ack ),
     .rd_pre     ( (chk_state == 4'd10) ? rd_pre_q : 1'b1 ),
+    // MISTER-141: each probe address must be driven from the state that
+    // RAISES rd_req (0/2/4), not only the state that waits for ack (1/3/5).
+    // sdram_simple accepted requests late enough to hide the stale first
+    // cycle; sdram_openrow latches the address immediately and read the
+    // mux default instead (bench probe 0x110410 caught it). The chr-DMA
+    // pair (7/8) always covered both states - same idiom now everywhere.
     .rd_addr    ( (chk_state == 4'd10) ? rd_addr_q :
-                  (chk_state == 4'd1)  ? 25'd0 :
-                  (chk_state == 4'd3)  ? 25'h0110400 :
-                  (chk_state == 4'd5)  ? 25'h0110410 :
+                  (chk_state == 4'd0 || chk_state == 4'd1) ? 25'd0 :
+                  (chk_state == 4'd2 || chk_state == 4'd3) ? 25'h0110400 :
+                  (chk_state == 4'd4 || chk_state == 4'd5) ? 25'h0110410 :
                   (chk_state == 4'd8 || chk_state == 4'd7)
                         ? (25'h0110000 + {10'd0, chr_dma_word, 1'b0}) :
                   {1'b0, core_rom_addr} ),
