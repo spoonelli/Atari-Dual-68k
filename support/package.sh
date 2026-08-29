@@ -51,6 +51,13 @@ cp "$REPO/dist/platforms/_images/$PLATFORM.bin" "$STAGE/Platforms/_images/"
 # not merged onto the SD by users following the folder-copy instructions.
 cp "$REPO/support/build_rom.py" "$STAGE/build_rom.py"
 
+# licence texts MUST accompany the binary: GPL-3.0 requires a copy of the
+# licence with conveyed object code, and psram.sv's MIT requires its notice
+# accompany all copies including binaries (NOTICE.md is the inventory that
+# points at each vendored header).
+cp "$REPO/LICENSE"   "$STAGE/LICENSE.txt"
+cp "$REPO/NOTICE.md" "$STAGE/NOTICE.md"
+
 # Assets dir ships EMPTY (plus a note) -- ROMs are user-supplied, never distributed
 cat > "$STAGE/Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" <<'EOF'
 Put your self-built atari_escape.rom in this folder, under exactly that name --
@@ -159,6 +166,6 @@ fi
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets build_rom.py )
+( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets build_rom.py LICENSE.txt NOTICE.md )
 echo "packaged: $OUT"
 unzip -l "$OUT"

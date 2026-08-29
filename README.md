@@ -96,14 +96,16 @@ this boardset **for future evaluation** — a roadmap note, not a promise.
 ## Related: the MiSTer port
 
 A MiSTer (DE10-Nano) port lives on the `mister` branch and plays on real
-hardware, with its own platform work landed: the
-playfield holds top priority on the single shared SDRAM (the Pocket gives it a
-separate PSRAM, MiSTer has no second RAM), fetch-return crossings carry the
-same settle-stage arrangement the Pocket uses, an on-screen build stamp shows
-at every core load, credits render as a core-drawn overlay (mappable button or
-keyboard C), and the OSD has music/speech sliders. It still trails the Pocket
-core in accumulated device hours and is released separately, not as part of
-this package. Details: [`docs/MISTER.md`](docs/MISTER.md).
+hardware, with its own platform work landed: it now runs the same open-row
+SDRAM controller as the Pocket (ported after arbiter-level fixes proved the
+per-transaction cost was the real constraint — the playfield shares the one
+SDRAM there, where the Pocket gives it a separate PSRAM), fetch-return
+crossings carry the same settle-stage arrangement the Pocket uses, an
+on-screen build stamp shows at every core load, credits render as a
+core-drawn overlay (OSD trigger, mappable button, or keyboard C), and the
+OSD has music/speech sliders. It still trails the Pocket core in accumulated
+device hours and is released separately, not as part of this package.
+Details: [`docs/MISTER.md`](docs/MISTER.md).
 
 ## Hardware being implemented
 
@@ -421,8 +423,10 @@ owed alongside it. This is inherited from upstream rather than introduced here, 
 ## License
 
 **GPL-3.0** for this project's own RTL and tooling — see [`LICENSE`](LICENSE).
-The tree is not uniformly GPL-3.0, and downstream users keep the weaker terms on
-these files:
+Release zips for both platforms carry `LICENSE.txt` and `NOTICE.md` (the
+per-component compliance inventory) alongside the binary, as the GPL and the
+MIT-licensed `psram.sv` require. The tree is not uniformly GPL-3.0, and
+downstream users keep the weaker terms on these files:
 
 | Component | Licence |
 |---|---|
