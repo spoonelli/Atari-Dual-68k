@@ -1208,22 +1208,15 @@ wire [7:0]  pal_b = (b_m[10:2] > 9'd255) ? 8'd255 : b_m[9:2];
 // pages this replaces render EMPTY on some framework builds (see
 // Arcade-Escape.sv).  escape_credits is pipelined to the same two-clock depth
 // as the colour path, so its pixel lands on the pixel it belongs to.
-// MISTER-134: BOOT SPLASH. The Pocket rule - every build shows its number on
-// screen - finally reaches MiSTer: the credits page (whose second line is the
-// build number, support/gen_credits_overlay.py - BUMP THEM TOGETHER) is
-// forced on for the first ~3.5 s after reset, so "is the new rbf actually
-// running?" is answered by the screen instead of by faith. The Credits
-// button's own page overrides the splash; it never returns until reset.
-reg [8:0] splash_ctr = 9'd0;
-reg       vb_spl_d = 1'b0;
-always @(posedge clk_sys) begin
-    vb_spl_d <= VBlank;
-    if (reset) splash_ctr <= 9'd0;
-    else if (VBlank && !vb_spl_d && splash_ctr != 9'd210)
-        splash_ctr <= splash_ctr + 9'd1;
-end
-wire [1:0] cr_page_eff = (credits_page != 2'd0) ? credits_page
-                       : (splash_ctr != 9'd210) ? 2'd1 : 2'd0;
+// MISTER-142: the MISTER-134 boot splash is retired for release (owner
+// gate, docs/MISTER.md status note): the machine boots clean, and the
+// build number lives on credits page 1 (its second line -
+// support/gen_credits_overlay.py, BUMP THEM TOGETHER), reachable via the
+// OSD "Show Credits" trigger, the mappable Credits button, or keyboard C.
+// The splash existed to answer "is the new rbf actually running?" during
+// field-testing; the dated rbf filename plus the credits page carry that
+// duty now.
+wire [1:0] cr_page_eff = credits_page;
 
 wire cr_on, cr_px;
 escape_credits #(
