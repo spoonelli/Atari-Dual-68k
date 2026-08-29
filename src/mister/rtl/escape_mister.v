@@ -500,20 +500,26 @@ wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
 // ran essentially in blanking only.
 // The fix keeps the intent (MO must not STARVE) and drops the dominance:
 // MO gets first-class rank only after its oldest pending fetch has waited
-// AGE_BOOST clk_sdram cycles (~0.9 us - several CPU fetches' worth). Under
-// light load the boost never engages and the CPUs see the 136 arbiter;
-// under crowd load MO's wait is bounded at AGE_BOOST + one PF/CPU
-// transaction instead of a whole line.
+// AGE_BOOST clk_sdram cycles (~0.9 us - several CPU fetches' worth).
+// MOARB-139: the 138 cut reset the age only when the pending SET emptied.
+// The MO engine keeps its queue non-empty for entire active lines (garbage
+// link lists at boot do it even with zero sprites on screen - the POST sat
+// at "Waiting for Second Processor"), so the age saturated 0.9 us into
+// every line and the boost degenerated into 137's blanket rule. The age
+// must reset on every GRANT, not on queue-empty: one boosted slot per
+// aging period. Worst-case MO wait is unchanged (AGE_BOOST + one
+// transaction); worst-case CPU share is now bounded at ~2/3 of the
+// non-PF bus instead of zero.
 localparam [5:0] AGE_BOOST = 6'd32;
 reg [1:0] vb_sd_sync = 2'b11;
 always @(posedge clk_sdram) vb_sd_sync <= {vb_sd_sync[0], VBlank};
 reg [5:0] mo_age = 6'd0;
 reg mo_first_q = 1'b0;
 always @(posedge clk_sdram) begin
-    if (!core_rstn_sd || !(|mg_pend_w)) mo_age <= 6'd0;
+    if (!core_rstn_sd || !(|mg_pend_w) || mo_owner) mo_age <= 6'd0;
     else if (mo_age != 6'h3F)           mo_age <= mo_age + 6'd1;
     mo_first_q <= core_rstn_sd && (|mg_pend_w) && !vb_sd_sync[1]
-                  && (mo_age >= AGE_BOOST);
+                  && (mo_age >= AGE_BOOST) && !mo_owner;
 end
 reg        mo_pend_q  = 1'b0;
 reg [1:0]  mo_nch_q   = 2'd0;
