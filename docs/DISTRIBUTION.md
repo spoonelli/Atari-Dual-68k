@@ -53,25 +53,34 @@ _Arcade/Escape from the Planet of the Robot Monsters (set 1).mra
 _Arcade/cores/escape_<YYYYMMDD>.rbf
 ```
 
-**Plan:**
+**Implemented (2026-08-29):**
 
 1. `db_id`: `spoonelli/ataridual68k` — fixed forever (changing it duplicates
    installs; the Downloader documentation is explicit on this).
-2. Add `support/gen_mister_db.py`: reads the `mister-release/` staging
-   directory, computes md5/size, emits `ataridual68k_db.json.zip` with URLs
-   pointing at the GitHub release assets.
-3. CI (`build-mister.yml`) runs it after packaging; the db file is uploaded
-   as an asset of the same `mister-v*` release **and** committed to a
-   `db` branch so it has one permanent raw URL:
-   `https://raw.githubusercontent.com/spoonelli/Atari-Dual-68k/db/ataridual68k_db.json.zip`
-4. Users add, once:
+2. `support/gen_mister_db.py` reads the `mister-release/` staging directory,
+   computes md5/size, and emits `ataridual68k_db.json.zip` with URLs pinned
+   to the given release tag's **individual assets** (each MiSTer release
+   carries the `.rbf` and `.mra` as separate assets alongside the zip;
+   GitHub normalizes asset names — spaces to dots, parentheses dropped —
+   and the script reproduces that).
+3. The db is published under the fixed rolling tag **`mister-db`**, so the
+   user-facing URL never changes; each MiSTer release regenerates the asset
+   in place (`gh release upload mister-db … --clobber`). No extra branch,
+   release infrastructure only. `releases/latest` cannot be used as the
+   anchor: MiSTer releases are pre-releases, so `latest` resolves to the
+   Pocket line by design.
+4. Users add, once, to `/media/fat/downloader.ini`:
    ```ini
    [spoonelli/ataridual68k]
-   db_url = 'https://raw.githubusercontent.com/spoonelli/Atari-Dual-68k/db/ataridual68k_db.json.zip'
+   db_url = 'https://github.com/spoonelli/Atari-Dual-68k/releases/download/mister-db/ataridual68k_db.json.zip'
    ```
-   (documented in the MiSTer shipping README once live).
-5. Old dated `.rbf` files are handled by the db itself: when a new rbf path
-   replaces an old one, the Downloader removes files that leave the db.
+5. Superseded dated `.rbf` files are removed by the Downloader automatically
+   when they leave the db.
+
+Release-time checklist: upload `.rbf` + `.mra` as release assets, run
+`gen_mister_db.py <stage> <tag>`, clobber-upload to `mister-db`, then verify
+every db URL's md5 against the db (a stale CDN copy can lag a clobber by
+~1 minute).
 
 **Not applicable:** distribution via the official `MiSTer-devel` repos or
 the default `update_all` database list — those are curated collections;
