@@ -227,8 +227,8 @@ If you report a problem, a photo showing the build number plus page 2 (or page
 
 ## Notes for this release
 
-**Version mapping:** v0.1.0 = `BUILD_ID` 34 (the two cyan digits on the
-diagnostic HUD read `34`). A HUD photo identifies this release exactly.
+**Version mapping:** v0.1.0 = `BUILD_ID` 35 (the two cyan digits on the
+diagnostic HUD read `35`). A HUD photo identifies this release exactly.
 
 **The core installs as `spoonelli.eprom`** as of v0.1.0 — the rename this
 section recommended ("if it passes, rename before tagging") is done. Two
