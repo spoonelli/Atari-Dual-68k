@@ -176,6 +176,8 @@ localparam CONF_STR = {
 	"O[11:9],Music Volume,7,6,5,4,3,2,1,0;",
 	"O[14:12],Speech Volume,7,6,5,4,3,2,1,0;",
 	"-;",
+	"T[16],Show Credits;",
+	"-;",
 	"J1,Jump,Fire,Duck,Bomb,Start,Coin,Credits;",
 	"jn,A,B,X,Y,Start,Select,R;",
 	"V,v",`BUILD_DATE
@@ -293,7 +295,9 @@ always @(posedge clk_sys) begin
 	// MISTER-133: keyboard C works with no button mapping at all - a fresh
 	// install has no saved per-core map, so the joystick Credits button only
 	// exists after "Define eprom buttons" has been run once.
-	cr_btn_sync <= {cr_btn_sync[1:0], joystick_0[10] | joystick_1[10] | kb_creds};
+	// three ways in: the J1 "Credits" button (assignable in Define buttons),
+	// keyboard C, and the OSD "Show Credits" trigger (status[16])
+	cr_btn_sync <= {cr_btn_sync[1:0], joystick_0[10] | joystick_1[10] | kb_creds | status[16]};
 	if (reset) credits_page <= 2'd0;
 	else if (cr_btn_sync[1] && !cr_btn_sync[2])
 		credits_page <= (credits_page == 2'd2) ? 2'd0 : credits_page + 2'd1;

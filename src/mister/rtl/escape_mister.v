@@ -694,9 +694,17 @@ always @(posedge clk_sdram) begin
         if (fpe_vpre) begin fpe_valid <= 1'b1; fpe_vpre <= 1'b0; end
 
         // legacy CPU fetch (the never-wedge fallback behind the fastpath)
+        // MOARB-140: while mo_first_q has the fastpath blocked, a pending
+        // demand fetch must NOT defer to fastpath want - want can never drop
+        // while the fastpath is blocked, and the MO arm defers to pending
+        // demand, so demand+want+boost was a three-way standoff that froze
+        // CPUs AND MO until vblank (the 137/138/139 slowdown-plus-flashing).
+        // Exclusive with the MO arm by construction: it requires
+        // !(core_rom_req_s && !core_rom_ack_85).
         if (core_rom_req_s && !core_rom_ack_85 && !pf_pend_q
             && !sd_rd_req && !sd_rd_ack
-            && !fpv_owner && !fpe_owner && !fpv_want && !fpe_want
+            && !fpv_owner && !fpe_owner
+            && (mo_first_q || (!fpv_want && !fpe_want))
             && !mo_owner && !pf_owner) begin
             sd_rd_req <= 1'b1;
             rd_addr_q <= {1'b0, core_rom_addr};
