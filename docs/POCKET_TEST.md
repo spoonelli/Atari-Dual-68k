@@ -23,7 +23,7 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
    > with nowhere to write high scores.
 2. **SD card layout** (Pocket firmware 1.1+, jailbroken for unofficial cores):
    ```
-   /Cores/spoonelli.ataridual68k/
+   /Cores/spoonelli.eprom/
        bitstream.rbf_r
        core.json  audio.json  data.json  input.json  interact.json  variants.json  video.json
        info.txt   icon.bin
@@ -42,7 +42,7 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
      (see [`ROMS.md`](ROMS.md)). This project never distributes ROM data —
      and no platform artwork either; the shipped image is an original text
      placeholder you can replace on your SD.
-3. Insert SD, power on, open **Atari Dual 68k** from the Pocket menu. It asks
+3. Insert SD, power on, open **Escape: Robot Monsters** from the Pocket menu. It asks
    for the ROM (required slot) on launch.
 
 ## Controls

@@ -226,9 +226,15 @@ If you report a problem, a photo showing the build number plus page 2 (or page
 
 ## Notes for this release
 
-**The core still installs as `spoonelli.ataridual68k`.** Renaming it to
-`spoonelli.eprom` was considered for this release and **deliberately not done**
-— see below.
+**The core installs as `spoonelli.eprom`** as of v0.1.0 — the rename this
+section recommended ("if it passes, rename before tagging") is done. Two
+consequences for anyone upgrading from a development build:
+1. The old `/Cores/spoonelli.ataridual68k/` folder stays on your SD card and
+   appears as a second menu entry until you delete it.
+2. Saves are keyed by platform id (`eprom`), which did not change — your high
+   scores carry over. The one-device confirmation of that (A6) is part of the
+   RC test pass; the analysis below explains why the risk was accepted now
+   rather than at 1.0.
 
 **Nothing in the package is copyrighted content.** No ROM data, and the
 platform image is an original text placeholder, not marquee art. The packaging
@@ -237,7 +243,7 @@ folder contains anything but the placeholder note, or if any file other than
 the bitstream exceeds 600 KB. All three checks are tested against deliberately
 broken inputs, so they are known to be capable of failing.
 
-### Why the core was not renamed
+### Why the rename happened at v0.1.0 (the original analysis, kept)
 
 The Pocket keys its save files by **platform id**, not by core directory name,
 and the platform id (`eprom`) would not change in a rename — so on the

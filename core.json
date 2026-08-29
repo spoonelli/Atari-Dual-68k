@@ -3,7 +3,7 @@
         "magic": "APF_VER_1",
         "metadata": {
             "platform_ids": ["eprom"],
-            "shortname": "ataridual68k",
+            "shortname": "eprom",
             "description": "Atari 'Escape' hardware (dual 68000, JSA-I audio). Escape from the Planet of the Robot Monsters.",
             "author": "spoonelli",
             "url": "https://github.com/spoonelli/Atari-Dual-68k",

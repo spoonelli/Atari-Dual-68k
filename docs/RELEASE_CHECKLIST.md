@@ -22,10 +22,10 @@ Two sequencing facts drive the order:
 
 | # | Item | State | Note |
 |---|---|---|---|
-| A1 | Core identity `spoonelli.ataridual68k` -> `spoonelli.eprom` | TODO | Must land **before** any public release. Verify saves still resolve (`/Saves/eprom/common/`) on a real device afterwards. |
-| A2 | **Third-party attribution / GPL-3.0 compliance** | TODO | The most-missed item. We vendor TG68K (Tobias Gubener), jt51 (Jose Tejada), T65, TMS5220, and the Atari System 1 MiSTer RTL. A public GPL release needs a CREDITS/NOTICE naming each upstream, its licence, and preserved file headers. |
+| A1 | Core identity `spoonelli.ataridual68k` -> `spoonelli.eprom` | **DONE (v0.1.0 prep)** | Renamed: core.json shortname, package.sh, docs. `platform_ids` stays `eprom`; saves platform-keyed. Device confirmation of save carry-over folds into A6. Upgraders must delete the old core folder (noted in RELEASE_NOTES + README). |
+| A2 | **Third-party attribution / GPL-3.0 compliance** | **DONE (v0.1.0 prep)** | `NOTICE.md` at repo root: compliance inventory of every compiled component with authors, licences, vendored-file locations; reference/ material separated; the TMS5220 coefficient-provenance question stays flagged there. |
 | A3 | Single combined history rewrite (marquee blob + `output/` dirs) | BLOCKED | Rewritten mirror is prepared and verified; force-push needs approval. Pre-purge backup: `Documents/Lloyd Projects/atari-dual68k-prepurge-backup.bundle`. |
-| A4 | `input.json` vs RTL audit — **all** buttons, **both** players | TODO | The P2 bomb was a declared-vs-actual mismatch. Do not assume it was the only one; check the whole table rather than the one entry we already found. |
+| A4 | `input.json` vs RTL audit — **all** buttons, **both** players | **DONE (v0.1.0 prep)** | Full sweep: A/B/X/Y/Select map to cont1_key 4/5/6/7/14 exactly as the RTL consumes them, both controller blocks declared, Start-shares-Jump matches the schematic, shoulders intentionally unmapped (HUD-only). No mismatches found beyond the long-fixed P2 bomb. |
 | A5 | Debug HUD gated behind a menu toggle, default off | **DONE (build 114)** | `interact.json` id 38 'Developer HUD', default unchecked. With it clear, `diag_on` is forced low, so L1/R1/R/L2 do nothing and no debug path reaches video. RTL still compiled in -- see **section F**; the `DIAG_EN` compile-time half remains open. |
 | A6 | Save-path device test on real hardware | TODO | Gates the alpha/RC tag. |
 | A7 | Clean-boot look on real hardware | TODO | Gates the alpha/RC tag. |
@@ -35,7 +35,7 @@ Two sequencing facts drive the order:
 
 | # | Item | State | Note |
 |---|---|---|---|
-| B1 | Pocket game label -> "Escape from the Planet of the Robot Monsters" | TODO | **Two separate fields**: core name in `core.json`, platform name in `Platforms/eprom.json`. 44 characters will likely truncate on device — check the display limit and plan a short form plus full name. |
+| B1 | Pocket game label | **DONE (v0.1.0 prep)** | Platform name: `Escape: Robot Monsters` (22 chars, no truncation risk); full 44-char title lives in core.json description and the docs. Category Arcade / Atari Games / 1989 unchanged. |
 | B2 | Version scheme | **DONE** | Scheme fixed (2026-08-28, owner call): `core.json` version and the git tag move in lockstep — `v0.1.0` = first public RC, `0.x.y` during field-testing, `1.0.0` only when every section-A blocker is closed; patch bumps for fixes, minor bumps for features (eprom2). `BUILD_ID` stays the internal on-HUD build counter, and RELEASE_NOTES records the mapping (v0.1.0 = build 133) so a HUD photo identifies a release exactly. MiSTer versions independently (`mister-v0.x.y`). `core.json` set to 0.1.0. |
 | B3 | pupdate / openFPGA inventory listing | TODO | Community inventory is `joshcampbell191/openfpga-cores-inventory`. Needs a **public** repo, Releases, consistent zip naming, correct `core.json` platform metadata. Research exact submission format. |
 | B4 | Public vs private decision | TODO | Going private would instantly cut public access to the marquee blob (0 forks, so airtight) **but B3 requires public**. The purge resolves this: once the blob is gone, public is fine and no GitHub Support ticket is needed. |

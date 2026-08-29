@@ -50,12 +50,13 @@ diagnostic HUD latches the 6502 address it died at. The measured gap list is
 > with the residual being MAME slowing *more* than this core under load (see
 > **Accuracy**).
 
-**Core identity:** the core currently installs as `spoonelli.ataridual68k`.
-Renaming it to `spoonelli.eprom` is proposed but **not done** — see
-[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md). The platform id is `eprom`
-either way, so the ROM goes in `Assets/eprom/common/` and saves in
-`Saves/eprom/common/`. Platform art is an original text placeholder; real
-marquee art is user-supplied and not distributed, like the ROMs.
+**Core identity:** the core installs as `spoonelli.eprom` (renamed from the
+development identity `spoonelli.ataridual68k` at v0.1.0 — if you ran dev
+builds, delete the old core folder to avoid a duplicate menu entry). The
+platform id is `eprom`, so the ROM goes in `Assets/eprom/common/` and saves in
+`Saves/eprom/common/`; saves are platform-keyed and carry over. Platform art
+is an original text placeholder; real marquee art is user-supplied and not
+distributed, like the ROMs.
 
 Full hardware map, roadmap, and schematic findings: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
