@@ -69,10 +69,10 @@ others — the rows below describe what they would require, not partial support.
 | Set | Title | Status |
 |---|---|---|
 | **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
-| `eprom2` | Escape … (set 2) | Not supported. Same machine config and same hardware; differs only in program-ROM revisions (all rev 1, plus a `.40e`/`.50e` pair set 1 lacks). Plausibly a small step rather than a project — but nobody has tried it, so that is a guess. |
-| `klaxp1` | Klax (prototype set 1) | Not supported. Future target. |
-| `klaxp2` | Klax (prototype set 2) | Not supported. Future target. |
-| `guts` | Guts n' Glory (prototype) | Not supported. Future target. |
+| `eprom2` | Escape … (set 2) | Not supported — **for future evaluation.** Same machine config and same hardware; differs only in program-ROM revisions (all rev 1, plus a `.40e`/`.50e` pair set 1 lacks). Plausibly a small step rather than a project — but nobody has tried it, so that is a guess. |
+| `klaxp1` | Klax (prototype set 1) | Not supported — **for future evaluation.** |
+| `klaxp2` | Klax (prototype set 2) | Not supported — **for future evaluation.** |
+| `guts` | Guts n' Glory (prototype) | Not supported — **for future evaluation.** |
 
 Two structural differences make the Klax and Guts prototypes future work
 rather than near-misses:
@@ -90,7 +90,8 @@ rather than near-misses:
 CRC32 does not match, so a Klax or Guts romset cannot currently be assembled
 into a core image even to try.
 
-**Not an alpha target.** This section is a roadmap note, not a promise.
+**None of these are release targets.** This section marks the other titles on
+this boardset **for future evaluation** — a roadmap note, not a promise.
 
 ## Related: the MiSTer port
 
