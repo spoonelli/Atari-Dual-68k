@@ -95,8 +95,8 @@ this boardset **for future evaluation** — a roadmap note, not a promise.
 
 ## Related: the MiSTer port
 
-A MiSTer (DE10-Nano) port exists and is under active hardware bring-up on the
-`mister-*` branches. It plays, with its own platform work now landed: the
+A MiSTer (DE10-Nano) port lives on the `mister` branch and plays on real
+hardware, with its own platform work landed: the
 playfield holds top priority on the single shared SDRAM (the Pocket gives it a
 separate PSRAM, MiSTer has no second RAM), fetch-return crossings carry the
 same settle-stage arrangement the Pocket uses, an on-screen build stamp shows

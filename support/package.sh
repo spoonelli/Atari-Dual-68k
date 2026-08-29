@@ -158,6 +158,6 @@ fi
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets )
+( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets build_rom.py )
 echo "packaged: $OUT"
 unzip -l "$OUT"

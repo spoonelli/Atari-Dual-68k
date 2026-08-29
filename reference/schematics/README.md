@@ -13,7 +13,7 @@ in `docs/ARCHITECTURE.md` is not copyrightable and stays in the repo.
 | Sheets | Contents | RTL relevance |
 |--------|----------|---------------|
 | 1      | Main wiring diagram | I/O, control inputs |
-| 2–10   | Escape Main PCB assembly | dual 68000, memory decode/PALs, video (playfield / motion objects / alpha), palette, SLAPSTIC, clock & sync generation |
+| 2–10   | Escape Main PCB assembly | dual 68000-family CPUs (the drawings specify 68010), memory decode/PALs, video (playfield / motion objects / alpha), palette, SLAPSTIC, clock & sync generation |
 | 11–14  | Stand-Alone Audio PCB (JSA) | 6502, YM2151, POKEY, TMS5220, banking |
 | 15     | Power supply / coin door | not needed for the core |
 | 16     | Memory map, RAM/ROM error locations, Hall-effect joystick PCB | authoritative address map; analog joystick handling |
