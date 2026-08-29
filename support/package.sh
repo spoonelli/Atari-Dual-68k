@@ -21,7 +21,7 @@ OUT="${2:-$REPO/output/AtariDual68k-pocket.zip}"
 case "$OUT" in /*) ;; *) OUT="$PWD/$OUT";; esac
 
 AUTHOR="spoonelli"
-SHORT="ataridual68k"             # dev identity; release profile will ship spoonelli.eprom
+SHORT="eprom"                    # release identity (A1): installs as Cores/spoonelli.eprom
 PLATFORM="eprom"                 # must match core.json platform_ids[0]
 CORE_DIR="Cores/${AUTHOR}.${SHORT}"
 
@@ -46,17 +46,23 @@ cp "$RBF" "$STAGE/$CORE_DIR/bitstream.rbf_r"
 cp "$REPO/dist/platforms/$PLATFORM.json" "$STAGE/Platforms/"
 cp "$REPO/dist/platforms/_images/$PLATFORM.bin" "$STAGE/Platforms/_images/"
 
+# the ROM builder ships at the zip ROOT, deliberately outside Assets/ --
+# Guard 2 asserts Assets/ holds exactly the placeholder, and root files are
+# not merged onto the SD by users following the folder-copy instructions.
+cp "$REPO/support/build_rom.py" "$STAGE/build_rom.py"
+
 # Assets dir ships EMPTY (plus a note) -- ROMs are user-supplied, never distributed
 cat > "$STAGE/Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" <<'EOF'
 Put your self-built atari_escape.rom in this folder, under exactly that name --
 data.json declares it as a required slot and the Pocket asks for that filename.
 
-Build it from your own verified dumps of the MAME 'eprom' set. The tool lives in
-this project's source, not in this package:
+Build it from your own verified dumps of the MAME 'eprom' set. The tool is
+included at the top level of this zip (and in the project source at
+support/build_rom.py):
 
-  git clone https://github.com/spoonelli/Atari-Dual-68k
-  cd Atari-Dual-68k
-  python3 support/build_rom.py /path/to/eprom.zip ./atari_escape.rom
+  python3 build_rom.py /path/to/eprom.zip atari_escape.rom
+
+then place atari_escape.rom in this folder.
 
 Python 3 is the only requirement. Every chip is CRC32-checked against MAME's
 known-good values; a wrong or incomplete set is refused rather than half-built.
@@ -152,6 +158,6 @@ fi
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets )
+( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets build_rom.py )
 echo "packaged: $OUT"
 unzip -l "$OUT"
