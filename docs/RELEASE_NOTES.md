@@ -158,11 +158,12 @@ there is no operating condition worse than the one signed off.
 
 ## Not implemented
 
-- **Any game other than `eprom`.** The Escape board family also ran the *Klax*
-  and *Guts n' Glory* prototypes, and older versions of this README implied the
-  core covered them. It does not: those are single-CPU boards using JSA-II with
-  an OKI6295, and there is no OKI6295 in this RTL. `build_rom.py` builds only
-  the MAME `eprom` set and rejects chips whose CRCs do not match it.
+- **Any game other than `eprom`.** `eprom2` (the set-2 program-ROM revisions,
+  same hardware) is **the next target**. The *Klax* and *Guts n' Glory*
+  prototype romsets are documented but remain future evaluation: those are
+  single-CPU boards using JSA-II with an OKI6295, and there is no OKI6295 in
+  this RTL. `build_rom.py` builds only the MAME `eprom` set and rejects chips
+  whose CRCs do not match it.
 - **Save states / sleep.** None. `core.json` declares `sleep_supported: false`.
   Closing the core loses your position; only the EEPROM (high scores and
   operator settings) survives.
