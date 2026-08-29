@@ -1,4 +1,4 @@
-# Atari Dual 68k — Alpha release notes
+# Atari Dual 68k — v0.1.0 release notes
 
 An openFPGA core for the **Analogue Pocket** that implements Atari's
 *Escape from the Planet of the Robot Monsters* (1989) — the dual-68010 arcade
@@ -6,8 +6,9 @@ board, not an emulator port. The RTL is an independent re-implementation
 worked out from Atari's SP-332 schematic package, with MAME's `eprom.cpp`
 driver as a behavioural cross-check.
 
-**This is an alpha.** It plays the game from the first coin to the end, and it
-has real, measured gaps. This document is the honest list. Nothing here is
+**This is v0.1.0, the first public release.** It plays the game from the first
+coin to the end, and it has real, measured gaps. This document is the honest
+list. Nothing here is
 hidden in a footnote; if you are deciding whether to install it, read the
 "Known imperfect" and "Not implemented" sections and decide from those.
 
@@ -30,16 +31,18 @@ hidden in a footnote; if you are deciding whether to install it, read the
 1. Download the zip attached to this release and unzip it onto your Pocket SD
    card. It merges into the existing `Cores/`, `Platforms/` and `Assets/`
    folders.
-2. Build `atari_escape.rom` from dumps you own and put it in
-   `/Assets/eprom/common/` on the SD card. The builder is
+2. Build `atari_escape.rom` from dumps you own. The builder ships **in the
+   zip** (`build_rom.py` at the top level; also
    [`support/build_rom.py`](https://github.com/spoonelli/Atari-Dual-68k/blob/main/support/build_rom.py)
-   in the source repository:
+   in the source repository):
    ```
-   python3 support/build_rom.py /path/to/eprom ./atari_escape.rom
+   python3 build_rom.py /path/to/eprom.zip
    ```
-   It verifies all 28 chips against known-good CRC32s and refuses anything that
-   does not match. Details in [`ROMS.md`](ROMS.md).
-3. Launch **Atari Dual 68k** from the Pocket menu. It asks for the ROM on
+   It writes `atari_escape.rom` next to the script — move it to
+   `/Assets/eprom/common/` on the SD card. All 28 chips are verified against
+   known-good CRC32s; anything that does not match is refused. Details in
+   [`ROMS.md`](ROMS.md).
+3. Launch **Esc Robot Monst** from the Pocket menu. It asks for the ROM on
    startup.
 
 High scores and operator settings save themselves to
@@ -87,29 +90,33 @@ comparisons against MAME's own implementation:
 
 ## Known imperfect
 
-**Sprite dropouts in dense crowds.** Under heavy motion-object load the core
-can drop sprite scanlines the real board would draw. This is a bandwidth
-problem: the Pocket reaches its graphics data over SDRAM and a PSRAM chip,
-where the arcade board had parallel mask ROMs and no contention at all.
+**Resolved since the alpha list was first written** — kept here because the
+alpha circulated with these as open items:
 
-The rate is measured, per robot-object-frame:
-
-| Configuration | Dropout rate | 95% CI |
-|---|---|---|
-| Real arcade board | 0 events in ~7,150 | [0, 5.16e-04] |
-| No ROM shadow | 1.252e-03 | [8.51e-04, 1.78e-03] |
-| Full 32 KB shadow | 3.222e-04 | [1.47e-04, 6.12e-04] |
-| **This release (16 KB partial)** | **2.410e-04** | **[9.69e-05, 4.97e-04]** |
-
-The shipped configuration is **5.19× better than running with no shadow**
-(p = 1.0e-05) and statistically indistinguishable from the full 32 KB shadow
-(p = 0.62), while using 16 block-RAMs instead of 25 and handing 5.5% of
-video-CPU execution back to the more accurate 4-clock fastpath. Its entire
-confidence interval sits inside the bound established for the real board.
-
-The *ROM Shadow 0x54000* toggle in the Interact menu is **on by default and
-should stay that way** — turning it off is the 1.252e-03 row above. It is
-exposed for diagnosis, not as a tuning knob.
+- **Sprite dropouts in dense crowds** — closed by MOPAIR-131/MOPF2-132. The
+  root cause was architectural, not bandwidth-tuning: the real board fills a
+  *pair* of line buffers at two pixels per clock (SP-332 sheet 9), and the
+  engine now does the same, plus a second prefetch lane for each sprite's
+  second tile. The crowd-scene fixture went from 527 missing pixels to 0,
+  worst-case fetch latency from 153 to 34, and two full device playthroughs
+  show no dropouts. The dropout-rate table this section used to carry
+  described the single-buffer engine and is preserved in
+  [`investigations/MO_TILE_HOLES.md`](investigations/MO_TILE_HOLES.md).
+  The *ROM Shadow 0x54000* toggle remains **on by default and should stay
+  that way**; it is exposed for diagnosis, not as a tuning knob.
+- **"Occasional small sprite artifacts — reported, not reproduced"** — it was
+  real, and the statistical detectors were right that the shipped builds'
+  holes would not reproduce on a bench: the failure needed real-traffic fetch
+  latency. Same fix, same evidence, as above.
+- **Slightly under arcade speed in places** — the measured tail (video CPU at
+  0.973 logic frames per video frame, p10 0.703) was the same line-buffer
+  fill contention, and closed with it. The end-to-end benchmark now reads:
+  a full attract cycle within **0.35%** of MAME's frame count, walk cadence
+  locked at exactly 8 frames per animation phase against four real-cabinet
+  captures, and under the heaviest crowd load this core slows *less* than
+  MAME's 68000 model — consistent with the dedicated cabinet's 68010 — while
+  never running faster than authentic. HUD page 5 still shows the live
+  cadence figure. Current gap list: [`DEVIATIONS.md`](DEVIATIONS.md) §D.
 
 **A left-edge artifact.** Native columns 0-1 render stale playfield data on
 some screens. **Exact repro and measurement (build 113 field capture,
@@ -125,15 +132,6 @@ not a regression from anything in this release. It is a known item, deferred
 rather than fixed; no fix is imminent. Recorded in
 [`DEVIATIONS.md`](DEVIATIONS.md).
 
-**The game runs slightly under arcade speed in places.** Measured, the video
-CPU completes **0.973** logic frames per video frame against MAME's **0.9977**.
-The median is very nearly right; the whole deficit is in the tail (p10 = 0.703,
-minimum 0.313), and that tail is what reads as sluggishness in crowded scenes.
-The world CPU is at 0.984 vs 0.9999 and is not worth chasing. You can watch
-this live on HUD page 5, in the same units MAME is quoted in. Ruled out as
-causes: CPU type, and any constant few-percent overhead — a flat term cannot
-produce that tail shape.
-
 **Shimmer on 1-pixel diagonals.** The Pocket scales 336×240 up to 1440×1080,
 which is not an integer ratio, so every 1-pixel feature is drawn 4 or 5 pixels
 thick depending on where it lands (measured: period-9 fold contrast 12.3×).
@@ -145,14 +143,6 @@ off.
 **A 33-pixel horizontal deviation from MAME at scroll positions 50 and 157.**
 Reproduces identically across builds, so it is not a regression. Probably an
 un-wrapped coordinate in off-screen sprite rejection.
-
-**"Occasional small sprite artifacts" — reported, not reproduced.** The owner
-has seen small blocks that look like sprite cells that failed to write. Three
-independent detectors failed to find it: enclosed-black count is 0 in ours
-against 11 in MAME, and hole rate is statistically indistinguishable across
-builds. It may still be real — a sprite fetching wrong-but-plausibly-coloured
-data cannot be caught by any statistical shape test — but at present it is an
-observation without a measurement behind it.
 
 **Timing margin is thin, structurally.** Hold slack sits at roughly +0.10 ns
 and the design is at a floor: the SDRAM clock is exactly 5× the pixel clock and
@@ -236,8 +226,8 @@ consequences for anyone upgrading from a development build:
 1. The old `/Cores/spoonelli.ataridual68k/` folder stays on your SD card and
    appears as a second menu entry until you delete it.
 2. Saves are keyed by platform id (`eprom`), which did not change — your high
-   scores carry over. The one-device confirmation of that (A6) is part of the
-   RC test pass; the analysis below explains why the risk was accepted now
+   scores carry over. **Device-confirmed 2026-08-29** on the release
+   candidate; the analysis below explains why the risk was accepted at 0.1.0
    rather than at 1.0.
 
 **Nothing in the package is copyrighted content.** No ROM data, and the
