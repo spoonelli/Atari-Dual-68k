@@ -174,7 +174,8 @@ jobs:
           mkdir -p mister-release
           cp src/mister/output_files/Arcade-Escape.rbf mister-release/escape.rbf
           cp src/mister/releases/*.mra mister-release/
-          cp docs/MISTER.md mister-release/README.md
+          # user-facing install README; docs/MISTER.md stays the engineering record
+          cp src/mister/releases/README.md mister-release/README.md
 
       - name: Release must contain no ROM data
         run: |
