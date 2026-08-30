@@ -39,8 +39,8 @@ Two sequencing facts drive the order:
 | B2 | Version scheme | **DONE** | Scheme fixed (2026-08-28, owner call): `core.json` version and the git tag move in lockstep — `v0.1.0` = first public RC, `0.x.y` during field-testing, `1.0.0` only when every section-A blocker is closed; patch bumps for fixes, minor bumps for features (eprom2). `BUILD_ID` stays the internal on-HUD build counter, and RELEASE_NOTES records the mapping (v0.1.0 = build 35) so a HUD photo identifies a release exactly. MiSTer versions independently (`mister-v0.x.y`). `core.json` set to 0.1.0. |
 | B3 | pupdate / openFPGA inventory listing | TODO — **now unblocked** | v0.1.0 Release is published (2026-08-29), repo public, zip naming fixed. Remaining: research `joshcampbell191/openfpga-cores-inventory` submission format and submit. |
 | B4 | Public vs private decision | **DONE** | Public, post-purge. See A3 for the refs/pull residual and the optional Support ticket. |
-| B5 | `video.json` out-of-box look (aspect, scaler) | TODO | Most players never open settings. |
-| B6 | `interact.json` defaults sane for a first-time user | TODO | 11 entries today; HUD off, ROM Shadow on. |
+| B5 | `video.json` out-of-box look (aspect, scaler) | **DONE (audited 2026-08-30)** | One scaler mode: 336x240 at 4:3, no rotation/mirror — correct for this game. |
+| B6 | `interact.json` defaults sane for a first-time user | **DONE (audited 2026-08-30)** | 12 variables (under the Pocket's 16-render cap), every default correct: Service/Skip-Test off, sticks normal, deadzone 8, both volumes full, EEPROM Autosave on, ROM Shadow on, Developer HUD off. |
 
 ## C. Repo hygiene — "looks like a commercial release"
 
