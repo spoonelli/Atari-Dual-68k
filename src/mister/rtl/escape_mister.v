@@ -336,8 +336,14 @@ always @(posedge clk_sdram) begin
         // the motion objects' copy). PF and MO stop evicting each other's
         // open rows: the Pocket's PSRAM separation, rebuilt out of bank
         // partitioning. ioctl_wait backpressure absorbs the extra write.
-        if (dl_addr_q >= SPR_BASE) begin
-            sd_wr_addr <= dl_addr_q + 25'h04E0000;
+        // MISTER-151: the mirror address MUST come from the FSM-latched
+        // sd_wr_addr, never from dl_addr_q - the accumulator overwrites
+        // dl_addr_q the moment a following group's 4th byte lands, and the
+        // doubled write window widens that race. A clobbered dl_addr_q here
+        // wrote the WRONG tile into the mirror: persistent, download-
+        // dependent sprite corruption (owner frames 7548/4985, build 150).
+        if (sd_wr_addr >= SPR_BASE) begin
+            sd_wr_addr <= sd_wr_addr + 25'h04E0000;
             sd_wr_req  <= 1'b1;
             dl_phase   <= 3'd3;
         end else begin
