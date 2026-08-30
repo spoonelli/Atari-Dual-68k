@@ -2448,7 +2448,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // ---------------- on-device build version (diag strip, right of bit row)
     // BUMP EVERY RELEASE and verify on-screen digits match the packaged zip:
     // guards against flashing/labeling control issues.
-    localparam [15:0] BUILD_ID = 16'h3135;   // v0.1.0 RC2: menu name + packaged build_rom.py - screen shows '35'
+    localparam [15:0] BUILD_ID = 16'h3136;   // v0.1.1: release metadata patch (date_release, 68010 description) - screen shows '36'
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);

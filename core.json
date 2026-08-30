@@ -7,8 +7,8 @@
             "description": "Atari 'Escape' hardware (dual 68010, JSA-I audio). Escape from the Planet of the Robot Monsters.",
             "author": "spoonelli",
             "url": "https://github.com/spoonelli/Atari-Dual-68k",
-            "version": "0.1.0",
-            "date_release": "2026-08-29"
+            "version": "0.1.1",
+            "date_release": "2026-08-30"
         },
         "framework": {
             "target_product": "Analogue Pocket",
