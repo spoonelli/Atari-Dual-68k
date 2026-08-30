@@ -16,9 +16,10 @@ release — a fix on one platform is a fix on both.
 [docs/DEVIATIONS.md](https://github.com/spoonelli/Atari-Dual-68k/blob/main/docs/DEVIATIONS.md)):
 attract-loop period within 0.35% of MAME; walk cadence locked at 8
 frames/phase against real-cabinet captures; the core never runs faster than
-authentic. These figures were measured on the shared machine RTL; the
-MiSTer port is still accumulating its own device hours — treat these as
-field-testing builds.
+authentic. Crowd-scene performance on this port is measured at parity
+with the Pocket release (identical scroll-velocity distributions, zero
+slowdown dips where MAME dips in 19-28% of samples). Treat these as
+field-testing builds all the same.
 
 ## Install
 

@@ -6,19 +6,17 @@ that instantiates **the identical RTL the Pocket build uses** — `escape_core`,
 with MiSTer-shaped glue around it. Nothing in the machine is forked; if you fix
 a bug in `src/fpga/core/rtl/`, both platforms get it.
 
-> **Status (2026-08, build 139): plays on a real DE10-Nano.** The port has
-> been through repeated device rounds on the owner's hardware. Landed since the
-> early-history sections below were written: the game runs from the `mister`
-> branch with a boot splash + credits overlay (keyboard **C** cycles pages),
-> Music/Speech volume sliders in the OSD, and a build number on the splash
-> ("MISTER BUILD NNN" — always check it matches the .rbf you flashed).
-> Display corruption was fixed in layers, each device-verified: fixed-sprite
-> streaks were playfield scanline-deadline starvation (135 — PF now outranks
-> the CPUs on this bus), bit-soup garble was a missing CDC settle on the
-> SDRAM done-return (136), and machine flashing led to the MO anti-starvation
-> boost (137→139; the Pocket's blanket rule starves this bus's CPUs — see
-> `DEVIATIONS.md` §F2). The history sections below are kept as the port
-> record; where they disagree with this note, this note wins.
+> **Status (2026-08-30, build 152): at performance parity with the Pocket
+> release, measured.** Since the v0.1.0 status below: the open-row SDRAM
+> controller (141), the MO/fastpath one-for-one interleave with its demand
+> escape (146/147), the bank-2 MO tile mirror - the Pocket's PSRAM
+> separation rebuilt in SDRAM banks (150) - and the mirror download-race
+> fix (151). Crowd-scene scroll-velocity distributions are now identical
+> to the shipping Pocket build (median 5.33 native px/(1/30s), zero
+> sub-half-speed dips; MAME dips in 19-28% of samples). Default buttons:
+> Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top) (152). The
+> arbiter saga (137-149) is preserved below and in the tb_mister_moarb
+> bench, whose gates are calibrated against the hardware verdicts.
 >
 > **Released: [`mister-v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.0)**
 > (2026-08-29, BUILD 142, `escape_20260829.rbf`) — both gates below were met:
