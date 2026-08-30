@@ -108,6 +108,12 @@ alpha circulated with these as open items:
   real, and the statistical detectors were right that the shipped builds'
   holes would not reproduce on a bench: the failure needed real-traffic fetch
   latency. Same fix, same evidence, as above.
+- **The left-edge stale strip** (native columns 0-1 showing old playfield
+  content on transition screens) — closed at build 125: every layer sat
+  2 px right of MAME's window (`VID_H_BPORCH` 60 → 62), so the leftmost
+  columns showed the 512-px tilemap wrapping around from its far side.
+  The owner's own hypothesis — "is that line just phase shifted from the
+  other side?" — was exactly right, from the tilemap's other side.
 - **Slightly under arcade speed in places** — the measured tail (video CPU at
   0.973 logic frames per video frame, p10 0.703) was the same line-buffer
   fill contention, and closed with it. The end-to-end benchmark now reads:
@@ -117,20 +123,6 @@ alpha circulated with these as open items:
   MAME's 68000 model — consistent with the dedicated cabinet's 68010 — while
   never running faster than authentic. HUD page 5 still shows the live
   cadence figure. Current gap list: [`DEVIATIONS.md`](DEVIATIONS.md) §D.
-
-**A left-edge artifact.** Native columns 0-1 render stale playfield data on
-some screens. **Exact repro and measurement (build 113 field capture,
-t=16.5-17.5s):** during the blue map/transition screen the whole picture is
-flat navy EXCEPT columns 0 and 1, which still show the *previous* gameplay
-scene - red wall segments and a fragment of grey floor, full screen height.
-Measured per native column against the flat-navy body: columns 0 and 1 are
-**100% non-navy**, columns 2-9 are **0%**. A hard two-column boundary. The
-transition screen is the best place to see it precisely because the rest of
-the frame is featureless, so the stale strip cannot be mistaken for content. MAME convicts it, so it is a real bug rather than a display
-quirk. It is **not new** — it is present identically in earlier builds and is
-not a regression from anything in this release. It is a known item, deferred
-rather than fixed; no fix is imminent. Recorded in
-[`DEVIATIONS.md`](DEVIATIONS.md).
 
 **Shimmer on 1-pixel diagonals.** The Pocket scales 336×240 up to 1440×1080,
 which is not an integer ratio, so every 1-pixel feature is drawn 4 or 5 pixels
@@ -218,8 +210,10 @@ If you report a problem, a photo showing the build number plus page 2 (or page
 
 ## Notes for this release
 
-**Version mapping:** v0.1.0 = `BUILD_ID` 35 (the two cyan digits on the
-diagnostic HUD read `35`). A HUD photo identifies this release exactly.
+**Version mapping:** v0.1.1 = `BUILD_ID` 36; v0.1.0 = `BUILD_ID` 35 (the
+two cyan digits on the diagnostic HUD). A HUD photo identifies a release
+exactly. v0.1.1 is a metadata patch: corrected `date_release`, 68010 in
+the core description - no RTL change.
 
 **The core installs as `spoonelli.eprom`** as of v0.1.0 — the rename this
 section recommended ("if it passes, rename before tagging") is done. Two
