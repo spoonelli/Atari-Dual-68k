@@ -20,7 +20,7 @@ W, H = 336, 240
 PAGES = [
     [
         "ATARI DUAL 68K - EPROM",
-        "MISTER BUILD 152",          # BUMP with every MiSTer build: this line
+        "MISTER BUILD 153",          # BUMP with every MiSTer build: this line
                                       # doubles as the boot-splash stamp, the
                                       # only on-device proof of which rbf runs
         "@spoonelli_dev",
@@ -45,12 +45,13 @@ PAGES = [
         "Atari-system1 by d18c7db",
         "(Alex), incl. TMS5220",
         "",
-        "68000s: TG68K.C, Tobias",
+        "68010s: TG68K.C, Tobias",
         "Gubener (TobiFlex),",
         "LGPL-3.0; patches MikeJ,",
         "Till Harbaum, Rok Krajnc",
         "",
-        "JSA 6502: T65, D.Wallner",
+        "JSA 6502: T65 (BSD),",
+        "D.Wallner et al",
         "YM2151: jt51 by jotego",
         "(GPL-3.0)",
         "",
@@ -58,7 +59,7 @@ PAGES = [
         "eprom.cpp (Aaron Giles,",
         "BSD-3-Clause). No MAME",
         "source copied.",
-        "",
+        "Full terms: NOTICE.md",
         "        - page 2 of 2 -",
     ],
 ]
