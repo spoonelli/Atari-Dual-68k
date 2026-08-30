@@ -179,7 +179,7 @@ localparam CONF_STR = {
 	"T[16],Show Credits;",
 	"-;",
 	"J1,Jump,Fire,Duck,Bomb,Start,Coin,Credits;",
-	"jn,A,B,X,Y,Start,Select,R;",
+	"jn,Y,B,A,X,Start,Select,R;"   // owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top),
 	"V,v",`BUILD_DATE
 };
 

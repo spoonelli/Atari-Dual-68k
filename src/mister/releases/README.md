@@ -43,7 +43,8 @@ has caught that more than once.
 
 Run **Define eprom buttons** in the OSD the first time (new buttons do not
 appear in previously saved maps): Jump, Fire, Duck, Bomb, Start, Coin, and
-Credits.
+Credits. Fresh installs default to Jump on the left face button, Fire on
+the bottom, Duck on the right, Bomb on top (SNES Y/B/A/X).
 
 ## OSD options
 
