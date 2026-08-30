@@ -73,7 +73,12 @@ _Arcade/cores/escape_<YYYYMMDD>.rbf
    in place (`gh release upload mister-db … --clobber`). No extra branch,
    release infrastructure only. `releases/latest` cannot be used as the
    anchor: MiSTer releases are pre-releases, so `latest` resolves to the
-   Pocket line by design.
+   Pocket line by design. **Since 2026-08-30 the db's file URLs point at
+   the distribution repo's committed `releases/` files** (raw URLs into
+   `Arcade-Escape_MiSTer`), and the installed names are
+   `Arcade-Escape_YYYYMMDD.rbf` + the retagged MRA — one naming scheme
+   across manual installs, the db, and the future official distribution.
+   Regenerate from that repo's `releases/` directory.
 4. Users add, once, to `/media/fat/downloader.ini`:
    ```ini
    [spoonelli/ataridual68k]
