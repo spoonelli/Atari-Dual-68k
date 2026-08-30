@@ -266,7 +266,7 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
 | Platform | Release tag | Package |
 |---|---|---|
 | **Analogue Pocket** | [`v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/v0.1.0) (plain `v*` tags) | `AtariDual68k-pocket-v*.zip` |
-| **MiSTer (DE10-Nano)** | [`mister-v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.0) (`mister-v*` tags, field-testing pre-releases) | `AtariDual68k-mister-*.zip` with a dated `escape_YYYYMMDD.rbf` |
+| **MiSTer (DE10-Nano)** | [`mister-v0.1.1`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.1) (`mister-v*` tags, field-testing pre-releases; [update_all database](docs/DISTRIBUTION.md) available) | `AtariDual68k-mister-*.zip` with a dated `escape_YYYYMMDD.rbf` |
 
 Download the packaged zip from the
 [**Releases page**](https://github.com/spoonelli/Atari-Dual-68k/releases).
