@@ -87,6 +87,13 @@ Release-time checklist: upload `.rbf` + `.mra` as release assets, run
 every db URL's md5 against the db (a stale CDN copy can lag a clobber by
 ~1 minute).
 
+**Distribution repo:** [`Arcade-Escape_MiSTer`](https://github.com/spoonelli/Arcade-Escape_MiSTer)
+carries the core in the MiSTer standard layout (`sys/`, `rtl/` fully
+vendored, `releases/Arcade-Escape_YYYYMMDD.rbf` + MRA) — the repository
+that will be submitted to, and transferred into, MiSTer-devel when the
+adoption step below runs. Development stays in this repository; each
+MiSTer release is vendored over.
+
 **Roadmap — official MiSTer-devel adoption (the zero-friction tier).**
 `update_all`'s menu is a curated list (official distribution, JTCORES,
 Coin-Op Collection); independent cores cannot inject themselves into it,
