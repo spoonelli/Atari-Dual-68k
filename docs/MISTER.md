@@ -18,9 +18,12 @@ a bug in `src/fpga/core/rtl/`, both platforms get it.
 > arbiter saga (137-149) is preserved below and in the tb_mister_moarb
 > bench, whose gates are calibrated against the hardware verdicts.
 >
-> **Released: [`mister-v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.0)**
-> (2026-08-29, BUILD 142, `escape_20260829.rbf`) — both gates below were met:
-> the boot splash is retired (142) and the rbf naming landed in CI (141).
+> **Released: [`mister-v0.1.1`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.1)**
+> (2026-08-30, BUILD 153, `escape_20260830.rbf` — the parity release; first
+> delivery through the update_all database). Previously
+> [`mister-v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.0)
+> (2026-08-29, BUILD 142) — both gates below were met: the boot splash is
+> retired (142) and the rbf naming landed in CI (141).
 >
 > **Gates for the first tagged MiSTer release** (owner-set, 2026-08-29, now met):
 >
