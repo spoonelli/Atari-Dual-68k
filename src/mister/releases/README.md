@@ -1,47 +1,110 @@
-# Escape from the Planet of the Robot Monsters — MiSTer core
+# Arcade: Escape from the Planet of the Robot Monsters (MiSTer)
+
+Self-contained MiSTer distribution repository to confirm to standard core
+layout specs (`sys/`, `rtl/`, `releases/`). **Upstream development** — the
+shared machine RTL, simulation benches, measurement tooling, and the
+Analogue Pocket build — lives at
+[spoonelli/Atari-Dual-68k](https://github.com/spoonelli/Atari-Dual-68k);
+fixes land there first and are vendored here per release.
 
 A MiSTer (DE10-Nano) port of the
 [Atari Dual 68k](https://github.com/spoonelli/Atari-Dual-68k) core,
-implementing Atari Games' 1989 arcade release (MAME set `eprom`).
+implementing Atari Games' 1989 arcade release (MAME set `eprom`).  This LLM-assisted build has been refined extensively through testing and benchmarking against an original dedicated cabinet and PCB, with architecture decisions defaulting to preserving original gameplay accuracy.  
 
-**What you get:** the whole game. The real dual-CPU program boots and
-runs on two genuinely concurrent 68010s with shared RAM and the mailbox
-handshake, as the board does (68000 selectable — the dedicated cabinet
-shipped a 68010, the JAMMA version a 68000; both are authentic). The
-full attract cycle plays out — story pages, TMS5220 announcer speech,
-high-score table, demo play — then it takes coins, starts, and plays:
-Jake walks, robots swarm, the JSA-I sound board (YM2151 FM + speech)
-delivers music and effects in real time. All three video layers come
-through the schematic's paired line-buffer sprite engine; the
-hall-effect stick model includes the game's own in-game calibration
-screens; high scores and operator settings persist. The machine RTL is
-identical to the Analogue Pocket release — a fix on one platform is a
-fix on both.
+**Features:** 
+- The dual-CPU program boots and runs on two genuinely concurrent 68010s with shared RAM and the mailbox
+handshake, as the board does (68000 selectable — the dedicated cabinet that served as a reference shipped a 68010, and also as referenced in both the JAMMA kit and dedicated schematics.  However, the developer has discovered through this process that there are multiple boards evidenced in the wild that carry 68000s; therefore, both are "authentic").
 
-**Measured accuracy** (details in the project
-[README](https://github.com/spoonelli/Atari-Dual-68k#readme) and
-[docs/DEVIATIONS.md](https://github.com/spoonelli/Atari-Dual-68k/blob/main/docs/DEVIATIONS.md)):
-attract-loop period within 0.35% of MAME; walk cadence locked at 8
-frames/phase against real-cabinet captures; the core never runs faster than
-authentic. Crowd-scene performance on this port is measured at parity
-with the Pocket release (identical scroll-velocity distributions, zero
-slowdown dips where MAME dips in 19-28% of samples). Treat these as
-field-testing builds all the same.
+- All three video layers come through the schematic's paired line-buffer sprite engine.
+
+- The hall-effect stick model includes the game's own in-game calibration
+screens; high scores and operator settings persist.
+
+- The machine RTL is identical to the Analogue Pocket release - plan to continue dual path development wherever feasible.  
+
+
+| Subsystem | State |
+|---|---|
+| Build (CI, Quartus in Docker) | ✅ per-push compile, timing summary, rbf artifact |
+| Native simulation (GHDL + iverilog, upstream) | ✅ boot, march, JSA, sprite-scene replay benches, plus MiSTer-specific gates: playfield fetch service, crowd-load arbiter bench with hardware-calibrated thresholds |
+| ROM loading (MRA + ioctl → SDRAM, sprite repack in RTL, BRAM shadows) | ✅ CRC-checked by the MRA; no ROM data distributed |
+| Dual 68010s + shared RAM + mailbox handshake | ✅ genuinely concurrent on hardware |
+| SDRAM subsystem (open-row controller, bank-partitioned MO tile mirror, MO/CPU interleaved arbiter) | ✅ bench-gated; crowd performance measured at Pocket parity |
+| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay |
+| Sound (JSA-I: 6502 + YM2151 + TMS5220 speech) | ✅ full pipeline; liveness watchdog self-heals a wedged sound CPU |
+| Inputs (buttons, hall-stick model, keyboard) | ✅ incl. in-game calibration screens |
+| Credits overlay + OSD (volume sliders, Show Credits) | ✅ build number on credits page 1 |
+| High scores / operator settings | ✅ persist across power cycles |
+
+## Accuracy
+
+This is a **behaviorally accurate** core with authentic timing anchors — not
+a cycle-exact replica. Performance references are against actual machine
+gameplay, with MAME as the secondary reference. Honest classification:
+
+**Authentic (schematic-verified):** clock frequencies (7.159 MHz CPUs, true
+pixel clock, all clocks derived from the board's 14.318 MHz colorburst
+family); raster geometry (456x262 total, 336x240 visible, ~59.92 Hz);
+complete memory map, register and latch semantics; genuinely concurrent dual
+CPUs (the real board's architecture — MAME time-slices); zero-wait ROM
+fetches (traced pin-by-pin on the schematic: the 4-clock fastpath is the
+*accurate* path, not an overclock); the motion-object line buffer's
+two-pixels-per-clock fill (SP-332 sheet 9's paired LB customs); IRGB palette
+math with intensity; autovectored interrupts; the 128 ms watchdog.
+
+**Approximate:** per-instruction CPU cycle counts (TG68K is
+instruction-accurate, not cycle-exact); bus-cycle timing off-ROM (the
+original gave every subsystem its own parallel bus; this port funnels
+through one SDRAM with an open-row controller, bank-partitioned so the
+playfield and sprites keep separate open rows); video internals (same VRAM
+in, same pixels out on the same raster grid, via a re-architected line
+engine whose architecture-level properties come from the schematic).
+
+**Measured end-to-end, on hardware, against references:**
+
+- **Frame-level pacing**: attract-loop period accuracy exceeding **99.6%**
+  against MAME, story-panel timers in exact lockstep — and the residual is
+  MAME slowing *more* than this core in the demo.
+- **Animation cadence**: the walk cycle advances every **8 frames**, locked
+  against real-cabinet captures.
+- **Slowdown character**: in heavy crowds the game software slows on every
+  platform; a MAME longplay spends ~1.5x more of its crowd time slowed than
+  this core — consistent with MAME modelling the 68000 JAMMA variant while
+  this core defaults to the dedicated cabinet's 68010.
+- **This port specifically**: crowd-scene scroll-velocity distributions
+  measured identical to the Analogue Pocket release, with zero
+  sub-half-speed dips where MAME dips in 19-28% of samples.
+- **Pixels**: motion-object output replays MAME scene dumps at **100.0000%
+  agreement and coverage** on crowd, door, spawn-flash and factory-map
+  fixtures.
+
+Escape's game logic is IRQ- and frame-driven rather than cycle-counted, so
+at equal frame pacing the gameplay is indistinguishable from the arcade.
+The full deviations ledger and architectural-decisions discussion live
+upstream:
+[docs/DEVIATIONS.md](https://github.com/spoonelli/Atari-Dual-68k/blob/main/docs/DEVIATIONS.md)
+and the
+[project README](https://github.com/spoonelli/Atari-Dual-68k#architectural-decisions--for-the-cycle-accuracy-conversation).
 
 ## Install
 
-1. Copy `escape_YYYYMMDD.rbf` (dated per MiSTer's naming convention) to
-   `_Arcade/cores/` on your MiSTer SD card. **Delete any older
-   `escape*.rbf`** — the framework matches by prefix and may load the
-   stale one.
-2. Copy `Escape from the Planet of the Robot Monsters (set 1).mra` to `_Arcade/`.
+Both files are in [`releases/`](releases/) in this repository.
+
+1. Copy `Arcade-Escape_YYYYMMDD.rbf` to `_Arcade/cores/` on your MiSTer
+   SD card, keeping its name — the MRA references the core as
+   `Arcade-Escape`. **Delete any older `escape*.rbf` or
+   `Arcade-Escape*.rbf`**; the framework matches by prefix and may load
+   a stale one.
+2. Copy `Escape from the Planet of the Robot Monsters (set 1).mra` to
+   `_Arcade/`, replacing any earlier copy (older MRAs reference the old
+   rbf name).
 3. Put your own MAME `eprom.zip` romset in `games/mame/`. **No ROM data is
    included** — the MRA assembles the game from your verified dumps.
 4. Launch the game from the Arcade menu.
 
-## First boot
+## Self-Test and First boot
 
-The machine boots clean. To confirm which build is running, open **Show
+Note that this core follows the authentic behavior of the original PCB with a "Waiting for Second Processor" screen that will hold for several seconds.  After that, the machine boots clean. To confirm which build is running, open **Show
 Credits** in the OSD (or press the Credits button / keyboard **C**) — the
 **MISTER BUILD number** is on page 1. Check it matches the build you
 installed; it is the only guard against a cached or stale `.rbf`, and it
@@ -92,3 +155,14 @@ GPL-3.0 — sources at https://github.com/spoonelli/Atari-Dual-68k (branch
 Third-party components and attributions: NOTICE.md in the repo. This
 project distributes no ROM data and no copyrighted artwork; use only with
 software you are legally entitled to.
+
+
+## Building
+
+Quartus 17.0+ (CI uses Quartus Lite 18.1 in
+`theypsilon/quartus-lite-c5:18.1`): open `Arcade-Escape.qpf` and
+compile, or see `.github/workflows/build.yml`. All sources are vendored
+under `rtl/` — no submodules. Third-party provenance and licences:
+`NOTICE.md` (jt51 GPL-3.0, TG68K LGPL-3.0, T65 BSD-style, RTL base
+GPL-3.0; two files each of jt51/TG68K are vendored with documented
+modifications under `rtl/core/`).
