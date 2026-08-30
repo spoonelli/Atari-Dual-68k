@@ -45,7 +45,11 @@ has caught that more than once.
 Run **Define eprom buttons** in the OSD the first time (new buttons do not
 appear in previously saved maps): Jump, Fire, Duck, Bomb, Start, Coin, and
 Credits. Fresh installs default to Jump on the left face button, Fire on
-the bottom, Duck on the right, Bomb on top (SNES Y/B/A/X).
+the bottom, Duck on the right, Bomb on top (SNES Y/B/A/X). The define
+flow prompts for all seven buttons - answer every prompt before Finish,
+or the unanswered ones stay unmapped. Note the framework treats your
+global User/Menu button as "Undefine" inside this flow: assigning a
+core button to it silently clears the slot instead.
 
 ## OSD options
 
