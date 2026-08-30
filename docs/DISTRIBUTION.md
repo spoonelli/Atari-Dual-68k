@@ -26,6 +26,11 @@ single zip: MiSTer releases live under the same repository (tagged
 `mister-v*`), and the filter guarantees the inventory only ever selects
 Pocket packages.
 
+**Per-release obligation:** bump `core.json`'s `date_release` to the tag
+date in the same commit that bumps `version` — the inventory displays it
+as the core's release date (learned when v0.1.0 shipped showing the
+2026-08-06 authoring date).
+
 **Standing obligations (all already met):**
 
 - Public repository with GitHub Releases; the Pocket zip is one asset per
