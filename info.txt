@@ -1,21 +1,23 @@
 Atari Dual 68k (Escape from the Planet of the Robot Monsters, 1989)
-Alpha - openFPGA core for Analogue Pocket
+openFPGA core for Analogue Pocket - v0.1.x
 
-Dual 68000 + JSA-I audio (YM2151 + TMS5220 speech), hall-effect stick.
+Dual 68010 + JSA-I audio (YM2151 + TMS5220 speech), hall-effect stick.
 High scores and settings persist to the SD card.
 ROM required: MAME 'eprom' set, user-supplied (not included).
 
 Boots clean. Small cyan build number bottom-right - check it matches
 the build you installed.
 
-L1 shows/hides the diagnostic HUD (off by default). R1 cycles its 6
-pages (0-5); L2 toggles the trace view. With the HUD up, holding
-R1/L2/R2 isolates video layers - a probe, not a fault; these do
-nothing while the HUD is off. More toggles in the Interact menu.
+Developer HUD must be enabled in the core menu first (off by default);
+then L1 shows/hides it and R1 cycles its 7 pages (0-6); L2 toggles the
+trace view. With the HUD up, holding R1/L2/R2 isolates video layers -
+a probe, not a fault; these do nothing while the HUD is off. More
+toggles in the Interact menu.
 
-Known imperfect: sprite dropouts in dense crowds; shimmer on 1-pixel
-diagonals (Pocket scaler, not fixable in the core); some scenes run
-marginally under arcade speed. No save states.
+Measured accuracy: attract cycle within 0.35% of MAME; walk cadence
+exact; never faster than authentic. Known imperfect: shimmer on
+1-pixel diagonals (Pocket scaler, not fixable in the core); a stale
+2-column strip at the left edge on some screens. No save states.
 
 github.com/spoonelli/Atari-Dual-68k  (GPL-3.0)
 
@@ -30,6 +32,6 @@ Credits - several are licence obligations, not courtesies:
   jotego (Jose Tejada) - jt51 YM2151 core (GPL-3.0)
   agg23 (Adam Gastineau) - psram.sv CRAM controller (MIT)
   Analogue - APF framework (proprietary, Analogue SLA)
-Full terms: README.md and the third_party/ file headers.
+Full terms: LICENSE.txt and NOTICE.md in the release zip.
 
 Thanks: LMSS, DJS, LCS, TBPL, EG
