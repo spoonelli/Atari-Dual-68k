@@ -16,8 +16,8 @@ toggles in the Interact menu.
 
 Measured accuracy: attract cycle within 0.35% of MAME; walk cadence
 exact; never faster than authentic. Known imperfect: shimmer on
-1-pixel diagonals (Pocket scaler, not fixable in the core); a stale
-2-column strip at the left edge on some screens. No save states.
+1-pixel diagonals (Pocket scaler, not fixable in the core). No save
+states.
 
 github.com/spoonelli/Atari-Dual-68k  (GPL-3.0)
 
