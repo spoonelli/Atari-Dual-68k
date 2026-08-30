@@ -529,13 +529,7 @@ wire [3:0] mg_pend_w = mg_req_s ^ mg_req_last;
 // with the fastpath never blocked, the 140 standoff cannot form.
 reg [1:0] vb_sd_sync = 2'b11;
 always @(posedge clk_sdram) vb_sd_sync <= {vb_sd_sync[0], VBlank};
-// MOARB-148: mo_turn grows from a bit to a 2-credit counter. The 1:1
-// interleave measured 50.07 tiles/line; the worst real lines still
-// truncate (field: 1-2 scanline chunks missing from MO objects at owner
-// frames 3945/6560, build 147). 2:1 in MO's favor buys ~66 tiles/line
-// while the fastpath's worst contested wait is two MO services - about
-// 4-6 CPU clocks, still 2.5x inside escape_core's 16-clock fast timeout.
-reg [1:0] mo_turn = 2'd0;   // contested-cycle credits owed to MO
+reg mo_turn = 1'b0;   // 1 = MO takes the next contested idle cycle
 reg        mo_pend_q  = 1'b0;
 reg [1:0]  mo_nch_q   = 2'd0;
 reg [23:0] mo_naddr_q = 24'd0;
@@ -677,10 +671,10 @@ always @(posedge clk_sdram) begin
         end
 
         if ((fpv_want || fpe_want) && !pf_pend_q
-            && !(mo_pend_q && mo_turn != 2'd0)
+            && !(mo_pend_q && mo_turn)
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
             && !fpv_owner && !fpe_owner) begin
-            mo_turn   <= 2'd2;              // MO gets the next TWO contested cycles
+            mo_turn   <= 1'b1;              // MO gets the next contested cycle
             if (fpv_want && (!fpe_want || !fp_last_v)) begin
                 fpv_tag   <= fpv_addr_s;
                 fpv_valid <= 1'b0;
@@ -723,7 +717,7 @@ always @(posedge clk_sdram) begin
         if (core_rom_req_s && !core_rom_ack_85 && !pf_pend_q
             && !sd_rd_req && !sd_rd_ack
             && !fpv_owner && !fpe_owner
-            && ((!fpv_want && !fpe_want) || (mo_pend_q && mo_turn != 2'd0))
+            && ((!fpv_want && !fpe_want) || (mo_pend_q && mo_turn))
             && !mo_owner && !pf_owner) begin
             sd_rd_req <= 1'b1;
             rd_addr_q <= {1'b0, core_rom_addr};
@@ -757,8 +751,8 @@ always @(posedge clk_sdram) begin
             && !(core_rom_req_s && !core_rom_ack_85)
             && !sd_rd_req && !sd_rd_ack && !cpu_owner && !mo_owner && !pf_owner
             && !fpv_owner && !fpe_owner
-            && (mo_turn != 2'd0 || (!fpv_want && !fpe_want))) begin
-            if (mo_turn != 2'd0) mo_turn <= mo_turn - 2'd1;
+            && (mo_turn || (!fpv_want && !fpe_want))) begin
+            mo_turn     <= 1'b0;            // fastpath gets the next contested cycle
             mg_req_last[mo_nch_q] <= mg_req_s[mo_nch_q];
             rd_addr_q   <= {1'b0, mo_naddr_q};
             mo_sd_ch    <= mo_nch_q;

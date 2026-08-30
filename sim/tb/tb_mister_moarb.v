@@ -124,6 +124,26 @@ module tb_mister_moarb;
         if (dut.fpe_valid && (dut.fpe_tag == dut.fpe_addr_s)) fpe_addr <= fpe_addr + 24'd2;
     end
 
+    // worst continuous want-high stretch per fastpath lane, in clk_sdram.
+    // escape_core gives a stalled ROM fetch 16 CPU clocks (~80 clk_sdram)
+    // before the fast timeout fires and the fetch degrades to demand path -
+    // the 148 field regression (reboots) was this, invisible to grant
+    // counters: per-LANE wait is what the timeout sees.
+    integer fpv_wait = 0, fpe_wait = 0, fpv_wait_max = 0, fpe_wait_max = 0;
+    integer fpv_over = 0, fpe_over = 0;   // clks spent in a stretch past the timeout
+    always @(posedge clk_sdram) if (crowd_on) begin
+        if (dut.fpv_want) begin
+            fpv_wait = fpv_wait + 1;
+            if (fpv_wait > fpv_wait_max) fpv_wait_max = fpv_wait;
+            if (fpv_wait > 80) fpv_over = fpv_over + 1;
+        end else fpv_wait = 0;
+        if (dut.fpe_want) begin
+            fpe_wait = fpe_wait + 1;
+            if (fpe_wait > fpe_wait_max) fpe_wait_max = fpe_wait;
+            if (fpe_wait > 80) fpe_over = fpe_over + 1;
+        end else fpe_wait = 0;
+    end
+
     always @(posedge clk_sdram) if (crowd_on) begin
         cyc <= cyc + 1;
         done_d <= dut.mg_done_85;
@@ -235,6 +255,18 @@ module tb_mister_moarb;
         // scoring gates: a policy must BOTH fill a dense line AND keep the
         // fastpath alive. 144's numbers are the recorded baseline; these
         // bounds catch only outright pathology (blanket-rule-style collapse).
+        $display("  fastpath worst want-stretch: V %0d clks, E %0d clks (timeout ~80)",
+                 fpv_wait_max, fpe_wait_max);
+        $display("  fastpath timeout-share: V %0d.%02d%%, E %0d.%02d%%",
+                 (fpv_over*100)/(LINES*LINE_CLKS), (fpv_over*10000/(LINES*LINE_CLKS))%100,
+                 (fpe_over*100)/(LINES*LINE_CLKS), (fpe_over*10000/(LINES*LINE_CLKS))%100);
+        // CALIBRATED against hardware verdicts, not theory: the 147 arbiter
+        // (device-proven good) measures 4.0% here; the 148 arbiter (device
+        // reboot loops) measures 26.9%. The fence sits at 10% - any policy
+        // above it starves the CPUs' fast timeout chronically enough to
+        // endanger the game watchdog.
+        want(fpv_over < (LINES*LINE_CLKS)/10, "video fastpath timeout-share under 10%");
+        want(fpe_over < (LINES*LINE_CLKS)/10, "extra fastpath timeout-share under 10%");
         want(served   >= LINES*40, "MO service fills a dense line (>=40/line)");
         want(fp_grants >= LINES*5, "fastpath not starved (>=5 grants/line)");
         want(pf_grants > 0,        "playfield still served");
