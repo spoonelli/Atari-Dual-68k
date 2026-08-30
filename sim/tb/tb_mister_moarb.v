@@ -197,6 +197,10 @@ module tb_mister_moarb;
         put_group(25'h0110400, 32'h1111_2222);
         for (i = 0; i < 16; i = i + 1)
             put_group(25'h0110000 + i*4, 32'hA5A5_5A5A);
+        // MISTER-150: sprite-region groups exercise the mirror double-write
+        // (a wedge here stalls ioctl_wait forever and every gate times out)
+        put_group(25'h0120000, 32'hDEAD_BEEF);
+        put_group(25'h0120004, 32'hCAFE_F00D);
         repeat (60000) @(posedge clk_sdram);
         ioctl_download <= 1'b0;
         wait (rom_ready === 1'b1);

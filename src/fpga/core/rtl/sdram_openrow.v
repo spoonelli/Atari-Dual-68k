@@ -126,6 +126,12 @@ module sdram_openrow #(
     // 1 = per-client bank interleaving (see the map above). 0 = sdram_simple's
     // {ba,row,col} = {wa[23:22], wa[21:9], wa[8:0]}, i.e. everything in bank 0.
     parameter BANKMAP_EN       = 1,
+    // MISTER-150: route byte window 0x600000-0x6FFFFF (word 0x300000-0x37FFFF)
+    // to bank 2 - the MO tile MIRROR. Bank 2's real tenants (JSA + chars,
+    // rows 0x400-0x47F) are BRAM-shadowed after boot, so the bank sits cold;
+    // the mirror occupies rows 0x1800-0x1BFF, no overlap. Off by default:
+    // the Pocket's map is untouched (constant-folds away at 0).
+    parameter MIRROR_BANK2_EN  = 0,
     // Device minimums in CLOCKS at the target clock. See the timing block above.
     parameter T_RCD_CLK        = 2,
     parameter T_RP_CLK         = 2,
@@ -173,6 +179,9 @@ module sdram_openrow #(
     function [1:0] bank_of(input [23:0] wa);
         begin
             if (BANKMAP_EN == 0)          bank_of = wa[23:22];
+            else if (MIRROR_BANK2_EN != 0
+                     && wa[23:16] >= 8'h30
+                     && wa[23:16] <  8'h38) bank_of = 2'd2;  // MO tile mirror
             else if (wa[23:16] < 8'h04)   bank_of = 2'd0;   // video CPU program
             else if (wa[23:16] < 8'h08)   bank_of = 2'd1;   // extra CPU program
             else if (wa[23:16] < 8'h09)   bank_of = 2'd2;   // JSA 6502 + chars

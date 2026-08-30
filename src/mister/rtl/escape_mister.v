@@ -240,7 +240,7 @@ reg         sd_wr_req = 1'b0;
 reg  [24:0] sd_wr_addr;
 reg  [31:0] sd_wr_data;
 wire        sd_wr_ack;
-reg  [1:0]  dl_phase = 2'd0;
+reg  [2:0]  dl_phase = 3'd0;   // MISTER-150: grew a mirror-write leg
 
 // ---- SPRITE REPACK --------------------------------------------------------
 // b0..b3 are the four bit-planes for one tile-row byte index, ALREADY in
@@ -315,7 +315,7 @@ always @(posedge clk_sdram) begin
         shad_we <= 1'b0;
     end
     case (dl_phase)
-    2'd0: if (dl_req) begin
+    3'd0: if (dl_req) begin
         sd_wr_addr <= dl_addr_q;
         sd_wr_data <= dl_data_q;
         sd_wr_req  <= 1'b1;
@@ -326,15 +326,34 @@ always @(posedge clk_sdram) begin
         shad_pend  <= dl_data_q[15:0];
         shad_second<= 1'b1;
     end
-    2'd1: if (sd_wr_ack) begin
+    3'd1: if (sd_wr_ack) begin
         sd_wr_req <= 1'b0;
-        dl_phase  <= 2'd2;
+        dl_phase  <= 3'd2;
     end
-    2'd2: if (!sd_wr_ack) begin
+    3'd2: if (!sd_wr_ack) begin
+        // MISTER-150 MO TILE MIRROR: sprite-region groups are written twice -
+        // primary (bank 3, the playfield's copy) and byte +0x4E0000 (bank 2,
+        // the motion objects' copy). PF and MO stop evicting each other's
+        // open rows: the Pocket's PSRAM separation, rebuilt out of bank
+        // partitioning. ioctl_wait backpressure absorbs the extra write.
+        if (dl_addr_q >= SPR_BASE) begin
+            sd_wr_addr <= dl_addr_q + 25'h04E0000;
+            sd_wr_req  <= 1'b1;
+            dl_phase   <= 3'd3;
+        end else begin
+            dl_taken <= 1'b1;
+            dl_phase <= 3'd0;
+        end
+    end
+    3'd3: if (sd_wr_ack) begin
+        sd_wr_req <= 1'b0;
+        dl_phase  <= 3'd4;
+    end
+    3'd4: if (!sd_wr_ack) begin
         dl_taken <= 1'b1;
-        dl_phase <= 2'd0;
+        dl_phase <= 3'd0;
     end
-    default: dl_phase <= 2'd0;
+    default: dl_phase <= 3'd0;
     endcase
 end
 
@@ -754,7 +773,8 @@ always @(posedge clk_sdram) begin
             && (mo_turn || (!fpv_want && !fpe_want))) begin
             mo_turn     <= 1'b0;            // fastpath gets the next contested cycle
             mg_req_last[mo_nch_q] <= mg_req_s[mo_nch_q];
-            rd_addr_q   <= {1'b0, mo_naddr_q};
+            // MISTER-150: MO reads its own bank-2 mirror of the tile data
+            rd_addr_q   <= {1'b0, mo_naddr_q} + 25'h04E0000;
             mo_sd_ch    <= mo_nch_q;
             rd_pre_q    <= 1'b1;        // MO keeps the Pocket's armor
             sd_rd_req   <= 1'b1;
@@ -815,7 +835,7 @@ always @(posedge clk_sdram) begin
     end
 end
 
-sdram_openrow sdr (   // MISTER-141: the Pocket's open-row controller - see commit msg
+sdram_openrow #(.MIRROR_BANK2_EN(1)) sdr (   // MISTER-141 controller + MISTER-150 mirror
     .clk        ( clk_sdram ),
     .reset_n    ( pll_locked ),
     .dram_a     ( SDRAM_A ),

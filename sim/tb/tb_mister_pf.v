@@ -175,6 +175,10 @@ module tb_mister_pf;
         // a little alphanumerics content so the char DMA has something real
         for (i = 0; i < 16; i = i + 1)
             put_group(25'h0110000 + i*4, 32'hA5A5_5A5A);
+        // MISTER-150: sprite-region groups exercise the mirror double-write
+        // (a wedge here stalls ioctl_wait forever and every gate times out)
+        put_group(25'h0120000, 32'hDEAD_BEEF);
+        put_group(25'h0120004, 32'hCAFE_F00D);
 
         // HOLD the download long enough for the free-running pixel pipeline to
         // reach active video and issue playfield fetches - this is the whole
