@@ -1,4 +1,4 @@
-# Atari Dual 68k — Development History (v1–v78, builds 101–114)
+# Atari Dual 68k — Development History (v1–v78, builds 101–153, releases v0.1.x)
 
 A field log of bringing Atari's dual-68000 "Escape" hardware (E.P.R.O.M.) to
 the Analogue Pocket: what broke, what we measured, and what each era taught.
@@ -247,6 +247,109 @@ checks could not have failed.
   fastpath-eligible cycles land in the first 16 KB, across 7 distinct pages in
   480 us**. Not a 0% fill rate — a spin loop. The number remains unmeasured,
   and the case for the rework rests on measured *latency*, not on starvation.
+
+## Era 12 — The schematic's fill rate (builds 115–133)
+- The cadence hunt that consumed this era ended by dissolving its own premise.
+  The video CPU's 0.973-vs-0.9977 tail was chased through CPU type (68010 loop
+  mode: worth **0.0000%**), constants, and shadows — and turned out to be the
+  motion-object engine eating the bus. The clock explorations bracketed the
+  answer first: **123** took SDRAM to 7× (50.1 MHz) and got *slower* (tRAS
+  needs three clocks there); **124** settled on 6× (42.95 MHz) where every
+  timing improves at once, and shipped the open-row controller the Pocket
+  still runs.
+- **125** closed the left-edge strip the owner had already diagnosed in one
+  sentence — "is that line just phase shifted from the other side?" It was:
+  every layer sat 2 px right of MAME's window (`VID_H_BPORCH` 60→62), so
+  columns 0–1 showed the 512-px tilemap wrapping around. Two earlier "fixes"
+  had been reasoned from the wrong edge.
+- **129** added MOTEL: per-line truncation and worst-fetch-latency counters on
+  HUD page 6, video-decodable. For the first time sprite starvation was a
+  number in a capture instead of an impression.
+- **131** was the era's payoff: the crowd-scene fixture failed even at zero
+  latency, which meant *fill rate*, not fetch latency — and SP-332 sheet 9
+  had the answer drawn all along: the real board fills a **pair** of line
+  buffers, two pixels per DCLK. MOPAIR-131 rebuilt the engine that way
+  (crowd fixture 527 missing pixels → 0). **132** removed the residual stall
+  (71% of it was every sprite's *second* tile: the MOPF2 prefetch lane) and
+  fixed the two accepted cosmetics (ALPHAEQ: the alpha layer led by one
+  clock). **133** fenced the one unreproducible field failure — a wedged
+  sound 6502 — with a watchdog that self-heals in 0.75 s and freezes the
+  first-fault PC for later.
+- Era lesson: the emulator hid this class of bug perfectly. MAME has no fill
+  rate; the schematic did. When a fixture fails with every latency knob at
+  zero, stop tuning and re-read the drawings.
+
+## Era 13 — Release engineering (v0.1.0 / v0.1.1, BUILD_ID 34–36)
+- Shipping was its own engineering arc: the core identity renamed to
+  `spoonelli.eprom` *before* first release (platform-keyed saves proved on
+  device); the marquee blob and 34 MB of committed `output/` purged in one
+  history rewrite; 53 branches pruned to three; NOTICE.md written as a
+  per-component compliance inventory; five content-based packaging guards
+  (each provoked by a test that proves it can fail).
+- The docs got the same discipline as the RTL: reference split from
+  investigation record, an accuracy sweep against code and measurement, and
+  a benchmark section with numbers instead of adjectives — attract cycle
+  within 0.35% of MAME, walk cadence exactly 8 frames/phase against four
+  real-cabinet captures, crowd slowdown *less* than MAME's.
+- **v0.1.0** (BUILD_ID 34→35 after the RC2 metadata round) shipped
+  2026-08-29 with `build_rom.py` bundled in the zip; **v0.1.1** (36)
+  followed as a metadata patch after the cores inventory displayed the
+  file-authoring date as the release date. The lesson now lives next to the
+  version bump: `date_release` is the *release* date.
+- Stale claims kept surfacing days after their fixes — the left-edge strip
+  was still listed as open four builds after 125 closed it. The sweep habit
+  ("check the claim against the history, not against another document")
+  caught it, and B5/B6-style TODOs fell to five-minute audits.
+
+## Era 14 — The MiSTer arbiter saga (builds 134–153)
+- One SDRAM, three hungry clients, and six weeks of lessons compressed into
+  twenty builds. **135**: fixed-sprite streaks were the *playfield* starving
+  behind CPU vblank bursts — PF takes the top of the arbiter. **136**: bit-soup
+  garble was a missing two-edge CDC settle on fetch returns (the Pocket had
+  it; the port didn't).
+- Then the crowd-dropout campaign, where every intuition failed on hardware:
+  **137** ported the Pocket's blanket MO-over-fastpath rule — catastrophic;
+  **139/140** rationed it with an age boost — under-served dense lines;
+  **143** blanket again with the standoff fixed — *controls died in-game*;
+  **145** burst credits — same death; **148** a 2:1 weighted interleave —
+  watchdog reboots. The root cause, finally read out of `escape_core`
+  rather than theorized: a blocked fastpath has **16 CPU clocks** before
+  every ROM fetch degrades to timeout-plus-fallback. Any policy that blocks
+  the fastpath for long collapses both 68ks; the Pocket's rule only works
+  because on its two-client bus it *produces strict alternation*.
+- **146/147** implemented that property directly — a turn bit interleaving
+  contested cycles, plus the demand-fetch escape the turn variant needed —
+  and the bench grew gates **calibrated on hardware verdicts**: the working
+  arbiter measures 4% fastpath timeout-share, the reboot-looping one 27%,
+  the fence sits at 10%. No arbiter change reaches Quartus without passing
+  the gauntlet that would have caught every prior regression.
+- **150** ended the war by refusing to fight it: the Pocket's real advantage
+  was topological (playfield on its own PSRAM), so the port rebuilt the
+  separation inside one SDRAM — the sprite tiles written twice at download,
+  motion objects fetching their own bank's copy. Every metric improved at
+  once; worst-case MO latency fell 91%. **151** fixed the download race the
+  mirror introduced (the FSM read a live register the next byte could
+  clobber). **152/153** were release polish: the owner's button defaults and
+  a credits accuracy pass.
+- **mister-v0.1.1** shipped 2026-08-30 at measured performance parity with
+  the Pocket — identical crowd scroll-velocity distributions, zero slowdown
+  dips where MAME dips in 19–28% of samples.
+
+## Era 15 — Going public (2026-08-29 → 31)
+- Both platforms released and auto-updating within 48 hours: the Pocket
+  listed in the openFPGA cores inventory (pupdate-verified end to end), the
+  MiSTer served by a custom update_all database pinned by md5 — later
+  unified onto a standard-layout distribution repo
+  (`Arcade-Escape_MiSTer`) built for MiSTer-devel submission, which went
+  out 2026-08-31.
+- The first community interaction arrived within a day of the repo going
+  public: a licensing-diligence issue (NOTICE paths that didn't resolve in
+  the standalone tree, the missing `sys/` framework credit) — fixed
+  same-day. The documentation discipline paid for itself on first contact.
+- The remaining open set at submission: rare one-frame sprite-row flickers
+  on the heaviest MiSTer scanlines (fetch-cost work queued, bench-first),
+  the Pocket's 33-px scroll-position deviation, the unmeasured speech-tail
+  claim, and the section-F `DIAG_EN` decision. All enumerated, none hidden.
 
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)

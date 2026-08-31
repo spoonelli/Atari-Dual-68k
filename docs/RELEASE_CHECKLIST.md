@@ -60,8 +60,8 @@ separating reference from investigation. Three real gaps:
 
 | # | Item | State | Note |
 |---|---|---|---|
-| D1 | **`HISTORY.md` stops at build 102** | TODO | Titled "v1–v78"; covers v1–v78 plus builds 101–102. **Builds 103–113 are absent** — the SDRAM arc, VSHAD3, the stain fix, TAS atomicity, EEPROM, the MiSTer port, bus hardening. `RETROSPECTIVE.md` covers that ground but **thematically, not chronologically**: it answers "what did we learn about sprites", not "what happened in build 107". |
-| D2 | **`HISTORY.md` has two headings numbered "Era 6"** | TODO | Lines 89 and 116. Appended without reconciling — exactly the drift `docs/README.md` warns about, in the doc that is supposed to be the spine. |
+| D1 | **`HISTORY.md` stops at build 102** | **DONE (2026-08-31)** — extended through build 153 and the v0.1.x releases (eras 9–15) | Titled "v1–v78"; covers v1–v78 plus builds 101–102. **Builds 103–113 are absent** — the SDRAM arc, VSHAD3, the stain fix, TAS atomicity, EEPROM, the MiSTer port, bus hardening. `RETROSPECTIVE.md` covers that ground but **thematically, not chronologically**: it answers "what did we learn about sprites", not "what happened in build 107". |
+| D2 | **`HISTORY.md` has two headings numbered "Era 6"** | **DONE** — resolved in an earlier extension; verified single-numbered eras 1–15 | Lines 89 and 116. Appended without reconciling — exactly the drift `docs/README.md` warns about, in the doc that is supposed to be the spine. |
 | D3 | **Nothing separates community-reusable knowledge** | TODO | See below. |
 | D4 | `RELEASE_NOTES.md` known-issues honesty | **DONE (v0.1.0)** | Known-issues rewritten with resolution stories in the pre-release refresh; accuracy section carries the measured benchmarks. |
 
