@@ -141,3 +141,32 @@ ship an unmeasured `DIAG_EN=0` variant: it is a different bitstream from the one
 that was tested, and this project's own timing history (a `BUILD_ID` constant
 alone moving worst-case hold by 0.088 ns) says small diffs are not free.
 Measure the saving first; then decide whether it changes the recommendation.
+
+---
+
+## H. v0.1.2 planning (drafted 2026-08-31, post-submission)
+
+Sequenced after the MiSTer-devel submission (sent 2026-08-31); nothing here
+blocks the shipped v0.1.1 releases.
+
+**MiSTer v0.1.2 — close the flicker tail (fetch-cost axis, bench-first):**
+
+| # | Item | Note |
+|---|---|---|
+| H1 | `sdram_openrow` timing constants at 35.795 MHz | tRCD/tRP 2→1, tRFC 9→3 — datasheet-legal with margin (27.94 ns/clk). One variable; scored on `tb_mister_moarb` before hardware; watch the hold floor. |
+| H2 | PF line-start burst spreading | Only if H1 leaves the tail: the playfield's clustered line-start fetches are the residual MO latency-spike source. |
+| H3 | MiSTer-devel review follow-ups | Reactive; structural changes as requested. |
+| H4 | db retirement on adoption | Per the documented handoff in `DISTRIBUTION.md`. |
+
+**Pocket v0.1.2 — small truths:**
+
+| # | Item | Note |
+|---|---|---|
+| H5 | Ship the refreshed `info.txt` | Committed 2026-08-30, rides the next Pocket release. |
+| H6 | D4: 33-pixel deviation at scroll 50/157 | Suspect already named (un-wrapped `spr_right` in off-screen rejection); one bench-driven attempt. |
+| H7 | Speech-tail adjudication | The last unmeasured claim in the docs — measure vs MAME audio, then fix or retract with numbers. |
+
+**Slow-burn (no version attached):** section-F `DIAG_EN` decision; `eprom2`
+(second CRC table + MRA + both-platform verify); HISTORY.md builds-103+
+chronology; C5 clean-machine ROM-prep walkthrough; optional GitHub Support
+ticket for the pre-rewrite `refs/pull/*` snapshots.
