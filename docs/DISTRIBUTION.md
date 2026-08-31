@@ -13,8 +13,9 @@ which serves a read-only API generated from registered repositories'
 GitHub releases. Once a repo is registered, every new release is picked up
 automatically — there is no per-release submission.
 
-**One-time registration.** Open a `New Issue → Add Core` on that repository
-with:
+**One-time registration — DONE (2026-08-30, issue #1536; listing verified
+live in the inventory and installing via pupdate).** For the record, the
+submission was:
 
 | Field | Value for this project |
 |---|---|

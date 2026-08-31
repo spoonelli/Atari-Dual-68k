@@ -6,7 +6,7 @@ that instantiates **the identical RTL the Pocket build uses** — `escape_core`,
 with MiSTer-shaped glue around it. Nothing in the machine is forked; if you fix
 a bug in `src/fpga/core/rtl/`, both platforms get it.
 
-> **Status (2026-08-30, build 152): at performance parity with the Pocket
+> **Status (2026-08-30, build 153 = `mister-v0.1.1`): at performance parity with the Pocket
 > release, measured.** Since the v0.1.0 status below: the open-row SDRAM
 > controller (141), the MO/fastpath one-for-one interleave with its demand
 > escape (146/147), the bank-2 MO tile mirror - the Pocket's PSRAM
@@ -14,7 +14,8 @@ a bug in `src/fpga/core/rtl/`, both platforms get it.
 > fix (151). Crowd-scene scroll-velocity distributions are now identical
 > to the shipping Pocket build (median 5.33 native px/(1/30s), zero
 > sub-half-speed dips; MAME dips in 19-28% of samples). Default buttons:
-> Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top) (152). The
+> Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top) (152); credits
+> accuracy pass (153). The
 > arbiter saga (137-149) is preserved below and in the tb_mister_moarb
 > bench, whose gates are calibrated against the hardware verdicts.
 >

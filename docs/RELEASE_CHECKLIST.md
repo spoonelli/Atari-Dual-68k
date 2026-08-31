@@ -24,34 +24,34 @@ Two sequencing facts drive the order:
 |---|---|---|---|
 | A1 | Core identity `spoonelli.ataridual68k` -> `spoonelli.eprom` | **DONE (v0.1.0 prep)** | Renamed: core.json shortname, package.sh, docs. `platform_ids` stays `eprom`; saves platform-keyed. Device confirmation of save carry-over folds into A6. Upgraders must delete the old core folder (noted in RELEASE_NOTES + README). |
 | A2 | **Third-party attribution / GPL-3.0 compliance** | **DONE (v0.1.0 prep)** | `NOTICE.md` at repo root: compliance inventory of every compiled component with authors, licences, vendored-file locations; reference/ material separated; the TMS5220 coefficient-provenance question stays flagged there. |
-| A3 | Single combined history rewrite (marquee blob + `output/` dirs) | BLOCKED | Rewritten mirror is prepared and verified; force-push needs approval. Pre-purge backup: `Documents/Lloyd Projects/atari-dual68k-prepurge-backup.bundle`. |
+| A3 | Single combined history rewrite (marquee blob + `output/` dirs) | **DONE (2026-08-28)** | Executed and verified: blob and `output/` gone from all branches and tags, repo 36 MB → 2.4 MB. Residual: GitHub's read-only `refs/pull/1-3` still snapshot pre-rewrite history (no ROM data there; the marquee is reachable only by explicit PR-ref fetch) — a GitHub Support ticket can purge them if desired. Backups: `atari-dual68k-prepurge-backup.bundle`, `atari-dual68k-prerelease-backup-20260828.bundle`. |
 | A4 | `input.json` vs RTL audit — **all** buttons, **both** players | **DONE (v0.1.0 prep)** | Full sweep: A/B/X/Y/Select map to cont1_key 4/5/6/7/14 exactly as the RTL consumes them, both controller blocks declared, Start-shares-Jump matches the schematic, shoulders intentionally unmapped (HUD-only). No mismatches found beyond the long-fixed P2 bomb. |
 | A5 | Debug HUD gated behind a menu toggle, default off | **DONE (build 114)** | `interact.json` id 38 'Developer HUD', default unchecked. With it clear, `diag_on` is forced low, so L1/R1/R/L2 do nothing and no debug path reaches video. RTL still compiled in -- see **section F**; the `DIAG_EN` compile-time half remains open. |
-| A6 | Save-path device test on real hardware | TODO | Gates the alpha/RC tag. |
-| A7 | Clean-boot look on real hardware | TODO | Gates the alpha/RC tag. |
-| A8 | **Tile-shaped holes in motion objects** | TODO | **The one consistent blocker to alpha.** Sprites drawn correctly but with a rectangular chunk missing. Field evidence, ruled-out causes and the diagnostic plan: [`MO_TILE_HOLES.md`](investigations/MO_TILE_HOLES.md). Frame 5629 vs 5636 (same sprite, wrong then right) is the key pair. |
+| A6 | Save-path device test on real hardware | **DONE (v0.1.0)** | Owner-verified 2026-08-29: saves carried over from the `spoonelli.ataridual68k` dev install to `spoonelli.eprom`. |
+| A7 | Clean-boot look on real hardware | **DONE (v0.1.0)** | Owner-blessed 2026-08-29 on the RC2 package (BUILD_ID 35); v0.1.0 tagged and released. |
+| A8 | **Tile-shaped holes in motion objects** | **DONE (builds 131-132)** | Closed by MOPAIR-131 (paired even/odd line buffers, 2 px/clock — the schematic's MOL/MOR) + MOPF2-132 (tile-1 prefetch lane). Crowd fixture missing pixels 527 → 0; device-verified across full playthroughs. Record: [`MO_TILE_HOLES.md`](investigations/MO_TILE_HOLES.md). |
 
 ## B. Identity, metadata, and store presence
 
 | # | Item | State | Note |
 |---|---|---|---|
-| B1 | Pocket game label | **DONE (v0.1.0 prep)** | Platform name: `Escape: Robot Monsters` (22 chars, no truncation risk); full 44-char title lives in core.json description and the docs. Category Arcade / Atari Games / 1989 unchanged. |
-| B2 | Version scheme | **DONE** | Scheme fixed (2026-08-28, owner call): `core.json` version and the git tag move in lockstep — `v0.1.0` = first public RC, `0.x.y` during field-testing, `1.0.0` only when every section-A blocker is closed; patch bumps for fixes, minor bumps for features (eprom2). `BUILD_ID` stays the internal on-HUD build counter, and RELEASE_NOTES records the mapping (v0.1.0 = build 133) so a HUD photo identifies a release exactly. MiSTer versions independently (`mister-v0.x.y`). `core.json` set to 0.1.0. |
-| B3 | pupdate / openFPGA inventory listing | TODO | Community inventory is `joshcampbell191/openfpga-cores-inventory`. Needs a **public** repo, Releases, consistent zip naming, correct `core.json` platform metadata. Research exact submission format. |
-| B4 | Public vs private decision | TODO | Going private would instantly cut public access to the marquee blob (0 forks, so airtight) **but B3 requires public**. The purge resolves this: once the blob is gone, public is fine and no GitHub Support ticket is needed. |
-| B5 | `video.json` out-of-box look (aspect, scaler) | TODO | Most players never open settings. |
-| B6 | `interact.json` defaults sane for a first-time user | TODO | 11 entries today; HUD off, ROM Shadow on. |
+| B1 | Pocket game label | **DONE (v0.1.0)** | Platform name: `Esc Robot Monst` (owner call after on-device menu checks, 2026-08-29; well under the 31-char limit). Full title lives in core.json description and the docs. Category Arcade / Atari Games / 1989 unchanged. |
+| B2 | Version scheme | **DONE** | Scheme fixed (2026-08-28, owner call): `core.json` version and the git tag move in lockstep — `v0.1.0` = first public RC, `0.x.y` during field-testing, `1.0.0` only when every section-A blocker is closed; patch bumps for fixes, minor bumps for features (eprom2). `BUILD_ID` stays the internal on-HUD build counter, and RELEASE_NOTES records the mapping (v0.1.0 = build 35) so a HUD photo identifies a release exactly. MiSTer versions independently (`mister-v0.x.y`). `core.json` set to 0.1.0. |
+| B3 | pupdate / openFPGA inventory listing | **DONE (2026-08-31)** | Submitted as openfpga-library/analogue-pocket#1536; the inventory serves `spoonelli.eprom` (v0.1.1, correct date) and pupdate installs it — owner-verified end to end. |
+| B4 | Public vs private decision | **DONE** | Public, post-purge. See A3 for the refs/pull residual and the optional Support ticket. |
+| B5 | `video.json` out-of-box look (aspect, scaler) | **DONE (audited 2026-08-30)** | One scaler mode: 336x240 at 4:3, no rotation/mirror — correct for this game. |
+| B6 | `interact.json` defaults sane for a first-time user | **DONE (audited 2026-08-30)** | 12 variables (under the Pocket's 16-render cap), every default correct: Service/Skip-Test off, sticks normal, deadzone 8, both volumes full, EEPROM Autosave on, ROM Shadow on, Developer HUD off. |
 
 ## C. Repo hygiene — "looks like a commercial release"
 
 | # | Item | State | Note |
 |---|---|---|---|
-| C1 | Strip committed `output/` build dirs from history | TODO | Fold into A3. |
-| C2 | Branch pruning | TODO | 29 remote heads, including `*-EXPERIMENTAL`, `spike/fx68k-EXPLORATORY-do-not-ship`, several `hold-*` probes, and a stray branch literally named `origin`. |
-| C3 | Decide what `main` means | TODO | `main` is stale (`3ee6859`). Release branch? |
-| C4 | README + support doc cleanup | TODO | `docs/README.md` already splits reference from investigation record — extend that discipline to the top-level README. |
+| C1 | Strip committed `output/` build dirs from history | **DONE** | Folded into A3, executed 2026-08-28. |
+| C2 | Branch pruning | **DONE (2026-08-28)** | 53 heads → 3: `main` / `pocket` / `mister`. All pre-prune branches preserved in `atari-dual68k-prerelease-backup-20260828.bundle`. |
+| C3 | Decide what `main` means | **DONE** | `main` mirrors `pocket` (fast-forwarded on every pocket push); `mister` carries the port. |
+| C4 | README + support doc cleanup | **DONE (2026-08-29)** | Top-level README refreshed for release (accuracy benchmarks, architectural-decisions section); docs reorganized (investigations/ split) and accuracy-swept; READMEs synced across all three branches; 0 dead links. |
 | C5 | ROM prep end-to-end from a clean machine | TODO | `docs/ROMS.md` + `build_rom.py` with no local state. |
-| C6 | MiSTer fork: same release or separate? | TODO | Affects wording everywhere. |
+| C6 | MiSTer fork: same release or separate? | **DONE — separate** | MiSTer tags independently (`mister-v0.x.y`), zips per build from the `mister` branch. Its two release gates (retire boot splash; `escape_YYYYMMDD.rbf` naming — the latter done in CI) are recorded in [`MISTER.md`](MISTER.md)'s status note. |
 
 ## D. Documentation and the historical record
 
@@ -63,7 +63,7 @@ separating reference from investigation. Three real gaps:
 | D1 | **`HISTORY.md` stops at build 102** | TODO | Titled "v1–v78"; covers v1–v78 plus builds 101–102. **Builds 103–113 are absent** — the SDRAM arc, VSHAD3, the stain fix, TAS atomicity, EEPROM, the MiSTer port, bus hardening. `RETROSPECTIVE.md` covers that ground but **thematically, not chronologically**: it answers "what did we learn about sprites", not "what happened in build 107". |
 | D2 | **`HISTORY.md` has two headings numbered "Era 6"** | TODO | Lines 89 and 116. Appended without reconciling — exactly the drift `docs/README.md` warns about, in the doc that is supposed to be the spine. |
 | D3 | **Nothing separates community-reusable knowledge** | TODO | See below. |
-| D4 | `RELEASE_NOTES.md` known-issues honesty | TODO | D6 left-edge strip, MO dropout status, EEPROM autosave behaviour, and which SDRAM lever shipped. |
+| D4 | `RELEASE_NOTES.md` known-issues honesty | **DONE (v0.1.0)** | Known-issues rewritten with resolution stories in the pre-release refresh; accuracy section carries the measured benchmarks. |
 
 ### D3 — what is worth extracting for other developers
 
