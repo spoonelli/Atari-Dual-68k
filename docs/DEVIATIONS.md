@@ -106,9 +106,12 @@ number, is the shared thing.** The Pocket moved to the open-row controller
 reads 42.954546) and scales the same policy by the clock ratio: interval 160×1.2 = 192,
 defer cap 48×1.2 = 58, worst case 250 clocks = **5.82 µs = 74.5% of budget** — the same
 `INTERVAL + DEFER_CAP + 16`-shaped bound, re-derived at 23.280 ns/clock in the
-`core_top.v` controller-select comment. The MiSTer keeps `sdram_simple` at
-35.795455 MHz with 160/48 as tabled above. A future edit to either platform's
-interval must re-run `sim/run_sdram_refresh_tb.sh`, not inherit either number.
+`core_top.v` controller-select comment. The MiSTer ran `sdram_simple` at
+35.795455 MHz with 160/48 as tabled above until MISTER-141, when it adopted
+`sdram_openrow` at the same 35.795455 MHz — with the module's conservative
+default timings and the same 160/48 policy, so the reconciliation stands.
+A future edit to either platform's interval must re-run
+`sim/run_sdram_refresh_tb.sh`, not inherit either number.
 
 **Everyone's arithmetic was wrong in the same safe-looking direction.** All three
 branches assumed `worst case = INTERVAL + DEFER_CAP`. Measured against the real FSM the
@@ -185,17 +188,31 @@ the bus topology genuinely differs: on the Pocket the playfield fetches from PSR
 so SDRAM is shared by the CPUs and the motion objects only; on MiSTer the playfield
 is on the same SDRAM as everything else. Consequences, each measured on device:
 
-- **Controller**: Pocket runs `sdram_openrow` at 42.95 MHz (6× pixel clock);
-  MiSTer runs `sdram_simple` at 35.795 MHz (5×, phase-locked, near-zero-hold CDC
-  cluster — see [`TIMING.md`](TIMING.md)).
+- **Controller**: both platforms run `sdram_openrow` since MISTER-141 —
+  Pocket at 42.95 MHz (6× pixel clock, re-derived tight timings), MiSTer at
+  35.795 MHz (5×, phase-locked, near-zero-hold CDC cluster — see
+  [`TIMING.md`](TIMING.md)) with the module's conservative default timings.
 - **Arbiter rank**: on MiSTer the playfield outranks the CPUs (fixed-sprite streaks
   in builds ≤134 were PF scanline-deadline starvation behind CPU vblank-burst
   traffic); on the Pocket no PF client exists on this bus, so the CPUs own the top.
-- **MO anti-starvation**: the Pocket's blanket "MO outranks speculative CPU fills"
-  rule is correct there (one-for-one interleave) and was catastrophic when ported
-  to MiSTer (builds 137/138 — with PF also on the bus it starved the CPUs to
-  blanking-only). MiSTer instead uses a one-shot age boost: an MO fetch that has
-  waited 32 SDRAM clocks jumps the queue once, then re-ages.
+- **MO vs speculative CPU fills**: the Pocket's blanket "MO outranks the
+  fastpath" rule was catastrophic when ported literally (builds 137/143/145:
+  `escape_core` gives a blocked fastpath only 16 CPU clocks before every ROM
+  fetch degrades to timeout-plus-fallback, and one variant deadlocked into
+  the game watchdog). What the Pocket rule actually *produces* on its
+  two-client bus is strict alternation — so MiSTer implements that property
+  directly: a turn bit interleaves MO and fastpath one-for-one on contested
+  cycles, with a demand-fetch escape (MOARB-146/147). Scored before
+  hardware by `sim/run_mister_moarb_tb.sh`, whose gates are calibrated
+  against hardware verdicts (the working arbiter measures 4% fastpath
+  timeout-share; the reboot-looping one 27%; the fence is 10%).
+- **MO tile mirror (MISTER-150)**: the deepest Pocket advantage is that its
+  playfield has a physically separate memory (PSRAM), so PF and MO never
+  evict each other's open rows. MiSTer reproduces the separation inside one
+  SDRAM: the 1 MB sprite-tile region is written twice at download and the
+  motion objects fetch their own copy from an otherwise-idle bank. Measured
+  effect: every axis improved at once — MO worst-case latency −91%, and
+  crowd-scene performance at parity with the Pocket release.
 
 The rule this section exists for: **a bus-priority change proven on one platform is
 a hypothesis, not a fix, on the other.** Port the intent, re-derive the mechanism
