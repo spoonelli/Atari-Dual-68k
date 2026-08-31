@@ -198,7 +198,7 @@ wide and one channel transaction yields exactly one 8-pixel tile row. Every per-
 cost figure in §5.4 assumes it.
 
 Note that honouring `ROMREGION_INVERT` at all is a choice, not a hardware property.
-`MISTER.md:127-144` states it plainly: it is a MAME `gfxdecode` convenience, and
+`investigations/MISTER_PORT_RECORD.md` (its ROM-repack section) states it plainly: it is a MAME `gfxdecode` convenience, and
 schematic-accurate cores usually ignore it — but this project's engines were written
 against the MAME-decoded form, so it follows MAME here.
 
@@ -272,7 +272,7 @@ wire        in_spr   = (ioctl_addr >= SPR_BASE);        // SPR_BASE = 25'h012000
 argued**: the `.mra` was assembled with `sebdel/mra-tools-c` against a real
 `eprom.zip`, the loader transform replayed offline, and the result compared to
 `build_rom.py`'s image — byte-for-byte identical across all `0x220000` bytes
-(`MISTER.md:165-171`). The *download stream* differs and cannot not differ.
+(`investigations/MISTER_PORT_RECORD.md`, download-stream section). The *download stream* differs and cannot not differ.
 
 Backpressure is `ioctl_wait = ~pll_locked | dl_pending` (`:280`). One hazard is worth
 knowing: `dl_pending` is deliberately **not** cleared when `ioctl_download` drops,

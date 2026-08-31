@@ -40,7 +40,7 @@ If you only read one file: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 | [`JSA.md`](JSA.md) | The JSA-I audio subsystem. |
 | [`TIMING.md`](TIMING.md) | Timing closure, and the structural hold-margin floor. |
 | [`SLAPSTIC.md`](SLAPSTIC.md) | Why the security chip is deliberately absent. |
-| [`MISTER.md`](MISTER.md) | The MiSTer (DE10-Nano) port: status, SD layout, platform notes. |
+| [`MISTER.md`](MISTER.md) | The MiSTer (DE10-Nano) port: current status, architecture, distribution, benches. |
 | [`PIPELINES.md`](PIPELINES.md) | Pipeline-by-pipeline walkthrough. Mostly reference; §4.1 carries a retraction notice. |
 
 ---
@@ -65,6 +65,7 @@ reference doc above, the reference doc wins.
 | [`SDRAM_ARCH.md`](investigations/SDRAM_ARCH.md) | The SDRAM architecture analysis behind the open-row/6x work. |
 | [`BUILDS_FOR_REVIEW.md`](investigations/BUILDS_FOR_REVIEW.md) | The build-128→132 decision ladder and its telemetry guide. |
 | [`CAPTURE_SWEEP_0826.md`](investigations/CAPTURE_SWEEP_0826.md) | Automated artifact sweep of the build-124→128 re-test captures. |
+| [`MISTER_PORT_RECORD.md`](investigations/MISTER_PORT_RECORD.md) | The MiSTer port's build-by-build record, wrong turns included — the arbiter saga lives here. |
 | evidence captures | The video captures and crops backing the above are kept off-repo (large, and some contain copyrighted game art). Each investigation names the capture it used. |
 
 ---

@@ -151,7 +151,7 @@ deferral intact. Measured trade-off:
 which is sprites. On MiSTer that bus is genuinely busier: the playfield moved onto it and
 adds **13,794 read transactions per frame** (57 cells/line × 242 lines — verified from
 `escape_mister.v:714`; the enqueue has no horizontal gate, so it free-runs at 57/line,
-not the 42 that `docs/MISTER.md:277` assumes) = 27,588 word accesses ≈ 32.3% of frame
+not the 42 that `docs/investigations/MISTER_PORT_RECORD.md` (its 42/line figure) assumes) = 27,588 word accesses ≈ 32.3% of frame
 clocks. Pocket issues the same 13,794 fetches but as PSRAM reads on a physically
 separate chip, so its SDRAM sees none of them. That is a real asymmetry — it is just not
 one that can buy MiSTer an out-of-spec refresh interval. Losing ~2% of sprite bandwidth
