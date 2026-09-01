@@ -12,6 +12,9 @@ entity escape_jsa is
     port (
         clk       : in  std_logic;
         reset_n   : in  std_logic;
+        -- MISTER-155 added pause to the real entity (same trap as uvol_fm
+        -- below: the stub must track every port the core's port map names).
+        pause     : in  std_logic := '0';
         snd_res   : in  std_logic := '0';
         rom_addr  : out std_logic_vector(23 downto 0);
         rom_data  : in  std_logic_vector(31 downto 0);
