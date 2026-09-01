@@ -112,10 +112,11 @@ cached or stale `.rbf`, and it has caught that more than once.
 ## Controls
 
 Run **Define eprom buttons** in the OSD the first time (new buttons do not
-appear in previously saved maps): Jump, Fire, Duck, Bomb, Start, and
-Coin. Fresh installs default to Jump on the left face button, Fire on
-the bottom, Duck on the right, Bomb on top (SNES Y/B/A/X). The define
-flow prompts for all six buttons - answer every prompt before Finish,
+appear in previously saved maps): Jump, Fire, Duck, Bomb, Start, Coin,
+and Pause. Fresh installs default to Jump on the left face button, Fire
+on the bottom, Duck on the right, Bomb on top (SNES Y/B/A/X), and Pause
+on the left shoulder. The define
+flow prompts for all seven buttons - answer every prompt before Finish,
 or the unanswered ones stay unmapped. Note the framework treats your
 global User/Menu button as "Undefine" inside this flow: assigning a
 core button to it silently clears the slot instead.
@@ -128,10 +129,12 @@ core button to it silently clears the slot instead.
 - **Debug page** — ROM Shadow (leave On, the default; it is a performance
   feature, not a hack) and Skip Self-Test. Future diagnostics will live
   here.
-- **Pause** — Off, OSD (freezes whenever the menu is open), or On. The
-  whole machine freezes coherently — both 68010s, sound board, speech —
-  and resumes exactly where it stopped. After 10 seconds the picture dims
-  to half brightness against burn-in (toggle: **Dim Video After 10s**).
+- **Pause options page** — "Pause when OSD is open" (default On) and
+  "Dim video after 10s" (default On; halves brightness against burn-in).
+  The mappable **Pause button** (default: left shoulder) toggles pause
+  any time. Either way the whole machine freezes coherently — both
+  68010s, sound board, speech — and resumes exactly where it stopped.
+  Reset cancels a held pause.
 - **Service Mode** — the operator control, on the root menu.
 - **Reset** — the machine's hard reset.
 

@@ -149,27 +149,31 @@ localparam CONF_STR = {
 	"P2O[11:9],Music Volume,7,6,5,4,3,2,1,0;",
 	"P2O[14:12],Speech Volume,7,6,5,4,3,2,1,0;",
 	"-;",
-	"P3,Debug;",
+	// MISTER-157: the DonkeyKong-family pause idiom - a mappable Pause
+	// button plus this page - replaces the Psikyo three-state (155/156).
+	// SENSE IS INVERTED on both rows, like O[8]: status powers up 0 and
+	// both default On, so 0 = On and the wires are driven ~status[].
+	"P3,Pause options;",
+	"P3O[18],Pause when OSD is open,On,Off;",
+	"P3O[20],Dim video after 10s,On,Off;",
+	"P4,Debug;",
 	// VSHAD3-112 runtime toggle, moved to the Debug page for the
 	// mister-devel menu conventions (MISTER-154).  SENSE IS INVERTED ON
 	// PURPOSE: status powers up 0 and the shadow's default is ON, so
 	// 0 = On and the wire is driven ~status[8].  Writing this "Off,On"
 	// would ship every first-boot player the non-default configuration.
-	"P3O[8],ROM Shadow 0x54000,On,Off;",
-	"P3O[7],Skip Self-Test,Off,On;",
+	"P4O[8],ROM Shadow 0x54000,On,Off;",
+	"P4O[7],Skip Self-Test,Off,On;",
 	"-;",
-	"O[19:18],Pause,Off,OSD,On;",
-	// SENSE IS INVERTED like O[8]: status powers up 0 and the burn-in
-	// guard should default On, so 0 = On and the wire is ~status[20].
-	"O[20],Dim Video After 10s,On,Off;",
 	"O[6],Service Mode,Off,On;",
 	"-;",
 	"R[0],Reset;",
 	"-;",
-	"J1,Jump,Fire,Duck,Bomb,Start,Coin;",
-	// owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top)
-	"jn,Y,B,A,X,Start,Select;",
-	"V,v156 ",`BUILD_DATE," by spoonelli;"
+	"J1,Jump,Fire,Duck,Bomb,Start,Coin,Pause;",
+	// owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top);
+	// Pause rides the left shoulder, same slot the DK core gives it
+	"jn,Y,B,A,X,Start,Select,L;",
+	"V,v157 ",`BUILD_DATE," by spoonelli;"
 };
 
 ////////////////////////////   CLOCKS   //////////////////////////
@@ -274,8 +278,18 @@ wire        rom_ready;
 
 wire reset = RESET | status[0] | buttons[1] | ioctl_download;
 
-// MISTER-155: Psikyo-style pause - Off / pause-with-OSD / hard On
-wire pause = (OSD_STATUS && status[18]) || status[19];
+// MISTER-157: DonkeyKong-family pause - the mappable Pause button toggles,
+// OSD-open pauses when the (default-On, inverted-sense) option says so, and
+// reset cancels a held pause.  status[19] (155's hard-On state) is retired.
+wire pause_btn = joystick_0[10] | joystick_1[10];
+reg  pause_toggle = 1'b0;
+reg  pause_btn_d  = 1'b0;
+always @(posedge clk_sys) begin
+	pause_btn_d <= pause_btn;
+	if (pause_btn & ~pause_btn_d) pause_toggle <= ~pause_toggle;
+	if (reset) pause_toggle <= 1'b0;
+end
+wire pause = pause_toggle | (OSD_STATUS & ~status[18]);
 
 
 escape_mister machine
