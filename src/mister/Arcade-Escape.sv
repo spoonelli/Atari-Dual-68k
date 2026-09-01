@@ -199,7 +199,10 @@ localparam CONF_STR = {
 	// owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top);
 	// Pause rides the left shoulder, same slot the DK core gives it
 	"jn,Y,B,A,X,Start,Select,L;",
-	"V,v159 ",`BUILD_DATE," by spoonelli;"
+	// Renders as "ESCAPE 260901 v159 by spoonelli" - Main prepends the
+	// core id, and the whole line must stay within the OSD's 32 columns
+	// or the credit truncates (v158 proved it at 33).
+	"V,",`BUILD_DATE," v159 by spoonelli;"
 };
 
 ////////////////////////////   CLOCKS   //////////////////////////
