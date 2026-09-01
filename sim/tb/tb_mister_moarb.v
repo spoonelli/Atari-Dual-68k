@@ -53,7 +53,8 @@ module tb_mister_moarb;
     escape_mister dut (
         .uvol_ym      ( 3'b111 ),
         .uvol_tms     ( 3'b111 ),
-        .credits_page ( 2'd0 ),
+        .crt_hadj     ( 4'd0 ),
+        .crt_vadj     ( 4'd0 ),
         .clk_sys(clk_sys), .clk_sdram(clk_sdram),
         .pll_locked(pll_locked), .reset(reset),
         .ioctl_download(ioctl_download), .ioctl_wr(ioctl_wr),

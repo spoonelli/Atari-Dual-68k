@@ -130,7 +130,8 @@ module escape_mister (
     // page from the mappable Credits button (0 = off).
     input  wire [2:0]  uvol_ym,
     input  wire [2:0]  uvol_tms,
-    input  wire [1:0]  credits_page,
+        input  wire [3:0]  crt_hadj,          // MISTER-154: CRT H adjust, signed nibble
+    input  wire [3:0]  crt_vadj,          // MISTER-154: CRT V adjust, signed nibble
 
     // ---- status -----------------------------------------------------------
     output wire        rom_ready    // SDRAM up, image loaded, self-check done
@@ -1243,41 +1244,29 @@ wire [7:0]  pal_r = (r_m[10:2] > 9'd255) ? 8'd255 : r_m[9:2];
 wire [7:0]  pal_g = (g_m[10:2] > 9'd255) ? 8'd255 : g_m[9:2];
 wire [7:0]  pal_b = (b_m[10:2] > 9'd255) ? 8'd255 : b_m[9:2];
 
-// ---- MISTER-132: core-credits overlay -------------------------------------
-// Drawn here, in the core's own video path, because the CONF_STR submenu
-// pages this replaces render EMPTY on some framework builds (see
-// Arcade-Escape.sv).  escape_credits is pipelined to the same two-clock depth
-// as the colour path, so its pixel lands on the pixel it belongs to.
-// MISTER-142: the MISTER-134 boot splash is retired for release (owner
-// gate, docs/MISTER.md status note): the machine boots clean, and the
-// build number lives on credits page 1 (its second line -
-// support/gen_credits_overlay.py, BUMP THEM TOGETHER), reachable via the
-// OSD "Show Credits" trigger, the mappable Credits button, or keyboard C.
-// The splash existed to answer "is the new rbf actually running?" during
-// field-testing; the dated rbf filename plus the credits page carry that
-// duty now.
-wire [1:0] cr_page_eff = credits_page;
-
-wire cr_on, cr_px;
-escape_credits #(
-    .H_BPORCH ( VID_H_BPORCH ), .V_BPORCH ( VID_V_BPORCH ),
-    .H_ACTIVE ( VID_H_ACTIVE ), .V_ACTIVE ( VID_V_ACTIVE )
-) u_credits (
-    .clk     ( clk_sys ),
-    .page    ( cr_page_eff ),
-    .x_count ( x_count ),
-    .y_count ( y_count ),
-    .ov_on   ( cr_on ),
-    .ov_px   ( cr_px )
-);
-
-// ---- video output registers ----------------------------------------------
-// The colour path is two clocks behind the raster counters (color_vaddr is
-// registered, then the colour RAM read is registered), so the sync/blank
-// flags are delayed to match.
 reg [1:0] de_d, hs_d, vs_d, hb_d, vb_d;
-wire cur_hs = (x_count >= HS_START) && (x_count < HS_END);
-wire cur_vs = (y_count >= VS_START) && (y_count < VS_END);
+// MISTER-154 CRT H/V adjust: the standard MiSTer idiom - a signed offset
+// added to the sync start/end positions (cf. Arcade-PsikyoSH2 PS6406B.sv
+// HSYNC_START, Arcade-Cave's P1 adjusters; both GPL-3.0 - pattern
+// re-derived here, no code copied). Only where the picture sits on the
+// glass moves; the machine raster, active window and blanking are
+// untouched. Wrap-safe so +7 on VSync (base 254..257 of 262) still emits
+// a full-width pulse across the frame boundary.
+wire signed [10:0] hadj = {{7{crt_hadj[3]}}, crt_hadj};
+wire signed [10:0] vadj = {{7{crt_vadj[3]}}, crt_vadj};
+function [9:0] wrapd(input signed [11:0] v, input [9:0] total);
+    wrapd = v >= $signed({2'b00, total}) ? v - $signed({2'b00, total})
+          : v < 0                        ? v + $signed({2'b00, total})
+          : v[9:0];
+endfunction
+wire [9:0] hs_s = wrapd($signed({2'b00, HS_START}) + hadj, VID_H_TOTAL);
+wire [9:0] hs_e = wrapd($signed({2'b00, HS_END})   + hadj, VID_H_TOTAL);
+wire [9:0] vs_s = wrapd($signed({2'b00, VS_START}) + vadj, VID_V_TOTAL);
+wire [9:0] vs_e = wrapd($signed({2'b00, VS_END})   + vadj, VID_V_TOTAL);
+wire cur_hs = (hs_s <= hs_e) ? (x_count >= hs_s && x_count < hs_e)
+                             : (x_count >= hs_s || x_count < hs_e);
+wire cur_vs = (vs_s <= vs_e) ? (y_count >= vs_s && y_count < vs_e)
+                             : (y_count >= vs_s || y_count < vs_e);
 always @(posedge clk_sys) begin
     hs_d <= {hs_d[0], cur_hs};
     vs_d <= {vs_d[0], cur_vs};
@@ -1289,12 +1278,6 @@ always @(posedge clk_sys) begin
     VBlank <= vb_d[1];
     if (hb_d[1] || vb_d[1] || evideo_off) begin
         VGA_R <= 8'd0; VGA_G <= 8'd0; VGA_B <= 8'd0;
-    end else if (cr_on) begin
-        // credits overlay: lit text white, everything else the game picture
-        // dimmed to a quarter so the page reads over any scene
-        VGA_R <= cr_px ? 8'hFF : {2'b00, pal_r[7:2]};
-        VGA_G <= cr_px ? 8'hFF : {2'b00, pal_g[7:2]};
-        VGA_B <= cr_px ? 8'hFF : {2'b00, pal_b[7:2]};
     end else begin
         VGA_R <= pal_r; VGA_G <= pal_g; VGA_B <= pal_b;
     end

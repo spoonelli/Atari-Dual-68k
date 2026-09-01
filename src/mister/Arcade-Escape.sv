@@ -136,52 +136,36 @@ assign VIDEO_ARY = (!ar) ? 12'd3 : 12'd0;
 localparam CONF_STR = {
 	"A.ESCAPE;;",
 	"-;",
-	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
-	"O[5:3],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"P1,Audio & Video;",
+	"P1O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	"P1O[5:3],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"P1-;",
+	"P1O[27:24],CRT H Adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
+	"P1O[31:28],CRT V Adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
+	"P1-;",
+	// Audio sliders: SENSE IS INVERTED - status powers up 0 and bit-clear
+	// must be the default, so the labels count DOWN and the wires are
+	// driven ~status[].  Default (status 0) = "7" = full volume.
+	"P1O[11:9],Music Volume,7,6,5,4,3,2,1,0;",
+	"P1O[14:12],Speech Volume,7,6,5,4,3,2,1,0;",
+	"-;",
+	"P2,Debug;",
+	// VSHAD3-112 runtime toggle, moved to the Debug page for the
+	// mister-devel menu conventions (MISTER-154).  SENSE IS INVERTED ON
+	// PURPOSE: status powers up 0 and the shadow's default is ON, so
+	// 0 = On and the wire is driven ~status[8].  Writing this "Off,On"
+	// would ship every first-boot player the non-default configuration.
+	"P2O[8],ROM Shadow 0x54000,On,Off;",
 	"-;",
 	"O[6],Service Mode,Off,On;",
 	"O[7],Skip Self-Test,Off,On;",
 	"-;",
-	// VSHAD3-112 runtime toggle.  This is the MiSTer equivalent of the
-	// Pocket's interact.json variable id 37 "ROM Shadow 0x54000" - and the
-	// only equivalent there is: interact.json is an openFPGA/APF file that
-	// MiSTer neither reads nor has an analogue of, so a Pocket menu entry
-	// that should exist on both platforms has to be hand-carried to CONF_STR.
-	// (The Pocket's Interact menu also has a hard 16-variable cap, currently
-	// 11 used.  CONF_STR has no such cap - it is limited only by status[]
-	// width, 128 bits, of which this core uses 8.)
-	//
-	// SENSE IS INVERTED ON PURPOSE.  hps_io powers status[] up at zero and a
-	// fresh SD card has no saved config, so bit-clear MUST be the default
-	// behaviour.  The shadow's default is ON (matching Interact id 37
-	// defaultval 1), therefore 0 = On and the wire is driven ~status[8].
-	// Writing this "Off,On" would silently ship every first-boot player the
-	// non-default configuration.
-	"O[8],ROM Shadow 0x54000,On,Off;",
-	"-;",
 	"R[0],Reset;",
 	"-;",
-	// ---------------------------------------------------------------------
-	// MISTER-132: the About/Credits CONF_STR submenu pages that lived here
-	// rendered EMPTY on the owner's framework build ("Pn-,text;" text lines
-	// are not drawn by every menu renderer), so the attributions moved into
-	// the CORE's own video path: escape_credits.v draws them as an overlay,
-	// cycled by the mappable Credits button (page 1 -> page 2 -> off).  The
-	// full unabridged attribution text stays in docs/MISTER.md and in
-	// support/gen_credits_overlay.py, which generates the overlay bitmap.
-	//
-	// Audio sliders: SENSE IS INVERTED like ROM Shadow above - status powers
-	// up 0 and bit-clear must be the default, so the labels count DOWN and
-	// the wires are driven ~status[].  Default (status 0) = "7" = full volume.
-	"O[11:9],Music Volume,7,6,5,4,3,2,1,0;",
-	"O[14:12],Speech Volume,7,6,5,4,3,2,1,0;",
-	"-;",
-	"T[16],Show Credits;",
-	"-;",
-	"J1,Jump,Fire,Duck,Bomb,Start,Coin,Credits;",
+	"J1,Jump,Fire,Duck,Bomb,Start,Coin;",
 	// owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top)
-	"jn,Y,B,A,X,Start,Select,R;",
-	"V,v",`BUILD_DATE
+	"jn,Y,B,A,X,Start,Select;",
+	"V,v154 ",`BUILD_DATE," by spoonelli;"
 };
 
 ////////////////////////////   CLOCKS   //////////////////////////
@@ -254,7 +238,7 @@ wire rom_wr = ioctl_wr && ioctl_download && (ioctl_index == 16'd0);
 
 /////////////////////////   KEYBOARD   ///////////////////////////
 reg kb_up1, kb_dn1, kb_lf1, kb_rt1, kb_jump1, kb_fire1, kb_duck1, kb_bomb1;
-reg kb_start1, kb_coin1, kb_start2, kb_coin2, kb_creds;
+reg kb_start1, kb_coin1, kb_start2, kb_coin2;
 wire pressed = ps2_key[9];
 always @(posedge clk_sys) begin
 	reg old_state;
@@ -273,7 +257,6 @@ always @(posedge clk_sys) begin
 			9'h01E: kb_start2 <= pressed;   // 2
 			9'h02E: kb_coin1  <= pressed;   // 5
 			9'h036: kb_coin2  <= pressed;   // 6
-			9'h021: kb_creds  <= pressed;   // C - credits overlay (MISTER-133)
 			default: ;
 		endcase
 	end
@@ -286,23 +269,6 @@ wire [15:0] core_aud_l, core_aud_r;
 wire        rom_ready;
 
 wire reset = RESET | status[0] | buttons[1] | ioctl_download;
-
-// MISTER-132: Credits button (joy bit 10, either player) cycles the core's
-// credits overlay: off -> page 1 -> page 2 -> off.  Synchronised and
-// edge-detected in clk_sys; reset returns to off.
-reg  [1:0] credits_page = 2'd0;
-reg  [2:0] cr_btn_sync = 3'd0;
-always @(posedge clk_sys) begin
-	// MISTER-133: keyboard C works with no button mapping at all - a fresh
-	// install has no saved per-core map, so the joystick Credits button only
-	// exists after "Define eprom buttons" has been run once.
-	// three ways in: the J1 "Credits" button (assignable in Define buttons),
-	// keyboard C, and the OSD "Show Credits" trigger (status[16])
-	cr_btn_sync <= {cr_btn_sync[1:0], joystick_0[10] | joystick_1[10] | kb_creds | status[16]};
-	if (reset) credits_page <= 2'd0;
-	else if (cr_btn_sync[1] && !cr_btn_sync[2])
-		credits_page <= (credits_page == 2'd2) ? 2'd0 : credits_page + 2'd1;
-end
 
 
 escape_mister machine
@@ -379,7 +345,8 @@ escape_mister machine
 	// MISTER-132: inverted-sense sliders (see CONF_STR comment) + overlay page
 	.uvol_ym      (~status[11:9]),
 	.uvol_tms     (~status[14:12]),
-	.credits_page (credits_page),
+	.crt_hadj     (status[27:24]),
+	.crt_vadj     (status[31:28]),
 
 	.rom_ready  (rom_ready)
 );

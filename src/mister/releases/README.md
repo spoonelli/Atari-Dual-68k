@@ -104,30 +104,33 @@ Both files are in [`releases/`](releases/) in this repository.
 
 ## Self-Test and First boot
 
-Note that this core follows the authentic behavior of the original PCB with a "Waiting for Second Processor" screen that will hold for several seconds.  After that, the machine boots clean. To confirm which build is running, open **Show
-Credits** in the OSD (or press the Credits button / keyboard **C**) — the
-**MISTER BUILD number** is on page 1. Check it matches the build you
-installed; it is the only guard against a cached or stale `.rbf`, and it
-has caught that more than once.
+Note that this core follows the authentic behavior of the original PCB with a "Waiting for Second Processor" screen that will hold for several seconds.  After that, the machine boots clean. To confirm which build is running, open the OSD — the
+**version footer** at the bottom reads `v<build> <date> by spoonelli`.
+Check it matches the build you installed; it is the only guard against a
+cached or stale `.rbf`, and it has caught that more than once.
 
 ## Controls
 
 Run **Define eprom buttons** in the OSD the first time (new buttons do not
-appear in previously saved maps): Jump, Fire, Duck, Bomb, Start, Coin, and
-Credits. Fresh installs default to Jump on the left face button, Fire on
+appear in previously saved maps): Jump, Fire, Duck, Bomb, Start, and
+Coin. Fresh installs default to Jump on the left face button, Fire on
 the bottom, Duck on the right, Bomb on top (SNES Y/B/A/X). The define
-flow prompts for all seven buttons - answer every prompt before Finish,
+flow prompts for all six buttons - answer every prompt before Finish,
 or the unanswered ones stay unmapped. Note the framework treats your
 global User/Menu button as "Undefine" inside this flow: assigning a
 core button to it silently clears the slot instead.
 
 ## OSD options
 
-- **Music Volume / Speech Volume** — independent 8-step sliders.
-- **Show Credits** — cycles the credits pages (so does the assignable
-  Credits button, or the **C** key on a keyboard).
-- **ROM Shadow** — leave On (default); it is a performance feature, not a hack.
+- **Audio & Video page** — aspect ratio, scandoubler effects, **CRT H/V
+  Adjust** (±8 steps, for positioning the picture on your display), and
+  independent Music / Speech volume sliders.
+- **Debug page** — ROM Shadow (leave On, the default; it is a performance
+  feature, not a hack). Future diagnostics will live here.
+- **Service Mode / Skip Self-Test** — operator controls, on the root menu.
 - **Reset** — the machine's hard reset.
+
+Attributions live in `NOTICE.md` (in this zip and the repository).
 
 ## Auto-updates (update_all / Downloader)
 

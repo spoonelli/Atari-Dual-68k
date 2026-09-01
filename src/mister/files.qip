@@ -16,7 +16,6 @@
 
 set_global_assignment -name SYSTEMVERILOG_FILE Arcade-Escape.sv
 set_global_assignment -name VERILOG_FILE rtl/escape_mister.v
-set_global_assignment -name VERILOG_FILE rtl/escape_credits.v
 # NOTE: the core PLL is NOT listed here.  sys/pll_q<version>.qip pulls in
 # "rtl/pll.qip" (a path the MiSTer framework hard-codes relative to the project
 # directory), which is why our PLL lives at src/mister/rtl/pll.qip.  Listing it
