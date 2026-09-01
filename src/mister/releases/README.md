@@ -122,12 +122,17 @@ core button to it silently clears the slot instead.
 
 ## OSD options
 
-- **Audio & Video page** — aspect ratio, scandoubler effects, **CRT H/V
-  Adjust** (±8 steps, for positioning the picture on your display), and
-  independent Music / Speech volume sliders.
+- **Video page** — aspect ratio, scandoubler effects, and **CRT H/V
+  Adjust** (±8 steps, for positioning the picture on your display).
+- **Audio page** — independent Music / Speech volume sliders.
 - **Debug page** — ROM Shadow (leave On, the default; it is a performance
-  feature, not a hack). Future diagnostics will live here.
-- **Service Mode / Skip Self-Test** — operator controls, on the root menu.
+  feature, not a hack) and Skip Self-Test. Future diagnostics will live
+  here.
+- **Pause** — Off, OSD (freezes whenever the menu is open), or On. The
+  whole machine freezes coherently — both 68010s, sound board, speech —
+  and resumes exactly where it stopped. After 10 seconds the picture dims
+  to half brightness against burn-in (toggle: **Dim Video After 10s**).
+- **Service Mode** — the operator control, on the root menu.
 - **Reset** — the machine's hard reset.
 
 Attributions live in `NOTICE.md` (in this zip and the repository).

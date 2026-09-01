@@ -136,40 +136,40 @@ assign VIDEO_ARY = (!ar) ? 12'd3 : 12'd0;
 localparam CONF_STR = {
 	"A.ESCAPE;;",
 	"-;",
-	"P1,Audio & Video;",
+	"P1,Video;",
 	"P1O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"P1O[5:3],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"P1-;",
 	"P1O[27:24],CRT H Adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"P1O[31:28],CRT V Adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
-	"P1-;",
+	"P2,Audio;",
 	// Audio sliders: SENSE IS INVERTED - status powers up 0 and bit-clear
 	// must be the default, so the labels count DOWN and the wires are
 	// driven ~status[].  Default (status 0) = "7" = full volume.
-	"P1O[11:9],Music Volume,7,6,5,4,3,2,1,0;",
-	"P1O[14:12],Speech Volume,7,6,5,4,3,2,1,0;",
+	"P2O[11:9],Music Volume,7,6,5,4,3,2,1,0;",
+	"P2O[14:12],Speech Volume,7,6,5,4,3,2,1,0;",
 	"-;",
-	"P2,Debug;",
+	"P3,Debug;",
 	// VSHAD3-112 runtime toggle, moved to the Debug page for the
 	// mister-devel menu conventions (MISTER-154).  SENSE IS INVERTED ON
 	// PURPOSE: status powers up 0 and the shadow's default is ON, so
 	// 0 = On and the wire is driven ~status[8].  Writing this "Off,On"
 	// would ship every first-boot player the non-default configuration.
-	"P2O[8],ROM Shadow 0x54000,On,Off;",
+	"P3O[8],ROM Shadow 0x54000,On,Off;",
+	"P3O[7],Skip Self-Test,Off,On;",
 	"-;",
 	"O[19:18],Pause,Off,OSD,On;",
 	// SENSE IS INVERTED like O[8]: status powers up 0 and the burn-in
 	// guard should default On, so 0 = On and the wire is ~status[20].
 	"O[20],Dim Video After 10s,On,Off;",
 	"O[6],Service Mode,Off,On;",
-	"O[7],Skip Self-Test,Off,On;",
 	"-;",
 	"R[0],Reset;",
 	"-;",
 	"J1,Jump,Fire,Duck,Bomb,Start,Coin;",
 	// owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top)
 	"jn,Y,B,A,X,Start,Select;",
-	"V,v155 ",`BUILD_DATE," by spoonelli;"
+	"V,v156 ",`BUILD_DATE," by spoonelli;"
 };
 
 ////////////////////////////   CLOCKS   //////////////////////////
