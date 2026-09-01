@@ -443,17 +443,9 @@ wire       rotate_en  = (rotate_sel != 2'd0) & ~direct_video;
 wire       rotate_ccw = (rotate_sel == 2'd1);
 wire       flip       = status[17];
 wire       no_rotate  = ~rotate_en;
+wire       video_rotated;
 
-// MISTER-158a PROBE: 158 came up black on hardware with rotate off, which
-// the FB_EN gating says is impossible - so bisect.  This build keeps the
-// MISTER_FB macro and the emu port block but removes the live instance:
-// FB and DDRAM tied off exactly as 157.  If this boots, the instance is
-// implicated; if it is still black, the macro/port layer (or placement)
-// is.  One variable.
-wire video_rotated = 1'b0;
-assign {FB_EN, FB_FORMAT, FB_WIDTH, FB_HEIGHT, FB_BASE, FB_STRIDE} = '0;
-assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
-// screen_rotate screen_rotate (.*);   // restored when the probe answers
+screen_rotate screen_rotate (.*);
 
 arcade_video #(.WIDTH(336), .DW(24)) arcade_video
 (
