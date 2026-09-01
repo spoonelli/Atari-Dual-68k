@@ -158,6 +158,9 @@ localparam CONF_STR = {
 	"P2O[8],ROM Shadow 0x54000,On,Off;",
 	"-;",
 	"O[19:18],Pause,Off,OSD,On;",
+	// SENSE IS INVERTED like O[8]: status powers up 0 and the burn-in
+	// guard should default On, so 0 = On and the wire is ~status[20].
+	"O[20],Dim Video After 10s,On,Off;",
 	"O[6],Service Mode,Off,On;",
 	"O[7],Skip Self-Test,Off,On;",
 	"-;",
@@ -166,7 +169,7 @@ localparam CONF_STR = {
 	"J1,Jump,Fire,Duck,Bomb,Start,Coin;",
 	// owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top)
 	"jn,Y,B,A,X,Start,Select;",
-	"V,v154 ",`BUILD_DATE," by spoonelli;"
+	"V,v155 ",`BUILD_DATE," by spoonelli;"
 };
 
 ////////////////////////////   CLOCKS   //////////////////////////
@@ -271,6 +274,9 @@ wire        rom_ready;
 
 wire reset = RESET | status[0] | buttons[1] | ioctl_download;
 
+// MISTER-155: Psikyo-style pause - Off / pause-with-OSD / hard On
+wire pause = (OSD_STATUS && status[18]) || status[19];
+
 
 escape_mister machine
 (
@@ -348,8 +354,7 @@ escape_mister machine
 	.uvol_tms     (~status[14:12]),
 	.crt_hadj     (status[27:24]),
 	.crt_vadj     (status[31:28]),
-	// MISTER-155: Psikyo-style pause - Off / pause-with-OSD / hard On
-	.pause        ((OSD_STATUS && status[18]) || status[19]),
+	.pause        (pause),
 
 	.rom_ready  (rom_ready)
 );
@@ -368,7 +373,27 @@ reg [2:0] pix_tog_s = 3'd0;
 always @(posedge clk_ram) pix_tog_s <= {pix_tog_s[1:0], pix_tog};
 wire core_ce_pix = pix_tog_s[2] ^ pix_tog_s[1];
 
-wire [23:0] RGB_in = {core_r, core_g, core_b};
+// MISTER-155: dim the frozen frame to half brightness after 10 s of pause,
+// the burn-in guard from JimmyStones' Pause_MiSTer (idiom only, no code
+// copied - the Psikyo pause we modelled doesn't carry it, the wider arcade
+// family does).  The timer runs in the pixel/CPU domain; the flag flips at
+// most once per pause with the picture already frozen, so a two-flop
+// resync into clk_ram is plenty.
+wire       dim_en = ~status[20];   // inverted sense - see CONF_STR comment
+reg [26:0] dim_ctr = 27'd0;
+wire       dim_hit = (dim_ctr == 27'd71_590_910);   // 10 s at 7.159091 MHz
+always @(posedge clk_sys) begin
+	if (pause && dim_en) begin
+		if (!dim_hit) dim_ctr <= dim_ctr + 27'd1;
+	end else begin
+		dim_ctr <= 27'd0;
+	end
+end
+reg [1:0] dim_s = 2'd0;
+always @(posedge clk_ram) dim_s <= {dim_s[0], dim_hit};
+
+wire [23:0] RGB_in = dim_s[1] ? {1'b0, core_r[7:1], 1'b0, core_g[7:1], 1'b0, core_b[7:1]}
+                              : {core_r, core_g, core_b};
 wire  [2:0] fx = status[5:3];
 
 arcade_video #(.WIDTH(336), .DW(24)) arcade_video
