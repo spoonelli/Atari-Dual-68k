@@ -151,7 +151,9 @@ assign VIDEO_ARY = (!ar) ? (rotate_en ? 12'd4 : 12'd3) : 12'd0;
 
 `include "build_id.v"
 localparam CONF_STR = {
-	"A.ESCAPE;;",
+	// Plain modern core id (Cave/IGSPGM style; the "A." arcade prefix is
+	// the DK-era legacy).  Renaming moves the saved-config namespace.
+	"ESCAPE;;",
 	"-;",
 	"P1,Video;",
 	"P1O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
@@ -162,6 +164,8 @@ localparam CONF_STR = {
 	"P1-;",
 	"P1O[27:24],CRT H Adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"P1O[31:28],CRT V Adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
+	// MISTER-159: root spacer between every page link, the Cave layout
+	"-;",
 	"P2,Audio;",
 	// Audio sliders: SENSE IS INVERTED - status powers up 0 and bit-clear
 	// must be the default, so the labels count DOWN and the wires are
@@ -177,6 +181,7 @@ localparam CONF_STR = {
 	"P3,Pause options;",
 	"P3O[18],Pause when OSD is open,Off,On;",
 	"P3O[20],Dim video after 10s,On,Off;",
+	"-;",
 	"P4,Debug;",
 	// VSHAD3-112 runtime toggle, moved to the Debug page for the
 	// mister-devel menu conventions (MISTER-154).  SENSE IS INVERTED ON
@@ -194,7 +199,7 @@ localparam CONF_STR = {
 	// owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top);
 	// Pause rides the left shoulder, same slot the DK core gives it
 	"jn,Y,B,A,X,Start,Select,L;",
-	"V,v158 ",`BUILD_DATE," by spoonelli;"
+	"V,v159 ",`BUILD_DATE," by spoonelli;"
 };
 
 ////////////////////////////   CLOCKS   //////////////////////////
