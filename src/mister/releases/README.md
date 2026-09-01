@@ -123,8 +123,10 @@ core button to it silently clears the slot instead.
 
 ## OSD options
 
-- **Video page** — aspect ratio, scandoubler effects, and **CRT H/V
-  Adjust** (±8 steps, for positioning the picture on your display).
+- **Video page** — aspect ratio, **Rotate** (No / CCW / CW) and
+  **Flip 180** for rotated or flipped cabinets, scandoubler effects, and
+  **CRT H/V Adjust** (±8 steps, for positioning the picture on your
+  display). Rotation is unavailable under direct video.
 - **Audio page** — independent Music / Speech volume sliders.
 - **Debug page** — ROM Shadow (leave On, the default; it is a performance
   feature, not a hack) and Skip Self-Test. Future diagnostics will live

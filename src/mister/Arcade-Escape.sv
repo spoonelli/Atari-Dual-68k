@@ -80,6 +80,21 @@ module emu
 	output  [7:0] DDRAM_BE,
 	output        DDRAM_WE,
 
+`ifdef MISTER_FB
+	// MISTER-158: DDR3 framebuffer, driven by sys screen_rotate for the
+	// Rotate / Flip 180 options.  With both off the framebuffer disengages
+	// (FB_EN low) and video takes the same direct path as build 153.
+	output        FB_EN,
+	output  [4:0] FB_FORMAT,
+	output [11:0] FB_WIDTH,
+	output [11:0] FB_HEIGHT,
+	output [31:0] FB_BASE,
+	output [13:0] FB_STRIDE,
+	input         FB_VBL,
+	input         FB_LL,
+	output        FB_FORCE_BLANK,
+`endif
+
 	//SDRAM interface with lower latency
 	output        SDRAM_CLK,
 	output        SDRAM_CKE,
@@ -111,7 +126,8 @@ assign ADC_BUS  = 'Z;
 assign USER_OUT = '1;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
-assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
+// DDRAM_* is owned by screen_rotate (MISTER-158) - see the VIDEO section.
+assign FB_FORCE_BLANK = 0;
 
 assign VGA_F1      = 0;
 assign VGA_SCALER  = 0;
@@ -129,8 +145,9 @@ assign BUTTONS   = 0;
 //////////////////////////////////////////////////////////////////
 
 wire [1:0] ar = status[122:121];
-assign VIDEO_ARX = (!ar) ? 12'd4 : (ar - 1'd1);
-assign VIDEO_ARY = (!ar) ? 12'd3 : 12'd0;
+// MISTER-158: a rotated picture swaps the 4:3 default (Psikyo's arx/ary swap)
+assign VIDEO_ARX = (!ar) ? (rotate_en ? 12'd3 : 12'd4) : (ar - 1'd1);
+assign VIDEO_ARY = (!ar) ? (rotate_en ? 12'd4 : 12'd3) : 12'd0;
 
 `include "build_id.v"
 localparam CONF_STR = {
@@ -138,6 +155,9 @@ localparam CONF_STR = {
 	"-;",
 	"P1,Video;",
 	"P1O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	// MISTER-158: for rotated / flipped cabinets, the Psikyo core's rows
+	"P1O[16:15],Rotate,No,CCW,CW;",
+	"P1O[17],Flip 180,Off,On;",
 	"P1O[5:3],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"P1-;",
 	"P1O[27:24],CRT H Adjust,0,+1,+2,+3,+4,+5,+6,+7,-8,-7,-6,-5,-4,-3,-2,-1;",
@@ -174,7 +194,7 @@ localparam CONF_STR = {
 	// owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top);
 	// Pause rides the left shoulder, same slot the DK core gives it
 	"jn,Y,B,A,X,Start,Select,L;",
-	"V,v157 ",`BUILD_DATE," by spoonelli;"
+	"V,v158 ",`BUILD_DATE," by spoonelli;"
 };
 
 ////////////////////////////   CLOCKS   //////////////////////////
@@ -225,6 +245,7 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.status(status),
 	.status_menumask({1'b0, direct_video}),
 	.direct_video(direct_video),
+	.video_rotated(video_rotated),
 
 	.ioctl_download(ioctl_download),
 	.ioctl_wr(ioctl_wr),
@@ -410,6 +431,21 @@ always @(posedge clk_ram) dim_s <= {dim_s[0], dim_hit};
 wire [23:0] RGB_in = dim_s[1] ? {1'b0, core_r[7:1], 1'b0, core_g[7:1], 1'b0, core_b[7:1]}
                               : {core_r, core_g, core_b};
 wire  [2:0] fx = status[5:3];
+
+// MISTER-158: Rotate / Flip 180 through the framework's screen_rotate
+// (sys/arcade_video.v) and its triple-buffered DDR3 framebuffer.  Wiring
+// per the Psikyo core; module and buffer are framework code (sys/ NOTICE
+// row).  Rotation is forced off under direct video, matching the DK core.
+// With Rotate=No and Flip off, FB_EN stays low and the scaler takes the
+// direct VGA_* path - bit-identical to what shipped in 153.
+wire [1:0] rotate_sel = status[16:15];
+wire       rotate_en  = (rotate_sel != 2'd0) & ~direct_video;
+wire       rotate_ccw = (rotate_sel == 2'd1);
+wire       flip       = status[17];
+wire       no_rotate  = ~rotate_en;
+wire       video_rotated;
+
+screen_rotate screen_rotate (.*);
 
 arcade_video #(.WIDTH(336), .DW(24)) arcade_video
 (
