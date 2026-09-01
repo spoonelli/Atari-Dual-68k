@@ -9,7 +9,12 @@
 	<rbf>escape</rbf>
 	<mameinfo parent="eprom" cpp="eprom" input="eprom"/>
 	<display type="raster" rotate="0"/>
-	<buttons names="Jump,Fire,Duck,Bomb,Start,Coin" default="A,B,X,Y,Start,Select"/>
+	<!-- On an MRA launch this element OVERRIDES the core's J1/jn lines, so
+	     it must mirror Arcade-Escape.sv exactly: seven buttons including the
+	     wrapper-level Pause, owner defaults Jump=Y(left) Fire=B(bottom)
+	     Duck=A(right) Bomb=X(top), Pause on the left shoulder.  Build 159
+	     shipped six with A,B,X,Y here and silently hid Pause. -->
+	<buttons names="Jump,Fire,Duck,Bomb,Start,Coin,Pause" default="Y,B,A,X,Start,Select,L"/>
 
 	<!--
 	  ROM STREAM LAYOUT
