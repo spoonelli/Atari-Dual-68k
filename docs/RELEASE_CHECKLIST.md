@@ -169,4 +169,9 @@ blocks the shipped v0.1.1 releases.
 **Slow-burn (no version attached):** section-F `DIAG_EN` decision; `eprom2`
 (second CRC table + MRA + both-platform verify); HISTORY.md builds-103+
 chronology; C5 clean-machine ROM-prep walkthrough; optional GitHub Support
-ticket for the pre-rewrite `refs/pull/*` snapshots.
+ticket for the pre-rewrite `refs/pull/*` snapshots; **save-states
+evaluation** (MiSTer `SS<base>:<size>` DDR window + framework hooks; the
+open question is CPU state capture — the imported T65/TG68K/jt51 expose no
+internal state, so the fork is in-house CPU rewrites vs a sequencer-walk
+snapshot; the MISTER-155 pause already provides the coherent-freeze half,
+and any answer must serve both platforms or be MiSTer-only by design).
