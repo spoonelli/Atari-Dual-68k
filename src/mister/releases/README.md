@@ -105,9 +105,10 @@ Both files are in [`releases/`](releases/) in this repository.
 ## Self-Test and First boot
 
 Note that this core follows the authentic behavior of the original PCB with a "Waiting for Second Processor" screen that will hold for several seconds.  After that, the machine boots clean. To confirm which build is running, open the OSD — the
-**version footer** at the bottom reads `v<build> <date> by spoonelli`.
-Check it matches the build you installed; it is the only guard against a
-cached or stale `.rbf`, and it has caught that more than once.
+**version footer** at the bottom reads `ESCAPE v<date> by spoonelli`,
+with the date matching the `.rbf` filename you installed. Check they
+agree; it is the only guard against a cached or stale `.rbf`, and it
+has caught that more than once.
 
 ## Controls
 

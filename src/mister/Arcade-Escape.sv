@@ -199,10 +199,13 @@ localparam CONF_STR = {
 	// owner default: Jump=Y(left) Fire=B(bottom) Duck=A(right) Bomb=X(top);
 	// Pause rides the left shoulder, same slot the DK core gives it
 	"jn,Y,B,A,X,Start,Select,L;",
-	// Renders as "ESCAPE 260901 v159 by spoonelli" - Main prepends the
-	// core id, and the whole line must stay within the OSD's 32 columns
-	// or the credit truncates (v158 proved it at 33).
-	"V,",`BUILD_DATE," v159 by spoonelli;"
+	// Renders as "ESCAPE v260901 by spoonelli" - the family convention
+	// (Cave's author-credit form): the date IS the version, matching the
+	// CoreName_YYYYMMDD.rbf naming.  No internal build number on screen -
+	// the build <-> release mapping lives in the release notes.  Main
+	// prepends the core id, and the whole line must stay within the OSD's
+	// 32 columns or the credit truncates (v158 proved it at 33).
+	"V,v",`BUILD_DATE," by spoonelli;"
 };
 
 ////////////////////////////   CLOCKS   //////////////////////////
