@@ -129,7 +129,7 @@ core button to it silently clears the slot instead.
 - **Debug page** — ROM Shadow (leave On, the default; it is a performance
   feature, not a hack) and Skip Self-Test. Future diagnostics will live
   here.
-- **Pause options page** — "Pause when OSD is open" (default On) and
+- **Pause options page** — "Pause when OSD is open" (default Off) and
   "Dim video after 10s" (default On; halves brightness against burn-in).
   The mappable **Pause button** (default: left shoulder) toggles pause
   any time. Either way the whole machine freezes coherently — both

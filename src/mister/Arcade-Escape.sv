@@ -151,10 +151,11 @@ localparam CONF_STR = {
 	"-;",
 	// MISTER-157: the DonkeyKong-family pause idiom - a mappable Pause
 	// button plus this page - replaces the Psikyo three-state (155/156).
-	// SENSE IS INVERTED on both rows, like O[8]: status powers up 0 and
-	// both default On, so 0 = On and the wires are driven ~status[].
+	// OSD-pause defaults Off (owner call, diverging from the DK family's
+	// On) so its sense is plain; the dim row IS INVERTED like O[8] -
+	// status powers up 0, dim defaults On, wire driven ~status[20].
 	"P3,Pause options;",
-	"P3O[18],Pause when OSD is open,On,Off;",
+	"P3O[18],Pause when OSD is open,Off,On;",
 	"P3O[20],Dim video after 10s,On,Off;",
 	"P4,Debug;",
 	// VSHAD3-112 runtime toggle, moved to the Debug page for the
@@ -279,7 +280,7 @@ wire        rom_ready;
 wire reset = RESET | status[0] | buttons[1] | ioctl_download;
 
 // MISTER-157: DonkeyKong-family pause - the mappable Pause button toggles,
-// OSD-open pauses when the (default-On, inverted-sense) option says so, and
+// OSD-open pauses when the (default-Off, plain-sense) option says so, and
 // reset cancels a held pause.  status[19] (155's hard-On state) is retired.
 wire pause_btn = joystick_0[10] | joystick_1[10];
 reg  pause_toggle = 1'b0;
@@ -289,7 +290,7 @@ always @(posedge clk_sys) begin
 	if (pause_btn & ~pause_btn_d) pause_toggle <= ~pause_toggle;
 	if (reset) pause_toggle <= 1'b0;
 end
-wire pause = pause_toggle | (OSD_STATUS & ~status[18]);
+wire pause = pause_toggle | (OSD_STATUS & status[18]);
 
 
 escape_mister machine
