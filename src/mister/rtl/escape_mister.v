@@ -99,7 +99,7 @@ module escape_mister (
     output reg         VBlank,
 
     // ---- audio ------------------------------------------------------------
-    output wire [15:0] audio_l,
+    output wire [15:0] audio_l,        // MISTER-155: muted while paused (see core_audio mux)
     output wire [15:0] audio_r,
 
     // ---- controls (any domain; synchronised inside) -----------------------
@@ -132,6 +132,7 @@ module escape_mister (
     input  wire [2:0]  uvol_tms,
         input  wire [3:0]  crt_hadj,          // MISTER-154: CRT H adjust, signed nibble
     input  wire [3:0]  crt_vadj,          // MISTER-154: CRT V adjust, signed nibble
+    input  wire        pause,             // MISTER-155: freeze the machine (video keeps scanning)
 
     // ---- status -----------------------------------------------------------
     output wire        rom_ready    // SDRAM up, image loaded, self-check done
@@ -1358,6 +1359,13 @@ wire [3:0] p2_btn = {p2_duck | p2_bomb, 1'b0, p2_fire | p2_bomb, p2_jump | p2_bo
 //       variant shipped a 68000 and is CPU_TYPE 0. Neither is a fallback.
 //       Behaviour is identical on this ROM; interrupt entry costs ~5 extra
 //       clocks for the extended exception frame. See docs/CPU_AND_ARBITER.md.
+
+// MISTER-155: pause mutes the output; the chips themselves are frozen by
+// the core's gated enable ladder, so this only silences the held DAC level.
+wire [15:0] core_audio_l_w, core_audio_r_w;
+assign audio_l = pause ? 16'd0 : core_audio_l_w;
+assign audio_r = pause ? 16'd0 : core_audio_r_w;
+
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
               .TASLOCK_EN(TASLOCK_EN), .VSHAD3_EN(1), .CPU_TYPE(1)) ecore (
     .clk        ( clk_sys ),
@@ -1391,14 +1399,15 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .coin1      ( coin1_s ),
     .coin2      ( coin2_s ),
     .step_btn   ( start1_s ),
+    .pause      ( pause ),
     .skip_test  ( skip_s ),
     .irq_strict ( 1'b0 ),
     .vshad3_on  ( vshad3_s ),
     .uvol_ym    ( uvol_ym ),
     .uvol_tms   ( uvol_tms ),
     .uvol_fm    ( 24'hFFFFFF ),
-    .audio_l    ( audio_l ),
-    .audio_r    ( audio_r ),
+    .audio_l    ( core_audio_l_w ),
+    .audio_r    ( core_audio_r_w ),
     .alpha_vaddr( alpha_vaddr ),
     .alpha_vdata( alpha_vdata ),
     .color_vaddr( color_vaddr ),

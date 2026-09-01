@@ -222,6 +222,12 @@ entity escape_core is
         -- cabs, MAME marks it unused, but the self-test error loop reads it:
         -- 0x776 btst #0,$260000 — held low = step past a failed region)
         step_btn   : in  std_logic := '0';   -- active-high pressed
+        -- MISTER-155 pause: stalls both 68ks by withholding DTACK (a legal
+        -- bus wait, the Psikyo MEM_WAIT idiom), freezes the JSA enable
+        -- ladder, and gates every liveness/watchdog counter so nothing
+        -- mistakes a paused machine for a wedged one. Default '0': the
+        -- Pocket build is untouched.
+        pause      : in  std_logic := '0';
         -- diagnostic: force reads of the tests-passed flag ($3F7F0C) to 0x0100
         -- so the boot takes its already-passed branch (Interact "Skip Self-Test")
         skip_test  : in  std_logic := '0';
@@ -1290,7 +1296,7 @@ begin
                     if mb_timer(25)='1' then
                         mbox_dead_i <= '1';   -- latched until the reset it causes
                     else
-                        mb_timer <= mb_timer + 1;
+                        if pause = '0' then mb_timer <= mb_timer + 1; end if;   -- MISTER-155
                     end if;
                 end if;
                 mb_cmd_we_d <= cmd_we; mb_ack_we_d <= ack_we;
@@ -1833,7 +1839,7 @@ begin
             if reset_n='0' then
                 e_idle_cnt <= (others=>'0'); e_dead_i <= '0';
             elsif boot_flag = x"01" and extra_release = '1' then
-                if e_as_n = '1' then
+                if e_as_n = '1' and pause = '0' then   -- MISTER-155: paused /= dead
                     if e_idle_cnt(22) = '1' then
                         e_dead_i <= '1';
                     else
@@ -1905,7 +1911,9 @@ begin
                 if v_sel_wdog='1' and v_as_n='0' and v_rw_n='0' then
                     wdog_ctr <= (others=>'0');
                 elsif vblank_in='1' and vblank_d='0' then
-                    if wdog_ctr = "111111" then
+                    if pause = '1' then
+                        null;                        -- MISTER-155: watchdog holds
+                    elsif wdog_ctr = "111111" then
                         wdog_expired_i <= '1';   -- latched until the reset it causes
                     else
                         wdog_ctr <= wdog_ctr + 1;
@@ -2169,7 +2177,7 @@ begin
                         jsa_wedges <= jsa_wedges + 1;
                     end if;
                 else
-                    jsa_wdg_ctr <= jsa_wdg_ctr + 1;
+                    if pause = '0' then jsa_wdg_ctr <= jsa_wdg_ctr + 1; end if;   -- MISTER-155
                 end if;
             else
                 jsa_wdg_ctr <= (others => '0');
@@ -2180,6 +2188,7 @@ begin
     jsa : entity work.escape_jsa
         generic map ( YM_ENABLE => (YM_ENABLE = 1) )
         port map ( clk=>clk, reset_n=>reset_n,
+            pause      => pause,
                    snd_res=>snd_res_p or jsa_wdg_kick,
                    rom_addr=>jsa_rom_addr, rom_data=>jsa_rom_data32,
                    rom_req=>jsa_rom_req, rom_ack=>jsa_shad_ack,
@@ -2456,6 +2465,13 @@ begin
                     end if;
                 else
                     e_dtack_n <= '1'; e_ws <= '0'; e_bus_yield <= '0';
+                end if;
+                -- MISTER-155 pause: last assignment wins - withhold DTACK
+                -- from both CPUs. A cycle whose DTACK was already sampled
+                -- completes; the next one stalls in legal wait states.
+                if pause = '1' then
+                    v_dtack_n <= '1';
+                    e_dtack_n <= '1';
                 end if;
             end if;
         end if;

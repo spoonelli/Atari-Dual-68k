@@ -53,6 +53,7 @@ module escape_core #(
     input wire coin1,
     input wire coin2,
     input wire step_btn,
+    input wire pause,
     input wire skip_test,
     input wire irq_strict,
     input wire vshad3_on,

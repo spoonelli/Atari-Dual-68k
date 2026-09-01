@@ -157,6 +157,7 @@ localparam CONF_STR = {
 	// would ship every first-boot player the non-default configuration.
 	"P2O[8],ROM Shadow 0x54000,On,Off;",
 	"-;",
+	"O[19:18],Pause,Off,OSD,On;",
 	"O[6],Service Mode,Off,On;",
 	"O[7],Skip Self-Test,Off,On;",
 	"-;",
@@ -347,6 +348,8 @@ escape_mister machine
 	.uvol_tms     (~status[14:12]),
 	.crt_hadj     (status[27:24]),
 	.crt_vadj     (status[31:28]),
+	// MISTER-155: Psikyo-style pause - Off / pause-with-OSD / hard On
+	.pause        ((OSD_STATUS && status[18]) || status[19]),
 
 	.rom_ready  (rom_ready)
 );

@@ -61,6 +61,7 @@ module tb_mister_pf;
         .uvol_ym      ( 3'b111 ),
         .uvol_tms     ( 3'b111 ),
         .crt_hadj     ( 4'd0 ),
+        .pause        ( 1'b0 ),
         .crt_vadj     ( 4'd0 ),
         .clk_sys(clk_sys), .clk_sdram(clk_sdram),
         .pll_locked(pll_locked), .reset(reset),

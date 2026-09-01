@@ -24,6 +24,7 @@ entity escape_jsa is
     port (
         clk       : in  std_logic;                      -- 7.159091 MHz
         reset_n   : in  std_logic;
+        pause      : in  std_logic := '0';   -- MISTER-155: freezes the whole board
         snd_res   : in  std_logic := '0';               -- pulse: 68k write 360020
 
         -- external program ROM bus (combined-image byte offsets; escape_core protocol)
@@ -211,8 +212,10 @@ begin
             end if;
         end if;
     end process;
-    cen_ym   <= '1' when enacnt(0) = '1'  else '0';
-    cen_ymp1 <= '1' when enacnt   = "11"  else '0';
+    -- MISTER-155 pause: gating the enable ladder freezes the 6502, YM2151
+    -- and TMS5220 coherently mid-cycle; resume is a plain re-enable.
+    cen_ym   <= '1' when enacnt(0) = '1' and pause = '0' else '0';
+    cen_ymp1 <= '1' when enacnt   = "11" and pause = '0' else '0';
     cen_cpu  <= '1' when enacnt   = "01"  else '0';
     cpu_ena  <= cen_cpu and not rom_stall;
 
