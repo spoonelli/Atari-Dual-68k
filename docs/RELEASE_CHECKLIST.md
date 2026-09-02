@@ -176,7 +176,17 @@ blocks the shipped v0.1.1 releases.
 the horizontal-sync leading edge (`VSYNC_HSTART = HSYNC_START`, the
 MegaDrive VDP idiom) instead of `x=0` — cosmetic on the wire, since
 composite sync merges the pulses and the TV locks to the HS edge anyway;
-logged 2026-09-02 after the MISTER-161 sync calibration; section-F `DIAG_EN` decision; `eprom2`
+logged 2026-09-02 after the MISTER-161 sync calibration; **authentic
+composite-sync record** — the board's real H/V sync positions, widths,
+vertical-sync line count and serration are unrecorded (MAME models none of
+it; ours were chosen, then TV-calibrated). Path 1, no hardware: decode the
+six GAL16V8 fuse dumps in the romset (`136069.50f/50p/55p/70j/100t/100v`)
+with MAME `jedutil` — if one is the sync/blank generator the positions fall
+out in counter terms. Path 2: USB scope on the csync line (period, pulse
+width, porches to first active pixel via the service-mode grid, VS lines,
+serration). Adopt widths / VS structure / edge alignment on both platforms
+if they differ; keep the display-centred default position (arcade monitors
+were pot-centred, so absolute position was never user-visible); section-F `DIAG_EN` decision; `eprom2`
 (second CRC table + MRA + both-platform verify); HISTORY.md builds-103+
 chronology; C5 clean-machine ROM-prep walkthrough; optional GitHub Support
 ticket for the pre-rewrite `refs/pull/*` snapshots; **save-states
