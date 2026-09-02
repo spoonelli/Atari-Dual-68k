@@ -351,6 +351,49 @@ checks could not have failed.
   the Pocket's 33-px scroll-position deviation, the unmeasured speech-tail
   claim, and the section-F `DIAG_EN` decision. All enumerated, none hidden.
 
+## Era 16 — The review response (2026-09-01 → 02)
+
+The MiSTer-devel maintainers' two notes — follow the menu conventions of
+the PGM / Psikyo / Cave cores, and no credits pages — became builds 154–161
+in two days, all in the wrapper; the machine RTL is unchanged from 153.
+
+- **154**: OSD pages, CRT H/V adjust (the Psikyo/Cave idiom, re-derived),
+  the credits overlay and its hex retired, `by spoonelli` in the framework
+  about line.
+- **155 → 157**: Pause — first Psikyo's three-state, then the DonkeyKong
+  family's shape: a mappable button plus a Pause-options page with OSD-pause
+  (owner default Off) and the 10 s dim. Underneath: DTACK withheld from both
+  68010s, the JSA's enable ladder frozen, and four liveness counters (game
+  watchdog, sound watchdog, idle detector, mailbox timer) taught that paused
+  is not dead. One casualty: the GHDL benches elaborate `escape_core` against
+  a JSA stub that did not know the new port — the stub's own comment had
+  predicted exactly that.
+- **156 / 159**: Video and Audio on their own pages, Cave-style spacers, core
+  id `ESCAPE` — which proved load-bearing: Main prefixes the id to the about
+  line, and `A.ESCAPE` pushed the credit off the OSD's 32 columns. The footer
+  conformed to the family's `v<date>`; the internal build number left the
+  screen and lives in the commit trail and here.
+- **158**: Rotate / Flip 180 through the framework's `screen_rotate`, already
+  inside the vendored `arcade_video.v` — 46 lines. A black screen on first
+  flash was a stale copy, not the bitstream; the bisection probe it triggered
+  was reverted unused.
+- **The MRA** had been silently overriding the core's `J1`/`jn` on every MRA
+  launch since the owner defaults were set: six buttons, `A,B,X,Y`. Fixed to
+  seven with `Y,B,A,X,Start,Select,L`, the mirror-CONF_STR rule written above
+  it.
+- **160 / 161**: on a composite Zenith the picture sat ~40 px right — sync
+  15.6 µs ahead of the picture where a TV expects ~10. 160 (10.1 µs)
+  overshot; 161 calibrated against the MegaDrive core the same set centres
+  perfectly (11.7 µs). Two ghosts closed on the way: the "exploded" submenus
+  are Main's flat-view toggle on the gamepad's R2, and a moment of lost
+  colour was the TV re-locking while sync moved under it.
+- The owner's first clean capture from the **original PCB** arrived and at
+  once produced an accuracy finding (factory-map halftone, checklist H8) and
+  two preservation items (authentic composite sync; VS-edge alignment).
+
+Shipped as `mister-v0.1.2` on 2026-09-02: build 161,
+`Arcade-Escape_20260902.rbf`.
+
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)
 2. SDRAM chip-clock capture phase (v45)
