@@ -1,7 +1,7 @@
 # MiSTer (DE10-Nano) port — reference
 
-Current as of **`mister-v0.1.1`** (2026-08-30, MISTER BUILD 153,
-`Arcade-Escape_20260830.rbf`). The build-by-build engineering history —
+Current as of **`mister-v0.1.2`** (2026-09-02, build 161,
+`Arcade-Escape_20260902.rbf`). The build-by-build engineering history —
 including the arbiter saga and its wrong turns — is preserved separately in
 [`investigations/MISTER_PORT_RECORD.md`](investigations/MISTER_PORT_RECORD.md);
 where that record disagrees with this page, this page wins.
@@ -56,9 +56,14 @@ measured and bench-gated. The full cross-platform rules live in
 - **CDC settle**: fetch-return done-toggles carry a two-edge settle delay
   (the Pocket's SDSCHED-74 arrangement, ported after its absence produced
   bit-soup garble).
-- **Credits overlay**: core-drawn (the framework's `P1-,text;` pages render
-  empty on some builds), cycled by the OSD "Show Credits" trigger, the
-  mappable Credits button, or keyboard C; the build number is on page 1.
+- **OSD (mister-v0.1.2)**: mister-devel menu conventions — Video / Audio /
+  Pause options / Debug pages, core id `ESCAPE`, about line
+  `ESCAPE v<date> by spoonelli`; a DK-style Pause (mappable button,
+  OSD-pause, 10 s dim) that freezes both 68010s and the JSA coherently with
+  the watchdogs held; Rotate/Flip through the framework framebuffer; CRT H/V
+  adjust; horizontal sync placed for consumer 15 kHz sets (MISTER-161,
+  calibrated against the MegaDrive core). All wrapper-side; the machine RTL
+  is unchanged from build 153.
 
 ## Benches (run before any bus/arbiter change)
 
@@ -74,5 +79,6 @@ measured and bench-gated. The full cross-platform rules live in
 
 | Tag | Build | Notes |
 |---|---|---|
+| [`mister-v0.1.2`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.2) | 161 | The review release: mister-devel menu conventions, credits pages retired for the about-line credit, DK-style pause with dim, Rotate/Flip, CRT adjust, MRA `<buttons>` fixed (Pause + owner defaults), composite-centred sync. Machine RTL unchanged from 153. |
 | [`mister-v0.1.1`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.1) | 153 | The parity release: open-row controller, interleave arbiter, tile mirror + download-race fix, owner button defaults, credits accuracy pass. First update_all delivery. |
 | [`mister-v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.0) | 142 | First tagged release: boot splash retired, dated rbf naming. |
