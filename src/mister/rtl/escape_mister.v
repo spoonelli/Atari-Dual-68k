@@ -148,10 +148,21 @@ localparam VID_V_TOTAL  = 10'd262;
 localparam VID_H_BPORCH = 10'd60;
 localparam VID_H_ACTIVE = 10'd336;
 localparam VID_H_TOTAL  = 10'd456;
-// sync pulses live in the front porch (active .. front porch .. sync .. back
-// porch).  The Pocket emitted 1-clock pulses, which the APF scaler accepts;
-// MiSTer's scandoubler/ascal need real widths.
-localparam HS_START = 10'd404, HS_END = 10'd436;   // 32 clocks
+// sync pulses live in the blanking interval (active .. front porch .. sync
+// .. back porch).  The Pocket emitted 1-clock pulses, which the APF scaler
+// accepts; MiSTer's scandoubler/ascal need real widths.
+//
+// MISTER-160: horizontal sync position is chosen for consumer 15 kHz
+// displays.  Active video is clocks 60..395; a TV places the left edge of
+// the picture ~10 us after the sync leading edge (4.7 us sync + ~5 us back
+// porch).  The original 404..436 pulse put that interval at 112 clocks =
+// 15.6 us, so composite CRTs showed the picture ~40 px right of centre with
+// CRT H Adjust (+-8) unable to reach it (2026-09-01 Zenith test).  444..20
+// (wrapping the line end - the comparators below are wrap-safe) gives 72
+// clocks = 10.1 us.  The pulse stays entirely inside blanking (396..59),
+// the machine raster and active window do not move, and HDMI is unaffected
+// because the scaler positions by DE, not by sync.
+localparam HS_START = 10'd444, HS_END = 10'd20;    // 32 clocks, wraps at 456
 localparam VS_START = 10'd254, VS_END = 10'd257;   // 3 lines
 
 reg [9:0] x_count = 10'd0;
