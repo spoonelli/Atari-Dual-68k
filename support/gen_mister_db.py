@@ -15,10 +15,14 @@ rolling tag `mister-db`, so the user's downloader.ini URL never changes:
 
 DB_ID is frozen forever; changing it duplicates installs.
 """
-import hashlib, json, os, sys, time, zipfile
+import hashlib, json, os, sys, time, zipfile, urllib.parse
 
 DB_ID = "spoonelli/ataridual68k"
 REPO  = "spoonelli/Atari-Dual-68k"
+# The MiSTer convention: files are served from the distribution repo's committed
+# releases/ folder (raw URLs, percent-encoded).  DB_URLS=release-assets restores
+# the pre-2026-08-30 behaviour of pointing at this repo's release assets.
+DIST  = "spoonelli/Arcade-Escape_MiSTer"
 
 def main() -> int:
     if len(sys.argv) < 3:
@@ -43,7 +47,9 @@ def main() -> int:
         files[sd_path] = {
             "hash": hashlib.md5(data).hexdigest(),
             "size": len(data),
-            "url": f"https://github.com/{REPO}/releases/download/{tag}/{asset}",
+            "url": (f"https://github.com/{REPO}/releases/download/{tag}/{asset}"
+                    if os.environ.get("DB_URLS") == "release-assets" else
+                    f"https://raw.githubusercontent.com/{DIST}/main/releases/{urllib.parse.quote(name)}"),
         }
     if not any(k.endswith(".rbf") for k in files):
         raise SystemExit("no .rbf staged - refusing to emit an empty db")
