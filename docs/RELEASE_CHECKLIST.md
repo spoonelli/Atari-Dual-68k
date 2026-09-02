@@ -166,6 +166,12 @@ blocks the shipped v0.1.1 releases.
 | H6 | D4: 33-pixel deviation at scroll 50/157 | Suspect already named (un-wrapped `spr_right` in off-screen rejection); one bench-driven attempt. |
 | H7 | Speech-tail adjudication | The last unmeasured claim in the docs — measure vs MAME audio, then fix or retract with numbers. |
 
+**Both platforms — accuracy, next release after v0.1.2 (shared machine RTL):**
+
+| # | Item | Note |
+|---|---|---|
+| H8 | Factory-map "halftone": travelled nodes must dim, not vanish | Found 2026-09-02 against the owner's real-PCB capture (`Genki Arcade - 2026-09-01 234201.mp4`, frame 24402, sector D level 03): the board renders already-travelled map nodes at reduced intensity; ours appear to drop them. Mechanism per the PCB GAL equations MAME carries (`eprom.cpp` screen_update): motion objects with the top priority bit set draw nothing themselves but *stain* the playfield beneath — `SHADE`/`CRA9` selects the alternate (dimmer) colour-RAM bank. Check `escape_core` handles that MO class as stain, not transparency. Oracle = the PCB capture, not MAME. Present in every release to date; not a regression. |
+
 **Slow-burn (no version attached):** section-F `DIAG_EN` decision; `eprom2`
 (second CRC table + MRA + both-platform verify); HISTORY.md builds-103+
 chronology; C5 clean-machine ROM-prep walkthrough; optional GitHub Support
