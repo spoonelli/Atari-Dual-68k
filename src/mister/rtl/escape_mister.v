@@ -156,13 +156,18 @@ localparam VID_H_TOTAL  = 10'd456;
 // displays.  Active video is clocks 60..395; a TV places the left edge of
 // the picture ~10 us after the sync leading edge (4.7 us sync + ~5 us back
 // porch).  The original 404..436 pulse put that interval at 112 clocks =
-// 15.6 us, so composite CRTs showed the picture ~40 px right of centre with
-// CRT H Adjust (+-8) unable to reach it (2026-09-01 Zenith test).  444..20
-// (wrapping the line end - the comparators below are wrap-safe) gives 72
-// clocks = 10.1 us.  The pulse stays entirely inside blanking (396..59),
-// the machine raster and active window do not move, and HDMI is unaffected
-// because the scaler positions by DE, not by sync.
-localparam HS_START = 10'd444, HS_END = 10'd20;    // 32 clocks, wraps at 456
+// 15.6 us and a composite Zenith showed the picture well right of centre,
+// beyond CRT H Adjust's +-8 (2026-09-01).  MISTER-160 tried 444..20 (72
+// clocks, 10.1 us) and overshot left (2026-09-02).  MISTER-161 calibrates
+// against a core the same set centres perfectly: the MegaDrive VDP in H40
+// puts sync 71 px ahead of the picture (HSYNC_START = DISP_START+7, blank
+// ends at 11, 13 px border; vdp_common.vhd), ~11.6 us with the slow-clock
+// stretch, on a 47.7 us picture - ours is 46.9 us, so the same interval
+// centres both.  432..8 = 84 clocks = 11.7 us.  The pulse stays inside
+// blanking (396..59); the machine raster and active window do not move;
+// HDMI is unaffected because the scaler positions by DE.  The comparators
+// below are wrap-safe (this pulse and the adjuster's extremes cross x=0).
+localparam HS_START = 10'd432, HS_END = 10'd464;   // 32 clocks, wraps to 8
 localparam VS_START = 10'd254, VS_END = 10'd257;   // 3 lines
 
 reg [9:0] x_count = 10'd0;
