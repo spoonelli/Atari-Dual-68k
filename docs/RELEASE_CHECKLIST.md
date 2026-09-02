@@ -172,7 +172,11 @@ blocks the shipped v0.1.1 releases.
 |---|---|---|
 | H8 | Factory-map "halftone": travelled nodes must dim, not vanish | Found 2026-09-02 against the owner's real-PCB capture (`Genki Arcade - 2026-09-01 234201.mp4`, frame 24402, sector D level 03): the board renders already-travelled map nodes at reduced intensity; ours appear to drop them. Mechanism per the PCB GAL equations MAME carries (`eprom.cpp` screen_update): motion objects with the top priority bit set draw nothing themselves but *stain* the playfield beneath — `SHADE`/`CRA9` selects the alternate (dimmer) colour-RAM bank. Check `escape_core` handles that MO class as stain, not transparency. Oracle = the PCB capture, not MAME. Present in every release to date; not a regression. |
 
-**Slow-burn (no version attached):** section-F `DIAG_EN` decision; `eprom2`
+**Slow-burn (no version attached):** MiSTer vertical-sync edges aligned to
+the horizontal-sync leading edge (`VSYNC_HSTART = HSYNC_START`, the
+MegaDrive VDP idiom) instead of `x=0` — cosmetic on the wire, since
+composite sync merges the pulses and the TV locks to the HS edge anyway;
+logged 2026-09-02 after the MISTER-161 sync calibration; section-F `DIAG_EN` decision; `eprom2`
 (second CRC table + MRA + both-platform verify); HISTORY.md builds-103+
 chronology; C5 clean-machine ROM-prep walkthrough; optional GitHub Support
 ticket for the pre-rewrite `refs/pull/*` snapshots; **save-states
