@@ -141,6 +141,11 @@ core button to it silently clears the slot instead.
 - **Service Mode** — the operator control, on the root menu.
 - **Reset** — the machine's hard reset.
 
+If the pages ever appear "exploded" — every option listed flat under its
+page heading — that is MiSTer's own flat-view toggle, not the core: in the
+OSD the framework maps the gamepad's **R2** trigger (and the backtick key)
+to it. Press R2 again to restore the pages.
+
 Attributions live in `NOTICE.md` (in this zip and the repository).
 
 ## Auto-updates (update_all / Downloader)
