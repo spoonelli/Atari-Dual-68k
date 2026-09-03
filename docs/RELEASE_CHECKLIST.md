@@ -156,7 +156,7 @@ blocks the shipped v0.1.1 releases.
 | H1 | `sdram_openrow` timing constants at 35.795 MHz | tRCD/tRP 2→1, tRFC 9→3 — datasheet-legal with margin (27.94 ns/clk). One variable; scored on `tb_mister_moarb` before hardware; watch the hold floor. |
 | H2 | PF line-start burst spreading | Only if H1 leaves the tail: the playfield's clustered line-start fetches are the residual MO latency-spike source. |
 | H3 | MiSTer-devel review follow-ups | **DONE — shipped as `mister-v0.1.2` (2026-09-02, build 161).** Builds 154–161: menu pages per Cave/Psikyo/DK, credits pages retired for the about-line credit, DK-style pause + dim, Rotate/Flip, CRT H/V adjust, MRA `<buttons>` corrected (Pause + owner defaults), composite-centred sync (MegaDrive-calibrated). H1/H2 (flicker tail) carry to the next MiSTer release alongside H8. |
-| H4 | db retirement on adoption | Per the documented handoff in `DISTRIBUTION.md`. |
+| H4 | db retirement on adoption | **DONE (2026-09-03)** — MiSTer-devel fork live, official distribution carries `Escape_YYYYMMDD.rbf`; empty db published under the unchanged `db_id`, README tells users to uninstall the stanza. Trigger was fork issue #1 (two dbs sharing the MRA path + a stale six-button map). |
 
 **Pocket v0.1.2 — small truths:**
 

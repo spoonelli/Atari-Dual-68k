@@ -44,6 +44,20 @@ as the core's release date (learned when v0.1.0 shipped showing the
 
 ## MiSTer — Downloader / update_all custom database
 
+**Status (2026-09-03): ADOPTED — the custom db is retired.** MiSTer-devel
+forked the distribution repo as `MiSTer-devel/Arcade-Escape_MiSTer`; the
+official distribution aggregator publishes the core as
+`_Arcade/cores/Escape_YYYYMMDD.rbf` (the aggregator strips the `Arcade-`
+prefix from every core) plus the MRA, whose `<rbf>` tag the maintainers
+set to `Escape` — Main resolves a tag against both `Escape_*` and
+`Arcade-Escape_*`, so that tag works on every install while `Arcade-Escape`
+would not have found the official file. Because the Downloader forbids two
+databases sharing a path, the custom db was retired the same day with an
+**empty** db under the unchanged `db_id` (so the Downloader removes the
+files it owned, keeping any path the official db also owns); the shipping
+README tells users to `update.sh --uninstall spoonelli/ataridual68k`.
+Everything below is the historical record of the interim route.
+
 **How it works.** MiSTer's Downloader (which `update_all` wraps) installs
 third-party cores from **custom databases**: a JSON file the core author
 publishes at a stable URL, which users reference once from
@@ -124,8 +138,10 @@ field):
 4. On adoption, the org repo becomes the MiSTer distribution point;
    the custom db is then retired with a final db update that leaves the
    Downloader-managed files in place for the official db to take over.
+   **Done 2026-09-03** — see the status note at the top of this section.
 
-Until then: the custom db is the supported auto-update route.
+The official distribution is now the auto-update route; the custom db is
+retired.
 
 ## Division of labour
 
