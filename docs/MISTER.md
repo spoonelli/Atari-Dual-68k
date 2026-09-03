@@ -18,11 +18,13 @@ verbatim with the Pocket build.
 
 ## Where to get it
 
-- **Distribution repo (standard MiSTer layout, submitted to MiSTer-devel):**
+- **Official MiSTer distribution (since 2026-09-03):** a stock `update_all`
+  installs `_Arcade/cores/Escape_YYYYMMDD.rbf` + the MRA from
+  [`MiSTer-devel/Arcade-Escape_MiSTer`](https://github.com/MiSTer-devel/Arcade-Escape_MiSTer),
+  the org's fork of our distribution repo
   [`spoonelli/Arcade-Escape_MiSTer`](https://github.com/spoonelli/Arcade-Escape_MiSTer)
-  — rbf + MRA in `releases/`.
-- **update_all**: one `downloader.ini` stanza, in
-  [`DISTRIBUTION.md`](DISTRIBUTION.md) and the distribution repo's README.
+  (standard layout, rbf + MRA in `releases/`). The interim custom
+  update_all db is retired — [`DISTRIBUTION.md`](DISTRIBUTION.md).
 - **Release zips**: `mister-v*` pre-release tags on this repository.
 
 Install, controls (defaults Jump=Y/left, Fire=B/bottom, Duck=A/right,

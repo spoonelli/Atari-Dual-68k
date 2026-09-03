@@ -150,13 +150,23 @@ Attributions live in `NOTICE.md` (in this zip and the repository).
 
 ## Auto-updates (update_all / Downloader)
 
-Add this once to `/media/fat/downloader.ini` and the core updates through
-your normal `update_all` run:
+The core ships in the **official MiSTer distribution** (repository
+`MiSTer-devel/Arcade-Escape_MiSTer`, installed as
+`_Arcade/cores/Escape_YYYYMMDD.rbf` plus the MRA), so a stock `update_all`
+run delivers and updates it — nothing to add.
 
-```ini
-[spoonelli/ataridual68k]
-db_url = 'https://github.com/spoonelli/Atari-Dual-68k/releases/download/mister-db/ataridual68k_db.json.zip'
+If you added the earlier custom database (`spoonelli/ataridual68k`) before
+adoption, remove it — it now delivers nothing and would only duplicate
+paths:
+
+```bash
+/media/fat/Scripts/update.sh --uninstall spoonelli/ataridual68k
 ```
+
+(or delete its stanza from `/media/fat/downloader.ini`), then run
+`update_all` again and delete any leftover `_Arcade/cores/Arcade-Escape_*.rbf`.
+After an MRA update that changes the button set, run **Define ESCAPE
+buttons** once — saved maps do not carry over.
 
 ## Reporting problems
 
