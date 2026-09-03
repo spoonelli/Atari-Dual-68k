@@ -33,7 +33,7 @@ screens; high scores and operator settings persist.
 | Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay |
 | Sound (JSA-I: 6502 + YM2151 + TMS5220 speech) | ✅ full pipeline; liveness watchdog self-heals a wedged sound CPU |
 | Inputs (buttons, hall-stick model, keyboard) | ✅ incl. in-game calibration screens |
-| Credits overlay + OSD (volume sliders, Show Credits) | ✅ build number on credits page 1 |
+| OSD (Video / Audio / Pause options / Debug pages; pause, rotate, CRT adjust) | ✅ build identity in the about line `ESCAPE v<date> by spoonelli` |
 | High scores / operator settings | ✅ persist across power cycles |
 
 ## Accuracy
@@ -91,10 +91,11 @@ and the
 Both files are in [`releases/`](releases/) in this repository.
 
 1. Copy `Arcade-Escape_YYYYMMDD.rbf` to `_Arcade/cores/` on your MiSTer
-   SD card, keeping its name — the MRA references the core as
-   `Arcade-Escape`. **Delete any older `escape*.rbf` or
-   `Arcade-Escape*.rbf`**; the framework matches by prefix and may load
-   a stale one.
+   SD card (the official distribution installs the same file as
+   `Escape_YYYYMMDD.rbf`). The MRA references the core as `Escape`, which
+   the framework matches against either spelling. **Delete any older
+   `escape*.rbf`, `Escape_*.rbf` or `Arcade-Escape*.rbf`**; the framework
+   matches by prefix and picks the newest-looking name.
 2. Copy `Escape from the Planet of the Robot Monsters (set 1).mra` to
    `_Arcade/`, replacing any earlier copy (older MRAs reference the old
    rbf name).
