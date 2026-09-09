@@ -152,7 +152,13 @@ entity escape_core is
         -- board whether or not the socket is filled (MAME drops the whole
         -- write when m_extra is absent; the reset value is full brightness
         -- either way, so the two agree unless a game writes it).
-        EXTRA_EN : integer := 1
+        EXTRA_EN : integer := 1;
+        -- GUTS-166: address-decoder variant (escape_decode VIDEO_MAP): 0 =
+        -- 3Fxxxx video block (Escape, Klax), 1 = FFxxxx (Guts n' Glory).
+        -- The block RAMs index on the same low address bits in both maps,
+        -- so only the decoder changes. The Guts MO format / priority rule /
+        -- tile region are NOT covered by this generic (KLAX_GUTS.md section 4).
+        VIDEO_MAP : integer := 0
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -800,7 +806,7 @@ begin
     e_vpa_n <= '0' when e_fc="111" and e_as_n='0' else '1';
 
     ---------------------------------------------------------------- decoders
-    vdec : entity work.escape_decode
+    vdec : entity work.escape_decode generic map ( VIDEO_MAP => VIDEO_MAP )
         port map ( addr=>v_addr(23 downto 0), as_n=>v_as_n,
                    sel_rom=>v_sel_rom, sel_eeprom=>v_sel_eeprom, sel_eeprom_unlk=>v_sel_unlk,
                    sel_ram=>v_sel_ram, sel_io=>v_sel_io, sel_watchdog=>v_sel_wdog,
@@ -808,7 +814,7 @@ begin
                    sel_moram=>v_sel_mo, sel_alpharam=>v_sel_alpha, sel_mobconfig=>v_sel_mobc,
                    sel_slip=>v_sel_slip, sel_workram=>v_sel_work, sel_pfpalette=>v_sel_pfpal );
 
-    edec : entity work.escape_decode
+    edec : entity work.escape_decode generic map ( VIDEO_MAP => VIDEO_MAP )
         port map ( addr=>e_addr(23 downto 0), as_n=>e_as_n,
                    sel_rom=>e_sel_rom, sel_eeprom=>e_unused(0), sel_eeprom_unlk=>e_unused(1),
                    sel_ram=>e_sel_ram, sel_io=>e_unused(2), sel_watchdog=>e_unused(3),
