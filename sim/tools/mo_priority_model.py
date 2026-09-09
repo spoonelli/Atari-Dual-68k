@@ -54,9 +54,21 @@ def decide(mo, pf):
     info['pfx3'] = 1 if (pf & 8) else 0
 
     # upper bit of MO priority signals special rendering and doesn't draw anything
-    if mopriority & 4:
+    # -- with ONE hardware exception MAME's screen_update misses.  GAL 136069.100V
+    # (the line-buffer write PAL, decoded from the romset fuse map) has a write
+    # term MSD0 & /MSD1 & /MSD2 & /MSD3 & MAT6: a special pixel whose pen is
+    # exactly 1 IS written into the line buffer, so GAL 100T sees it as MPX=1 -
+    # the shadow case (M7, SHADE).  The game keeps pen-1 twins of its map
+    # markers (tiles 22A2.. vs 22AB.., 22C4.. vs 22B4..) for exactly this: the
+    # FACTORY MAP dims travelled routes through the SHADE bank.  MAME
+    # `continue`s before computing SHADE and never dims them; the owner's PCB
+    # capture does.  Other special pens (2/4/6 = stain markers) are not written
+    # and draw nothing, as before.  See docs/investigations/MAP_HALFTONE.md.
+    if (mopriority & 4) and ((mo & 0x0F) != 1):
         info['special'] = 1
         return pf, info
+    if mopriority & 4:
+        info['special'] = 1          # written pen-1 special: shadow path below
 
     # --- FORCEMC0 -----------------------------------------------------------
     # FORCEMC0=!PFX3*PFX4*PFX5*!MPR0
@@ -105,8 +117,9 @@ def decide(mo, pf):
     out = pf
     if shade:
         out |= 0x100
-    if m7:
-        out |= 0x080
+    # MOSHADE-162: no `out |= 0x080` on M7.  MAME adds it; the game never
+    # populates the 0x38X bank it would select and the PCB renders shadowed
+    # playfield at 0x30X.  M7's playfield-side effect is the layer decision only.
     return out, info
 
 

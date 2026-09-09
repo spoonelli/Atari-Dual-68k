@@ -203,11 +203,24 @@ module escape_mob (
     // which is what a powered-up (or never-written) M10K location reads.
     // Without that, an untouched entry aliases the tag {fpar=0, ly=0}.
     // "occupied" = a real pixel written for the line this buffer was built for,
-    // special or not. "hit" = one that is allowed to DRAW (i.e. not special).
+    // special or not. "hit" = one that is allowed to DRAW.
+    //
+    // MOSHADE-162: a special (MPR2) pixel whose pen is exactly 1 DOES draw.
+    // GAL 136069.100V (the line-buffer write PAL, decoded from the romset
+    // fuse map - see docs/investigations/MAP_HALFTONE.md) writes normal
+    // pixels when pen != 0 and MAT6 = 0, and has ONE extra write term:
+    //     MSD0 & /MSD1 & /MSD2 & /MSD3 & MAT6   (special, pen == 1)
+    // Pens 2/4/6 on a special sprite only pulse /STON and /STOFF (the stain
+    // markers); pen 1 is written like any sprite pixel and reaches GAL 100T
+    // as MPX = 1, i.e. the SHADE / M7 case: the playfield wins and moves to
+    // its alternate (dim, I=4) colour bank.  That is how the FACTORY MAP dims
+    // its unreachable routes.  MAME's screen_update `continue`s on
+    // mopriority & 4 BEFORE computing SHADE, so MAME never dims them and
+    // this core inherited that; the owner's PCB capture dims them.
     wire occ0 = (disp_q0[19:11] == {built_fp0, built_ly0}) && (disp_q0[3:0] != 4'd0);
     wire occ1 = (disp_q1[19:11] == {built_fp1, built_ly1}) && (disp_q1[3:0] != 4'd0);
-    wire hit0 = occ0 && !disp_q0[10];
-    wire hit1 = occ1 && !disp_q1[10];
+    wire hit0 = occ0 && (!disp_q0[10] || disp_q0[3:0] == 4'd1);
+    wire hit1 = occ1 && (!disp_q1[10] || disp_q1[3:0] == 4'd1);
     // MOPAIR-131: per-bank occupancy of the BUILD buffer, for first-write-wins
     // on each half of the pair independently.
     wire [19:0] bld_qe = build_sel ? disp_q1e : disp_q0e;

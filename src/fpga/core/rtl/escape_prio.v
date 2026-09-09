@@ -104,9 +104,19 @@ module escape_prio (
     // MO branch : pen = mo & DATA_MASK = 0x100 | colour<<4 | pixel  (CRA9=1)
     // PF branch : pen = 0x200 | colour<<4 | pixel  (CRA10=1), then
     //               |0x100 if SHADE  -> CRA9, the alternate PF colour bank
-    //               |0x080 if M7     -> the upper MO bit fed to the GPC
+    //
+    // MOSHADE-162: M7 does NOT reach the playfield address.  MAME's
+    // screen_update ORs 0x080 into the playfield pen on M7 ("the upper MO bit
+    // fed to the GPC") and this comparator transcribed it.  The game's own
+    // colour RAM says otherwise: it populates the SHADE bank for colour 0 only
+    // (0x300-0x30F, on the map and in play) and NEVER the 0x380-0x38F bank
+    // that SHADE|M7 would address, so every shadowed playfield pixel indexed
+    // an empty bank and came out black - the FACTORY MAP's "erased" travelled
+    // routes.  The owner's PCB capture shows those routes at exactly the
+    // 0x30X entries (I=4, same hue).  M7's only playfield-side effect is the
+    // layer decision (playfield wins); see docs/investigations/MAP_HALFTONE.md.
     wire [10:0] mo_pen11 = {3'b001, mo_color, mo_pix};
-    wire [10:0] pf_pen11 = {2'b01, shade, pf_color[3] | m7, pf_color[2:0], pf_pix};
+    wire [10:0] pf_pen11 = {2'b01, shade, pf_color[3], pf_color[2:0], pf_pix};
 
     assign pen = mo_win ? mo_pen11 : pf_pen11;
 
