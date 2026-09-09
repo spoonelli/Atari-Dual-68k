@@ -23,7 +23,12 @@ else. The set is detected from the chips present (`136069-3025.50a` = set 1,
 `136069-1025.50a` = set 2). A set-2 folder that lacks the shared
 graphics/sound chips may sit next to an `eprom` folder and borrow them, the
 way MAME's clone lookup does. Set 2 is implemented but not yet verified on a
-device (see the README's supported-sets table).
+device (see the README's supported-sets table). The tool also assembles the
+Klax prototype and Guts n' Glory images (`klaxp1`/`klaxp2`/`guts`, detected
+from their first main chip; 2.5 MB and 3.5 MB, with the JSA-II ADPCM at
+`0x240000` and Guts' tile region at `0x280000`) — those need the single-CPU
+JSA-II core builds described in `investigations/KLAX_GUTS.md`, which are not
+shipped.
 
 Every chip is **CRC32-verified** against MAME's known-good values, and its size
 is checked. A missing chip, a short chip, or a wrong/modified dump aborts the

@@ -90,9 +90,12 @@ rather than near-misses:
   program has run through it yet because no romset is on hand. The plan and
   every measured delta are in `docs/investigations/KLAX_GUTS.md`.
 
-`support/build_rom.py` builds the two Escape sets and refuses any chip whose
-CRC32 does not match, so a Klax or Guts romset cannot currently be assembled
-into a core image even to try.
+`support/build_rom.py` now recognises `klaxp1`, `klaxp2` and `guts` folders
+or zips and assembles their images (KLAX-165: JSA-II ADPCM at `0x240000`,
+Guts tiles at `0x280000`), CRC-checked like Escape — but those images are
+for core builds that do not exist yet (`EXTRA_EN=0`, `JSA_BOARD=2`, and for
+Guts the video-map variant), and no such romset has been run through the
+tool.
 
 **Roadmap position:** the Klax and Guts n' Glory prototype romsets are
 documented above and are under evaluation for the 0.2 milestone (both need
