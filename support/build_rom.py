@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Assemble a single combined ROM image for the Atari Dual 68k core from user dumps.
 
-Input: a folder OR a standard MAME eprom.zip containing the original chip dumps.
+Input: a folder OR a standard MAME eprom.zip / eprom2.zip containing the original chip
+dumps (set 1 or set 2 are detected automatically; a clone folder may lean on the parent's
+shared chips next to it).
 Every chip is CRC32-verified against known-good values; wrong dumps are refused.
 No ROM data ships with this repository - you must supply your own.
 
@@ -42,11 +44,28 @@ CRCS = {
 "136069-1010.43u":"9d3e144d","136069-1015.38u":"23f40437","136069-1021.32u":"2a47ff7b",
 "136069-1008.76u":"b0cead58","136069-1009.70u":"fbc3934b","136069-1014.64u":"0e07493b",
 "136069-1019.57u":"34f8f0ed","136069-1007.125d":"409d818e",
+# set 2 (eprom2) program chips + MAME's name for the same chars chip
+"136069-1025.50a":"b0c9a476","136069-1024.40a":"4cc2c50c","136069-1027.50b":"84f533ea",
+"136069-1026.40b":"506396ce","136069-1029.50d":"99810b9b","136069-1028.40d":"08ab41f2",
+"136069-1033.40k":"395fc203","136069-1032.50k":"a19c8acb","136069-1037.50e":"ad39a3dd",
+"136069-1036.40e":"34fc8895","136069-1035.10s":"ffeb5647","136069-1034.10u":"c68f58dd",
+"136069.125d":"409d818e",
 }
 
 _zip = None   # set in main() when romdir is a zip
 
+# the same chars chip appears under two names across MAME's two sets (identical CRC)
+ALIAS = {"136069.125d": "136069-1007.125d", "136069-1007.125d": "136069.125d"}
+
 def rd(romdir, name, size=0x10000):
+    if _zip is not None and name not in _zip.namelist() and name in ALIAS and ALIAS[name] in _zip.namelist():
+        name = ALIAS[name]
+    if _zip is None:
+        cands = [name] + ([ALIAS[name]] if name in ALIAS else [])
+        dirs = [romdir, os.path.dirname(os.path.abspath(romdir)), os.path.join(os.path.dirname(os.path.abspath(romdir)), "eprom")]
+        found = next((os.path.join(d, c) for d in dirs for c in cands if os.path.exists(os.path.join(d, c))), None)
+        if found:
+            name = os.path.basename(found); romdir = os.path.dirname(found)
     if _zip is not None:
         try:
             b = _zip.read(name)
@@ -71,13 +90,29 @@ def interleave(hi, lo):                       # 16-bit big-endian: even=hi byte,
     out[1::2] = lo
     return bytes(out)
 
-MAIN = [("136069-3025.50a","136069-3024.40a"), ("136069-4027.50b","136069-4026.40b"),
-        ("136069-4029.50d","136069-4028.40d"), ("136069-2033.40k","136069-2032.50k")]
-# extra: own program (2035/2034) at 0, shared copy (2033/2032) at 0x60000
-EXTRA_OWN = ("136069-2035.10s","136069-2034.10u")
-SHARED    = ("136069-2033.40k","136069-2032.50k")
+# --- the two Escape sets (MAME eprom / eprom2) -------------------------------
+# Set 1 (eprom): revision-3/4 program, 512 KB main.  Set 2 (eprom2): revision-1
+# program with ONE extra main pair (1037.50e/1036.40e) at CPU 0x80000-0x9FFFF.
+# The core places that window at image 0x0A0000 (EPROM2-163); both sets share
+# the JSA, chars and sprite chips.  The set is detected from which first main
+# pair is present.
+SETS = {
+  "eprom": dict(
+    MAIN=[("136069-3025.50a","136069-3024.40a"), ("136069-4027.50b","136069-4026.40b"),
+          ("136069-4029.50d","136069-4028.40d"), ("136069-2033.40k","136069-2032.50k")],
+    MAIN_HI=None,
+    EXTRA_OWN=("136069-2035.10s","136069-2034.10u"),
+    SHARED=("136069-2033.40k","136069-2032.50k"),
+    CHARS="136069-1007.125d"),
+  "eprom2": dict(
+    MAIN=[("136069-1025.50a","136069-1024.40a"), ("136069-1027.50b","136069-1026.40b"),
+          ("136069-1029.50d","136069-1028.40d"), ("136069-1033.40k","136069-1032.50k")],
+    MAIN_HI=("136069-1037.50e","136069-1036.40e"),        # CPU 0x80000 -> image 0x0A0000
+    EXTRA_OWN=("136069-1035.10s","136069-1034.10u"),
+    SHARED=("136069-1033.40k","136069-1032.50k"),
+    CHARS="136069.125d"),                                # MAME's eprom2 name; same chip as 1007.125d
+}
 JSA   = "136069-1040.7b"
-CHARS = "136069-1007.125d"
 SPRITES = ["136069-1020.47s","136069-1013.43s","136069-1018.38s","136069-1023.32s",
            "136069-1016.76s","136069-1011.70s","136069-1017.64s","136069-1022.57s",
            "136069-1012.47u","136069-1010.43u","136069-1015.38u","136069-1021.32u",
@@ -103,20 +138,36 @@ def main() -> int:
 
     img = bytearray(0x220000)
 
+    def present(name):
+        if _zip is not None:
+            return name in _zip.namelist()
+        return os.path.exists(os.path.join(romdir, name))
+    if present("136069-3025.50a"):
+        setname = "eprom"
+    elif present("136069-1025.50a"):
+        setname = "eprom2"
+    else:
+        raise SystemExit("neither set found: expected 136069-3025.50a (set 1) or 136069-1025.50a (set 2) in " + romdir)
+    T = SETS[setname]
+    print(f"romset: {setname} ({'set 1, rev 3/4 program' if setname == 'eprom' else 'set 2, rev 1 program + 0x80000 window'})")
+
     # maincpu @0x000000
     off = 0x000000
-    for hi, lo in MAIN:
+    for hi, lo in T["MAIN"]:
         seg = interleave(rd(romdir, hi), rd(romdir, lo)); img[off:off+len(seg)] = seg; off += len(seg)
+    # set 2 only: CPU 0x80000-0x9FFFF lives at image 0x0A0000 (EPROM2-163 remap in escape_core)
+    if T["MAIN_HI"]:
+        seg = interleave(rd(romdir, T["MAIN_HI"][0]), rd(romdir, T["MAIN_HI"][1])); img[0x0A0000:0x0A0000+len(seg)] = seg
 
     # extra @0x080000: own program at +0, shared copy at +0x60000
     base = 0x080000
-    seg = interleave(rd(romdir, EXTRA_OWN[0]), rd(romdir, EXTRA_OWN[1])); img[base:base+len(seg)] = seg
-    seg = interleave(rd(romdir, SHARED[0]), rd(romdir, SHARED[1])); img[base+0x60000:base+0x60000+len(seg)] = seg
+    seg = interleave(rd(romdir, T["EXTRA_OWN"][0]), rd(romdir, T["EXTRA_OWN"][1])); img[base:base+len(seg)] = seg
+    seg = interleave(rd(romdir, T["SHARED"][0]), rd(romdir, T["SHARED"][1])); img[base+0x60000:base+0x60000+len(seg)] = seg
 
     # jsa 6502 @0x100000
     b = rd(romdir, JSA); img[0x100000:0x100000+len(b)] = b
-    # chars @0x110000
-    b = rd(romdir, CHARS, 0x04000); img[0x110000:0x110000+len(b)] = b
+    # chars @0x110000 (set 2 folders may name the chip 136069.125d, set 1 136069-1007.125d - same CRC)
+    b = rd(romdir, T["CHARS"], 0x04000); img[0x110000:0x110000+len(b)] = b
     # sprites @0x120000: repacked to CHUNKY 4bpp for single-burst tile-row fetches.
     # Source is 4 planar banks of 256KB (RGN_FRAC(n,4), plane0 = MSB), bit-inverted
     # (ROMREGION_INVERT). Output: per tile-row, 4 bytes = 8 pixels of 4-bit chunky:

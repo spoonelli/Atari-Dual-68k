@@ -394,6 +394,28 @@ in two days, all in the wrapper; the machine RTL is unchanged from 153.
 Shipped as `mister-v0.1.2` on 2026-09-02: build 161,
 `Arcade-Escape_20260902.rbf`.
 
+## Era 17 — Milestone 0.2 (2026-09-09 → )
+
+One milestone release rather than a trickle: the owner's priority list is
+the factory-map halftone, the second Escape romset, then the Klax / Guts
+prototypes (JSA-II), a ThunderJaws feasibility read, and gameplay comparison
+against the PCB capture. Test builds carry on; nothing ships until the list
+is closed.
+
+- **MOSHADE-162 / Pocket 37** (H8): the romset's own GAL fuse maps, decoded
+  in-house, showed the line-buffer write PAL (`100V`) admitting pen-1
+  special pixels and the comparator (`100T`) matching MAME's transcription
+  exactly. The dim the PCB shows on travelled map nodes is those pen-1 twins
+  shading the playfield into colour-RAM bank +0x100. Two MAME shortcuts had
+  come along for the ride (the early `continue` on MPR2, the `pf |= 0x080`
+  on M7); both corrected, `investigations/MAP_HALFTONE.md` holds the chain.
+- **EPROM2-163 / Pocket 38** (H9): set 2's tenth main pair at CPU
+  `0x80000–0x9FFFF` would have landed on the extra CPU's image region, so it
+  lives at `0x0A0000` and the video CPU's A19 window is remapped on all four
+  ROM paths. MAME read taps settled the two questions that mattered before
+  touching the bus: the window is read only in the power-on checksum, and
+  the extra CPU never reads the hole. `tb_escape_core` boots both sets.
+
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)
 2. SDRAM chip-clock capture phase (v45)

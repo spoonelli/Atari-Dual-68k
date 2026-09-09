@@ -171,6 +171,7 @@ blocks the shipped v0.1.1 releases.
 | # | Item | Note |
 |---|---|---|
 | H8 | Factory-map "halftone": travelled nodes must dim, not vanish | **FIXED IN RTL (MOSHADE-162, 2026-09-09) — device verification pending.** Root cause, from the romset GAL fuse maps + the PCB capture: GAL 136069.100V writes special (MPR2) pixels of pen 1 into the line buffer, so they shade the playfield (SHADE → colour-RAM +0x100, the I=4 bank the game populates); MAME `continue`s before SHADE and never dims (its level maps stay bright), and MAME's extra `pf |= 0x080` on M7 pointed shadows at the never-written 0x38X bank — the "erased to black". Both transcribed into our line buffer/comparator; both corrected, benches (tb_prio exhaustive, tb_mob shadow-twin, tb_stain) pass. Verify on device at a level ≥ 2 map against the PCB capture t406–t410: travelled nodes and START box dim same-hue (0x30X). Record: `investigations/MAP_HALFTONE.md`. |
+| H9 | `eprom2` (Escape set 2) | **IMPLEMENTED (EPROM2-163, 2026-09-09) — device verification pending.** The tenth main pair lands at image `0x0A0000`; `escape_core` remaps the video CPU's A19 window on all four ROM paths; `build_rom.py` auto-detects the set (and borrows shared chips from a sibling `eprom` folder); MiSTer gets its own `(set 2).mra`. MAME read taps (6000 frames): window read only in POST (f626–641), extra CPU never touches its hole. `tb_escape_core` boots set 2 (reset PC `$6A4`) and still boots set 1. Verify on both devices: POST passes (the checksum covers the new window), attract + a level of play, then the H8 map check on set 2 too. |
 
 **Slow-burn (no version attached):** MiSTer vertical-sync edges aligned to
 the horizontal-sync leading edge (`VSYNC_HSTART = HSYNC_START`, the
@@ -186,8 +187,7 @@ out in counter terms. Path 2: USB scope on the csync line (period, pulse
 width, porches to first active pixel via the service-mode grid, VS lines,
 serration). Adopt widths / VS structure / edge alignment on both platforms
 if they differ; keep the display-centred default position (arcade monitors
-were pot-centred, so absolute position was never user-visible); section-F `DIAG_EN` decision; `eprom2`
-(second CRC table + MRA + both-platform verify); HISTORY.md builds-103+
+were pot-centred, so absolute position was never user-visible); section-F `DIAG_EN` decision; HISTORY.md builds-103+
 chronology; C5 clean-machine ROM-prep walkthrough; optional GitHub Support
 ticket for the pre-rewrite `refs/pull/*` snapshots; **save-states
 evaluation** (MiSTer `SS<base>:<size>` DDR window + framework hooks; the
