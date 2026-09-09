@@ -175,8 +175,31 @@ sprites @0x120000 (1 MB), ADPCM @0x240000 (128 KB), tiles @0x280000 (1 MB)
    0x280000 — **done 2026-09-09** (Escape images byte-identical before and
    after; the new paths cannot be exercised without the sets). MRAs for the
    Klax sets wait on the packaging decision below.
-5. Guts: decoder variant, mob height/flip/order, prio rule, tile region —
-   each with a bench, each one variable.
+5. Guts, one variable at a time:
+   - decoder variant — **done 2026-09-09 (GUTS-166)**: `escape_decode`
+     `VIDEO_MAP=1` (threaded as `escape_core` `VIDEO_MAP`), `tb_escape_vmap`
+     probes every block edge of both maps (the original Escape-only
+     `tb_escape_decode` still passes); the block RAMs index on the same
+     low address bits in both maps so nothing else moved.
+   - MO entry format: `escape_mob.v` takes height from `q_w3[0][2:0]` and
+     hflip from `q_w3[0][3]` (line ~1093); Guts needs height `w3[3:0]` (so
+     `height_t` becomes 4 bits through `ydiff`/`ymatch`/`code_row`) and hflip
+     from **w1[15]**, which the scout no longer carries (MOCOV-1 dropped w1
+     from the queue) — a queue bit has to come back for it.
+   - render order: the scout walks from the SLIP head and the line buffer's
+     write policy reproduces MAME's *reverse* order for Escape (`escape_mob.v`
+     header and line ~444). Guts renders *forward*; in a line buffer that is
+     the opposite overwrite rule, which touches the blit-write policy and
+     `tb_mob`'s fixtures.
+   - priority: `escape_prio.v` is the GAL 100T transcription; Guts wants
+     MAME's plain rule (`!(pf & 8) || mopriority >= pfpriority`, stain pass
+     unchanged) behind the same generic.
+   - tile region: playfield tile fetches address the sprite slot base
+     (`0x120000`, `core_top.v` / `escape_mister.v`); Guts fetches playfield
+     rows from `0x280000` while MOs stay at `0x120000`.
+   None of the last four can be checked without a Guts scene dump from MAME,
+   so they wait for the romset: dump PF/ext/MO/SLIP/palette at a known
+   frame, extend `mo_priority_model.py` with the Guts rule, then transcribe.
 6. Device tests need the romsets. Until then the README keeps both games
    at "not supported".
 

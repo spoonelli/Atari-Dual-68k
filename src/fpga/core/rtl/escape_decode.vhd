@@ -10,6 +10,13 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 entity escape_decode is
+    generic (
+        -- GUTS-166: 0 = Escape / Klax video block at 3Fxxxx (SP-332 sheet 16);
+        -- 1 = Guts n' Glory's block at FFxxxx (MAME eprom.cpp guts_map): the
+        -- same RAMs at the same sizes, ext/palette RAM at the bottom instead
+        -- of the top. Everything below 3E0000 is common to both maps.
+        VIDEO_MAP : integer := 0
+    );
     port (
         addr            : in  std_logic_vector(23 downto 0); -- 68000 byte address
         as_n            : in  std_logic := '0';              -- address strobe (0 = valid)
@@ -68,13 +75,24 @@ begin
             elsif a >= x"2E0000" and a <= x"2E0001"       then sel_watchdog    <= '1';
             elsif a >= x"360000" and a <= x"36003F"       then sel_vidctrl     <= '1';
             elsif a >= x"3E0000" and a <= x"3E0FFF"       then sel_colorram    <= '1';
-            elsif a >= x"3F0000" and a <= x"3F1FFF"       then sel_pfram       <= '1';
-            elsif a >= x"3F2000" and a <= x"3F3FFF"       then sel_moram       <= '1';
-            elsif a >= x"3F4000" and a <= x"3F4EFF"       then sel_alpharam    <= '1';
-            elsif a >= x"3F4F00" and a <= x"3F4F7F"       then sel_mobconfig   <= '1';
-            elsif a >= x"3F4F80" and a <= x"3F4FFF"       then sel_slip        <= '1';
-            elsif a >= x"3F5000" and a <= x"3F7FFF"       then sel_workram     <= '1';
-            elsif a >= x"3F8000" and a <= x"3F9FFF"       then sel_pfpalette   <= '1';
+            elsif VIDEO_MAP = 0 then
+                if    a >= x"3F0000" and a <= x"3F1FFF"   then sel_pfram       <= '1';
+                elsif a >= x"3F2000" and a <= x"3F3FFF"   then sel_moram       <= '1';
+                elsif a >= x"3F4000" and a <= x"3F4EFF"   then sel_alpharam    <= '1';
+                elsif a >= x"3F4F00" and a <= x"3F4F7F"   then sel_mobconfig   <= '1';
+                elsif a >= x"3F4F80" and a <= x"3F4FFF"   then sel_slip        <= '1';
+                elsif a >= x"3F5000" and a <= x"3F7FFF"   then sel_workram     <= '1';
+                elsif a >= x"3F8000" and a <= x"3F9FFF"   then sel_pfpalette   <= '1';
+                end if;
+            else                                        -- GUTS-166: guts_map
+                if    a >= x"FF0000" and a <= x"FF1FFF"   then sel_pfpalette   <= '1';  -- playfield ext
+                elsif a >= x"FF8000" and a <= x"FF9FFF"   then sel_pfram       <= '1';
+                elsif a >= x"FFA000" and a <= x"FFBFFF"   then sel_moram       <= '1';
+                elsif a >= x"FFC000" and a <= x"FFCEFF"   then sel_alpharam    <= '1';
+                elsif a >= x"FFCF00" and a <= x"FFCF7F"   then sel_mobconfig   <= '1';
+                elsif a >= x"FFCF80" and a <= x"FFCFFF"   then sel_slip        <= '1';
+                elsif a >= x"FFD000" and a <= x"FFFFFF"   then sel_workram     <= '1';
+                end if;
             end if;
         end if;
     end process;
