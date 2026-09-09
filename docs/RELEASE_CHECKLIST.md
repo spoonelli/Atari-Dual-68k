@@ -170,7 +170,7 @@ blocks the shipped v0.1.1 releases.
 
 | # | Item | Note |
 |---|---|---|
-| H8 | Factory-map "halftone": travelled nodes must dim, not vanish | Found 2026-09-02 against the owner's real-PCB capture (`Genki Arcade - 2026-09-01 234201.mp4`, frame 24402, sector D level 03): the board renders already-travelled map nodes at reduced intensity; ours appear to drop them. Mechanism per the PCB GAL equations MAME carries (`eprom.cpp` screen_update): motion objects with the top priority bit set draw nothing themselves but *stain* the playfield beneath — `SHADE`/`CRA9` selects the alternate (dimmer) colour-RAM bank. Check `escape_core` handles that MO class as stain, not transparency. Oracle = the PCB capture, not MAME. Present in every release to date; not a regression. |
+| H8 | Factory-map "halftone": travelled nodes must dim, not vanish | **FIXED IN RTL (MOSHADE-162, 2026-09-09) — device verification pending.** Root cause, from the romset GAL fuse maps + the PCB capture: GAL 136069.100V writes special (MPR2) pixels of pen 1 into the line buffer, so they shade the playfield (SHADE → colour-RAM +0x100, the I=4 bank the game populates); MAME `continue`s before SHADE and never dims (its level maps stay bright), and MAME's extra `pf |= 0x080` on M7 pointed shadows at the never-written 0x38X bank — the "erased to black". Both transcribed into our line buffer/comparator; both corrected, benches (tb_prio exhaustive, tb_mob shadow-twin, tb_stain) pass. Verify on device at a level ≥ 2 map against the PCB capture t406–t410: travelled nodes and START box dim same-hue (0x30X). Record: `investigations/MAP_HALFTONE.md`. |
 
 **Slow-burn (no version attached):** MiSTer vertical-sync edges aligned to
 the horizontal-sync leading edge (`VSYNC_HSTART = HSYNC_START`, the
