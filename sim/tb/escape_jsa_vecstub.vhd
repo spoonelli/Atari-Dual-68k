@@ -8,7 +8,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 
 entity escape_jsa is
-    generic ( YM_ENABLE : boolean := true );
+    generic ( YM_ENABLE : boolean := true; BOARD : integer := 1 );
     port (
         clk       : in  std_logic;
         reset_n   : in  std_logic;

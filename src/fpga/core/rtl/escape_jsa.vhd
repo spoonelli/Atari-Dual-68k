@@ -18,8 +18,14 @@ use ieee.numeric_std.all;
 
 entity escape_jsa is
     generic (
-        -- false = GHDL sim: skip the Verilog jt51, stub silence (docs/JSA.md)
-        YM_ENABLE : boolean := true
+        -- false = GHDL sim: skip the Verilog jt51 (and jt6295), stub silence (docs/JSA.md)
+        YM_ENABLE : boolean := true;
+        -- JSA2-164: 1 = JSA-I (YM2151 + TMS5220; Escape), 2 = JSA-II (YM2151 +
+        -- OKI6295; Klax prototypes, Guts n' Glory). The 6502 map is the same
+        -- except 2800 reads / 2A00 writes go to the OKI instead of N/C / the
+        -- TMS, POKEY space is not decoded, and WRIO D3:2 / MIX D0 / RDIO D4
+        -- change meaning. docs/investigations/KLAX_GUTS.md section 2.
+        BOARD : integer := 1
     );
     port (
         clk       : in  std_logic;                      -- 7.159091 MHz
@@ -70,6 +76,24 @@ end escape_jsa;
 
 architecture rtl of escape_jsa is
     -- jt51 (third_party/jt51/hdl/jt51.v); bound by Quartus, skipped in GHDL sim
+    -- jt6295 (third_party/jt6295/hdl/jt6295.v); bound by Quartus, stubbed in GHDL
+    component jt6295
+        port (
+            rst      : in  std_logic;
+            clk      : in  std_logic;
+            cen      : in  std_logic;      -- 1.193 MHz enable (JSA_MASTER_CLOCK/3)
+            ss       : in  std_logic;      -- pin 7: 1 = /132, 0 = /165
+            wrn      : in  std_logic;
+            din      : in  std_logic_vector(7 downto 0);
+            dout     : out std_logic_vector(7 downto 0);
+            rom_addr : out std_logic_vector(17 downto 0);
+            rom_data : in  std_logic_vector(7 downto 0);
+            rom_ok   : in  std_logic;
+            sound    : out std_logic_vector(13 downto 0);
+            sample   : out std_logic
+        );
+    end component;
+
     component jt51
         port (
             rst    : in  std_logic;
@@ -161,10 +185,10 @@ architecture rtl of escape_jsa is
     signal tms_rst_cnt  : unsigned(9 downto 0) := (others => '1');
     signal tms_rst_idle : std_logic := '0';
     signal tms_en    : std_logic;
-    signal tms_rdy_n : std_logic;
+    signal tms_rdy_n : std_logic := '1';
     signal tms_int_n : std_logic;
     signal tms_do    : std_logic_vector(7 downto 0);
-    signal tms_spkr  : signed(13 downto 0);
+    signal tms_spkr  : signed(13 downto 0) := (others => '0');
 
     -- YM2151
     signal ym_rst    : std_logic;
@@ -192,6 +216,28 @@ architecture rtl of escape_jsa is
 
     -- rdio port
     signal rdio : std_logic_vector(7 downto 0);
+    signal rdio_d4 : std_logic;
+
+    -- JSA2-164: OKI6295 (jt6295). ADPCM ROM = combined-image slot 0x240000-
+    -- 0x27FFFF (256 KB aligned so the 18-bit chip address drops straight
+    -- in). The chip's byte reads are served through this board's existing
+    -- ROM request port as a second client behind the 6502, one 4-byte
+    -- group cached (the req/ack burst returns the word pair at addr and
+    -- addr|2).
+    signal oki_rst, oki_ss, oki_wrn : std_logic := '1';
+    signal oki_din, oki_dout : std_logic_vector(7 downto 0) := (others => '0');
+    signal oki_addr  : std_logic_vector(17 downto 0) := (others => '0');
+    signal oki_rdata : std_logic_vector(7 downto 0);
+    signal oki_ok    : std_logic;
+    signal oki_snd   : std_logic_vector(13 downto 0) := (others => '0');
+    signal oki_cen   : std_logic := '0';
+    signal oki_cctr  : unsigned(2 downto 0) := (others => '0');
+    signal oki_wrctr : unsigned(3 downto 0) := (others => '0');
+    signal oki_cache : std_logic_vector(31 downto 0) := (others => '0');
+    signal oki_tag   : std_logic_vector(15 downto 0) := (others => '0');
+    signal oki_cv    : std_logic := '0';
+    signal oki_miss  : std_logic;
+    signal rf_oki    : std_logic := '0';   -- the in-flight request belongs to the OKI
 
     -- mixer: YM gain = round(0.60*256*v/7), v = mix_reg(3:1)
     type gain_t is array (0 to 7) of unsigned(7 downto 0);
@@ -291,32 +337,53 @@ begin
                 pref_word(15 downto 8)  when rom_off(0) = '0' else
                 pref_word(7 downto 0);
 
+    -- JSA2-164: the OKI's 4-byte group is a miss when its tag differs
+    oki_ok   <= '1' when BOARD = 2 and oki_cv = '1' and oki_tag = oki_addr(17 downto 2) else '0';
+    oki_miss <= '1' when BOARD = 2 and oki_rst = '0' and oki_ok = '0' else '0';
+    oki_rdata <= oki_cache(31 downto 24) when oki_addr(1 downto 0) = "00" else
+                 oki_cache(23 downto 16) when oki_addr(1 downto 0) = "01" else
+                 oki_cache(15 downto 8)  when oki_addr(1 downto 0) = "10" else
+                 oki_cache(7 downto 0);
+
     fetch : process(clk)
     begin
         if rising_edge(clk) then
             if reset_n = '0' then
-                rf <= RF_IDLE; rom_req_i <= '0';
-                cache_v <= '0'; pref_v <= '0';
+                rf <= RF_IDLE; rom_req_i <= '0'; rf_oki <= '0';
+                cache_v <= '0'; pref_v <= '0'; oki_cv <= '0';
             else
                 case rf is
                     when RF_IDLE =>
                         if rom_stall = '1' and rom_ack = '0' then
                             rom_addr  <= x"10" & rom_off(15 downto 1) & '0';
                             rom_req_i <= '1';
+                            rf_oki    <= '0';
+                            rf <= RF_REQ;
+                        elsif oki_miss = '1' and rom_ack = '0' then
+                            -- 0x240000 | (group << 2): word pair at +0 and +2
+                            rom_addr  <= "001001" & oki_addr(17 downto 2) & "00";
+                            rom_req_i <= '1';
+                            rf_oki    <= '1';
                             rf <= RF_REQ;
                         end if;
                     when RF_REQ =>
                         if rom_ack = '1' then
                             rom_req_i  <= '0';
-                            cache_word <= rom_data(31 downto 16);
-                            cache_addr <= rom_off(15 downto 1);
-                            cache_v    <= '1';
-                            -- second burst word is addr|1: only a +2 prefetch
-                            -- when the fetched word index is even (escape_core rule)
-                            pref_word  <= rom_data(15 downto 0);
-                            pref_addr  <= std_logic_vector(
-                                unsigned(rom_off(15 downto 1)) + 1);
-                            pref_v     <= not rom_off(1);
+                            if rf_oki = '1' then
+                                oki_cache <= rom_data;      -- bytes +0..+3, big-endian words
+                                oki_tag   <= oki_addr(17 downto 2);
+                                oki_cv    <= '1';
+                            else
+                                cache_word <= rom_data(31 downto 16);
+                                cache_addr <= rom_off(15 downto 1);
+                                cache_v    <= '1';
+                                -- second burst word is addr|1: only a +2 prefetch
+                                -- when the fetched word index is even (escape_core rule)
+                                pref_word  <= rom_data(15 downto 0);
+                                pref_addr  <= std_logic_vector(
+                                    unsigned(rom_off(15 downto 1)) + 1);
+                                pref_v     <= not rom_off(1);
+                            end if;
                             rf <= RF_DONE;
                         end if;
                     when RF_DONE =>                    -- wait out ack (4-phase)
@@ -437,7 +504,7 @@ begin
             -- LANE3u: D4 = the REAL TMS5220 ready (v71's irqctr toggle was a
             -- stand-in; the real readyq transitions as the chip accepts data
             -- - the same behavior the 6502 boot poll expects on hardware)
-            & (not tms_rdy_n)        -- D4 ready (the chip's own READY)
+            & rdio_d4                -- D4: JSA-I the TMS5220's own READY; JSA-II reads 0 (MAME jsa_ii_ioports: unused)
             -- D3:2 idle LOW. The schematic doc calls these "+5V", but the
             -- JSA harness wires 0x04 as a third coin input (MAME JSAI port:
             -- Coin 3, IP_ACTIVE_HIGH; measured idle 2804 = 0x50/0x40, D3:2
@@ -448,6 +515,8 @@ begin
             -- D1:0 coins ACTIVE HIGH (MAME JSAI: IP_ACTIVE_HIGH; measured:
             -- idle 0, held coin reads 1)
             & coin2 & coin1;
+
+    rdio_d4 <= (not tms_rdy_n) when BOARD = 1 else '0';
 
     ---------------------------------------------------------------- YM2151 (jt51)
     ym_cs_n <= not sel_ym;
@@ -491,12 +560,14 @@ begin
               cmd_latch  when sel_r28 = '1' and a16(2 downto 1) = "01" else
               rdio       when sel_r28 = '1' and a16(2 downto 1) = "10" else
               x"00"      when sel_r28 = '1' and a16(2 downto 1) = "11" else
+              oki_dout   when sel_r28 = '1' and a16(2 downto 1) = "00" and BOARD = 2 else  -- /RDV
               x"FF"      when sel_r28 = '1' else
               x"FF"      when sel_pokey = '1' else   -- POKEY absent on Escape
               rom_byte   when sel_rom = '1' else
               x"FF";
 
-    ---------------------------------------------------------------- TMS5220
+    ---------------------------------------------------------------- TMS5220 (JSA-I)
+    tms_board : if BOARD = 1 generate
     -- clock enable: 7.159MHz / (16 - preset); preset 5 (squeak=0) = /11 =
     -- 650.8kHz, preset 7 (squeak=1) = /9 = 795.4kHz (System 1 14S law)
     tms_clk : process(clk)
@@ -550,6 +621,68 @@ begin
         O_ROMCLK => open, O_T11 => open, O_IO => open, O_PRMOUT => open,
         O_SPKR   => tms_spkr
     );
+    end generate;
+
+    ---------------------------------------------------------------- OKI6295 (JSA-II, jt6295)
+    -- WRIO D2 = OKI reset (active low), D3 = pin 7 (sample-rate select);
+    -- both LS273 bits clear at POR, so the chip is held in reset until the
+    -- firmware's first WRIO write, like the YM. 2A00 write = command byte
+    -- (/WRV), 2800 read = status (/RDV). MIX D0 = 1.0 / 0.5 volume.
+    oki_board : if BOARD = 2 generate
+        oki_rst <= (not reset_n) or (not cpu_res_n) or (not wrio_reg(2));
+        oki_ss  <= wrio_reg(3);
+        oki_wrn <= '0' when oki_wrctr /= 0 else '1';
+        oki_ctl : process(clk)
+        begin
+            if rising_edge(clk) then
+                -- 1.193 MHz enable = clk/6
+                if oki_cctr = 5 then oki_cctr <= (others => '0'); oki_cen <= '1';
+                else oki_cctr <= oki_cctr + 1; oki_cen <= '0'; end if;
+                -- 8-clock /WRV pulse, data held for its duration
+                if cpu_ena = '1' and cpu_rw_n = '0' and sel_w2a = '1' and a16(2 downto 1) = "00" then
+                    oki_din   <= cpu_do;
+                    oki_wrctr <= "1000";
+                elsif oki_wrctr /= 0 then
+                    oki_wrctr <= oki_wrctr - 1;
+                end if;
+            end if;
+        end process;
+
+        oki_real : if YM_ENABLE generate
+            u_oki : jt6295
+                port map (
+                    rst      => oki_rst,
+                    clk      => clk,
+                    cen      => oki_cen,
+                    ss       => oki_ss,
+                    wrn      => oki_wrn,
+                    din      => oki_din,
+                    dout     => oki_dout,
+                    rom_addr => oki_addr,
+                    rom_data => oki_rdata,
+                    rom_ok   => oki_ok,
+                    sound    => oki_snd,
+                    sample   => open );
+        end generate;
+        -- GHDL: no Verilog. Status reads idle (0xF0 = no channel busy, the
+        -- MSM6295 idle pattern), silence, and a ROM-address walker that
+        -- advances one byte per enable whenever the current byte is served,
+        -- so the second-client fetch path is exercised by the benches.
+        oki_stub : if not YM_ENABLE generate
+            oki_dout <= x"F0";
+            oki_snd  <= (others => '0');
+            walker : process(clk)
+            begin
+                if rising_edge(clk) then
+                    if oki_rst = '1' then
+                        oki_addr <= (others => '0');
+                    elsif oki_cen = '1' and oki_ok = '1' then
+                        oki_addr <= std_logic_vector(unsigned(oki_addr) + 1);
+                    end if;
+                end if;
+            end process;
+        end generate;
+    end generate;
 
     ---------------------------------------------------------------- mixer
     -- YM xleft/xright * (0.60 * mixvol/7) in Q8; TMS stub contributes silence.
@@ -557,7 +690,8 @@ begin
     mixer : process(clk)
         variable coef  : unsigned(7 downto 0);
         variable tcoef : unsigned(7 downto 0);
-        variable pl, pr, tv : signed(24 downto 0);
+        variable ocoef : unsigned(7 downto 0);
+        variable pl, pr, tv, ov : signed(24 downto 0);
         variable suml, sumr : signed(17 downto 0);
     begin
         if rising_edge(clk) then
@@ -577,11 +711,24 @@ begin
             else
                 tcoef := resize(shift_right(tcoef * (unsigned('0' & uvol_tms) + 1), 3), 8);
             end if;
+            -- JSA-II: OKI route 0.75 (MAME) x MIX D0 (1.0 / 0.5) = 192 / 96,
+            -- through the same user slider as the TMS on JSA-I
+            if BOARD = 2 then
+                if mix_reg(0) = '1' then ocoef := to_unsigned(192, 8); else ocoef := to_unsigned(96, 8); end if;
+                if uvol_tms = "000" then
+                    ocoef := (others=>'0');
+                else
+                    ocoef := resize(shift_right(ocoef * (unsigned('0' & uvol_tms) + 1), 3), 8);
+                end if;
+            else
+                ocoef := (others=>'0');
+            end if;
             pl := signed(ym_xl) * signed('0' & coef);
             pr := signed(ym_xr) * signed('0' & coef);
             tv := (signed(tms_spkr) & "00") * signed('0' & tcoef);
-            suml := resize(pl(23 downto 8), 18) + resize(tv(23 downto 8), 18);
-            sumr := resize(pr(23 downto 8), 18) + resize(tv(23 downto 8), 18);
+            ov := (signed(oki_snd) & "00") * signed('0' & ocoef);
+            suml := resize(pl(23 downto 8), 18) + resize(tv(23 downto 8), 18) + resize(ov(23 downto 8), 18);
+            sumr := resize(pr(23 downto 8), 18) + resize(tv(23 downto 8), 18) + resize(ov(23 downto 8), 18);
             if    suml > 32767  then audio_l <= x"7FFF";
             elsif suml < -32768 then audio_l <= x"8000";
             else  audio_l <= std_logic_vector(suml(15 downto 0)); end if;

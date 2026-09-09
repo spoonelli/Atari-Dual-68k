@@ -155,7 +155,7 @@ Reusable blocks (already in the System 1 core unless noted):
 | TMS5220 speech      | `TMS5220.vhd`                                      |
 | SLAPSTIC            | `SLAPSTIC.vhd` (likely unused by Escape — verify)  |
 | YM2151              | `jotego/jt51` (Pocket-proven)                      |
-| OKI6295 (guts/klaxp)| `jotego/jt6295`                                   |
+| OKI6295 (guts/klaxp)| `jotego/jt6295` (submodule `third_party/jt6295`, wired into `escape_jsa` `BOARD=2`, JSA2-164) |
 | 93C46 EEPROM        | `jotego/jteeprom`                                 |
 
 ## Status (2026-08)

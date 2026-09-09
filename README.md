@@ -84,8 +84,11 @@ rather than near-misses:
   unused. So they are *simpler* than Escape, but they exercise a configuration
   this core has never run.
 - **They use JSA-II, which adds an OKI6295.** Escape uses JSA-I (YM2151 +
-  TMS5220). The OKI6295 is a device that does not exist in this RTL at all;
-  `jotego/jt6295` is earmarked for it.
+  TMS5220). Since JSA2-164 the sound board RTL has a `BOARD=2` mode with
+  `jotego/jt6295` in the TMS5220's place, bench-proven on synthetic stimulus
+  (`sim/tb/tb_escape_jsa2.vhd`, `sim/tb/tb_jt6295.v`); no Klax or Guts
+  program has run through it yet because no romset is on hand. The plan and
+  every measured delta are in `docs/investigations/KLAX_GUTS.md`.
 
 `support/build_rom.py` builds the two Escape sets and refuses any chip whose
 CRC32 does not match, so a Klax or Guts romset cannot currently be assembled
