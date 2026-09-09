@@ -518,6 +518,28 @@ architecture rtl of escape_core is
     -- starvation victim is gone - JSA fetches from its own shadow since v63)
     signal vp_want, ep_want : std_logic;
     signal vp_addr, ep_addr : std_logic_vector(19 downto 0);
+
+    -- EPROM2-163: video-CPU ROM address -> combined-image address (20 bits).
+    -- Set 1 has 512 KB of main program (0x00000-0x7FFFF, image 1:1).  Set 2
+    -- (MAME eprom2) carries one more pair, 136069-1037.50e / 1036.40e, at CPU
+    -- 0x80000-0x9FFFF - the same window the image gives to the EXTRA CPU's
+    -- own program.  That window is placed in the image at 0x0A0000 (the first
+    -- 128 KB of the extra CPU's never-populated 0x20000-0x5FFFF hole; both
+    -- build_rom.py and the set-2 MRA put it there).  Set 2's POST reads the
+    -- whole window once at boot (its ROM checksum, PC 0x93C/0x93E in MAME),
+    -- so without this remap set 2 fails self-test.  Set 1 never touches
+    -- 0x80000-0x9FFFF; for it the function is the identity.  Every place the
+    -- video CPU's address becomes an image address - fast path, legacy
+    -- arbiter, speculative +2 prefetch, and the prefetch/last-word cache
+    -- tags - goes through here, so the caches compare like with like.
+    function v_img(a : std_logic_vector(23 downto 0)) return std_logic_vector is
+    begin
+        if a(19) = '1' then
+            return "101" & a(16 downto 1) & '0';      -- 0xA0000 | (a and 0x1FFFE)
+        else
+            return a(19 downto 1) & '0';
+        end if;
+    end function;
     signal v_hit_dly, e_hit_dly : unsigned(1 downto 0);
     signal v_served, e_served : std_logic;
     signal v_last_data, e_last_data : std_logic_vector(15 downto 0);
@@ -819,7 +841,7 @@ begin
                         and unsigned(v_addr(23 downto 0)) <= x"09FFFF" else '0';
     fast_e_spec <= '1' when FASTPATH_EN = 1 and e_shad_rng = '0'
                         and unsigned(e_addr(23 downto 0)) <= x"09FFFF" else '0';
-    fast_v_addr <= x"0" & v_addr(19 downto 1) & '0';
+    fast_v_addr <= x"0" & v_img(v_addr(23 downto 0));
     fast_e_addr <= std_logic_vector(
         unsigned(std_logic_vector'(x"0" & e_addr(19 downto 1) & '0')) + x"080000");
 
@@ -888,7 +910,7 @@ begin
                         -- arbiter only ever sees timed-out cycles)
                         elsif v_arb_pend='1' and v_served='0' and v_hit_dly="00"
                               and v_pref_valid='1'
-                              and (v_addr(19 downto 1) & '0') = v_pref_addr then
+                              and v_img(v_addr(23 downto 0)) = v_pref_addr then
                             v_rom_hold   <= v_pref_data;
                             v_hit_dly    <= "10";
                             v_served     <= '1';
@@ -910,7 +932,7 @@ begin
                         -- last-word cache (still gated OFF by LANE4d A/B)
                         elsif LW_CACHE_EN='1' and v_arb_pend='1' and v_served='0'
                               and v_hit_dly="00" and v_last_valid='1'
-                              and (v_addr(19 downto 1) & '0') = v_last_addr then
+                              and v_img(v_addr(23 downto 0)) = v_last_addr then
                             v_rom_hold  <= v_last_data;
                             v_hit_dly   <= "10";
                             v_served    <= '1';
@@ -930,7 +952,7 @@ begin
                             rom_req_i <= '1';
                         elsif v_arb_pend='1' and v_hit_dly="00" and v_served='0' then
                             rom_owner <= OWN_V; last_was_v <= '1';
-                            rom_addr_i <= x"0" & v_addr(19 downto 1) & '0';
+                            rom_addr_i <= x"0" & v_img(v_addr(23 downto 0));
                             rom_req_i <= '1';
                         -- v56: speculative word-0 follow-ups, lowest priority
                         elsif vp_want='1' then
@@ -961,11 +983,11 @@ begin
                             -- follow-ups would only steal its SDRAM slots.
                             if FASTPATH_EN = 0 then
                                 vp_addr <= std_logic_vector(
-                                    unsigned(v_addr(19 downto 1) & '0') + 2);
+                                    unsigned(v_img(v_addr(23 downto 0))) + 2);
                                 vp_want <= '1';
                             end if;
                             v_last_data  <= rom_data(31 downto 16);
-                            v_last_addr  <= v_addr(19 downto 1) & '0';
+                            v_last_addr  <= v_img(v_addr(23 downto 0));
                             v_last_valid <= '1';
                             v_rom_dtack <= '1'; rom_owner <= OWN_IDLE;
                             v_served    <= '1';
@@ -2068,7 +2090,7 @@ begin
                     end case;
                 end if;
 
-                if v_as_n='0' and v_addr(23 downto 0)=x"000694" then v_pc_seen <= '1'; end if;
+                if v_as_n='0' and (v_addr(23 downto 0)=x"000694" or v_addr(23 downto 0)=x"0006A4") then v_pc_seen <= '1'; end if;  -- reset PC: set 1 $694, set 2 $6A4 (debug/bench flag only)
 
                 -- playfield scroll: latched from cfg writes (3F4F00 word0=X, word1=Y)
                 if we_cfg='1' then

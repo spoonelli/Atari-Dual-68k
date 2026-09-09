@@ -1,7 +1,8 @@
 # Building and loading ROMs
 
 This core ships **no ROM data**. You supply your own verified dumps of the Atari
-"Escape" set (MAME set `eprom`) and assemble them into one image the core loads.
+"Escape" set (MAME set `eprom`, or the all-rev-1 clone `eprom2`) and assemble
+them into one image the core loads.
 
 You need a clone (or source zip) of this repository for `support/build_rom.py`;
 only Python 3 is required, no other dependencies.
@@ -18,7 +19,11 @@ python3 support/build_rom.py /path/to/eprom.zip ./atari_escape.rom
 Both forms produce a byte-identical image. With no arguments it looks for an
 `eprom` folder next to the repository and writes `atari_escape.rom` next to
 the script itself; pass both paths explicitly if you want them somewhere
-else.
+else. The set is detected from the chips present (`136069-3025.50a` = set 1,
+`136069-1025.50a` = set 2). A set-2 folder that lacks the shared
+graphics/sound chips may sit next to an `eprom` folder and borrow them, the
+way MAME's clone lookup does. Set 2 is implemented but not yet verified on a
+device (see the README's supported-sets table).
 
 Every chip is **CRC32-verified** against MAME's known-good values, and its size
 is checked. A missing chip, a short chip, or a wrong/modified dump aborts the
@@ -36,7 +41,8 @@ byte offsets):
 | Offset     | Size    | Region  | Transform vs the raw chips |
 |------------|---------|---------|----------------------------|
 | `0x000000` | 512 KB  | maincpu — Video CPU program | 16-bit interleave: even byte = `.50x`, odd = `.40x` (the `0x60000` pair is reversed — see [`ROMMAP.md`](ROMMAP.md)) |
-| `0x080000` | 512 KB  | extra — second 68000 | own program at `+0x00000`; MAME's `ROM_COPY` of maincpu `0x60000` at `+0x60000`; `0x0A0000–0x0DFFFF` zero-filled |
+| `0x080000` | 512 KB  | extra — second 68000 | own program at `+0x00000`; MAME's `ROM_COPY` of maincpu `0x60000` at `+0x60000`; `0x0A0000–0x0DFFFF` zero-filled (set 1) |
+| `0x0A0000` | 128 KB  | maincpu `0x80000–0x9FFFF` — **set 2 only** | the tenth main pair (`1037.50e`/`1036.40e`), interleaved like the others; the core remaps the video CPU's A19 window here (see [`ROMMAP.md`](ROMMAP.md)) |
 | `0x100000` | 64 KB   | JSA 6502 program + TMS5220 speech | none (verbatim) |
 | `0x110000` | 16 KB   | alphanumerics (chars) | none (verbatim, padded to 64 KB) |
 | `0x120000` | 1024 KB | `spr_tiles` — **playfield tiles _and_ motion objects** | **two** transforms: bit-invert, then 4 bit-planes → chunky 4bpp |

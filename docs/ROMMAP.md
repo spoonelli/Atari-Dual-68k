@@ -59,17 +59,27 @@ INVERT and then repacks the planes into chunky 4bpp. See [`ROMS.md`](ROMS.md).
 `100t, 100v, 50f, 50p, 55p, 70j` — these are the address-decode/logic PALs; we
 reimplement their equations in RTL rather than load them.
 
-## eprom2 (clone) — **not** the same layout
+## eprom2 (clone) — same machine, one more main pair
 
 All-rev-1 program ROMs: 1025.50a/1024.40a, 1027.50b/1026.40b, 1029.50d/1028.40d,
 1033.40k/1032.50k (main); 1035.10s/1034.10u (extra). Graphics/sound shared with
-the parent.
+the parent (MAME names the chars chip `136069.125d`; same CRC as `1007.125d`).
 
-It is **not** a drop-in layout swap: `eprom2` loads a *tenth* maincpu chip pair,
-1037.50e @ `0x80000` / 1036.40e @ `0x80001`, that the parent set does not have,
-filling maincpu `0x80000–0x9FFFF`. The parent's maincpu data ends at `0x7FFFF`.
-`support/build_rom.py` supports the parent `eprom` set only — its combined image
-has the extra CPU at `0x080000`, where `eprom2`'s tenth chip pair would land.
+`eprom2` loads a *tenth* maincpu chip pair, 1037.50e @ `0x80000` / 1036.40e @
+`0x80001`, filling maincpu `0x80000–0x9FFFF`; the parent's maincpu data ends at
+`0x7FFFF`. In our combined image that CPU range collides with the extra CPU's
+region at `0x080000`, so (EPROM2-163, 2026-09-09) the pair lives at image
+**`0x0A0000–0x0BFFFF`** — inside the extra CPU's zero-filled hole — and
+`escape_core.vhd` remaps video-CPU addresses with A19 set to that window
+(`v_img`: `0xA0000 | (a & 0x1FFFE)`) on every ROM path (fastpath, prefetch
+compare, SDRAM request, last-word cache). The extra CPU's own path is untouched.
+
+Measured in MAME 0.289 (read taps, 6000 frames incl. coin-up and play): the
+video CPU reads `0x80000–0x9FFFF` **only** during the power-on checksum
+(frames 626–641, 131072 accesses), and the extra CPU never reads its
+`0x20000–0x5FFFF` hole. So the window's placement cannot be observed by the
+extra CPU, and the remap has no timing consequence in gameplay.
+`support/build_rom.py` detects the set from the first main pair present.
 
 ## openFPGA image layout
 

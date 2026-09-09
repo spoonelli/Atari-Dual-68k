@@ -63,13 +63,14 @@ Full hardware map, roadmap, and schematic findings: [`docs/ARCHITECTURE.md`](doc
 ## Other games on this hardware
 
 MAME's `eprom.cpp` driver covers five sets on this board family.
-**Only `eprom` is supported.** The core has never been run against any of the
-others — the rows below describe what they would require, not partial support.
+**`eprom` is the shipped target; `eprom2` is implemented for milestone 0.2 and
+awaits device verification.** The core has never been run against the other
+three — their rows describe what they would require, not partial support.
 
 | Set | Title | Status |
 |---|---|---|
 | **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
-| `eprom2` | Escape … (set 2) | **Next target.** Identical machine configuration and hardware; differs only in program-ROM revisions (all rev 1, plus a `.40e`/`.50e` pair absent from set 1). Support requires an additional CRC table in `build_rom.py`; no RTL changes are anticipated. Not yet run or verified. |
+| `eprom2` | Escape … (set 2) | **Implemented (EPROM2-163, 2026-09-09) — sim-booted, device verification pending.** Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra`. Boots in `tb_escape_core`; not yet run on a Pocket or MiSTer. |
 | `klaxp1` | Klax (prototype set 1) | Not supported. Documented prototype romset; under future evaluation. |
 | `klaxp2` | Klax (prototype set 2) | Not supported. Documented prototype romset; under future evaluation. |
 | `guts` | Guts n' Glory (prototype) | Not supported. Documented prototype romset; under future evaluation. |
@@ -86,13 +87,13 @@ rather than near-misses:
   TMS5220). The OKI6295 is a device that does not exist in this RTL at all;
   `jotego/jt6295` is earmarked for it.
 
-`support/build_rom.py` builds only the `eprom` set and refuses any chip whose
+`support/build_rom.py` builds the two Escape sets and refuses any chip whose
 CRC32 does not match, so a Klax or Guts romset cannot currently be assembled
 into a core image even to try.
 
-**Roadmap position:** `eprom2` is the next supported-set target. The Klax and
-Guts n' Glory prototype romsets are documented above and remain under future
-evaluation; no support timeline is committed for them.
+**Roadmap position:** the Klax and Guts n' Glory prototype romsets are
+documented above and are under evaluation for the 0.2 milestone (both need
+JSA-II, i.e. an OKI6295); no support timeline is committed for them.
 
 ## Related: the MiSTer port
 
