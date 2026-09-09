@@ -141,7 +141,18 @@ entity escape_core is
         -- 68010 LOOP MODE IS NOT A REASON TO PREFER EITHER: TG68K does not
         -- implement it at all, and it measures 0.0000% of the video CPU's
         -- per-frame work on this game regardless. No speed change, either way.
-        CPU_TYPE : integer := 1
+        CPU_TYPE : integer := 1;
+        JSA_BOARD : integer := 1;     -- JSA2-164: 1 = JSA-I (Escape), 2 = JSA-II (Klax/Guts)
+        -- KLAX-165: 0 = the second 68000 socket is unpopulated (Klax
+        -- prototypes, Guts n' Glory: MAME klaxp/guts have no "extra" device).
+        -- The CPU, its two ROM shadows and their M10K are not built; the
+        -- extra-side bus idles (AS high), so the arbiter, TAS interlock and
+        -- mailbox logic see a CPU that never asks. The 360011 latch keeps its
+        -- intensity / video-off bits - they drive the video circuit on the
+        -- board whether or not the socket is filled (MAME drops the whole
+        -- write when m_extra is absent; the reset value is full brightness
+        -- either way, so the two agree unless a game writes it).
+        EXTRA_EN : integer := 1
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -205,6 +216,11 @@ entity escape_core is
         -- player inputs, active-high pressed (mapped to active-low bus bits)
         p1_buttons : in  std_logic_vector(3 downto 0);  -- D11 duck..D8 start
         p2_buttons : in  std_logic_vector(3 downto 0);
+        -- KLAX-165: digital joystick on the upper nibble, D15 up, D14 down,
+        -- D13 left, D12 right, active low on the bus (MAME klaxp 260000/
+        -- 260010). Escape's harness leaves these pins open (reads F).
+        p1_joy     : in  std_logic_vector(3 downto 0) := "0000";
+        p2_joy     : in  std_logic_vector(3 downto 0) := "0000";
         -- hall-effect joystick axes into the ADC0809 (0x80 = centered).
         -- Channel order per MAME eprom: IN0 = P1 Y, IN1 = P1 X, IN2 = P2 Y,
         -- IN3 = P2 X. X axes arrive pre-reversed (0x00 = full right), Y normal
@@ -744,12 +760,21 @@ begin
     e_resn <= reset_n and (extra_release or dbg_force_extra);
     -- Same part as the video CPU on both variants (schematic 20P "ECPU"),
     -- and run in the same mode - see the video CPU comment above.
+    g_ecpu : if EXTRA_EN = 1 generate
     ecpu : entity work.TG68K generic map ( CPU => CPU_SEL )
         port map ( CLK=>clk, RESET=>e_resn, HALT=>e_resn, BERR=>'0', IPL=>e_ipl,
                    ADDR=>e_addr, FC=>e_fc, DATAI=>e_di_r, DATAO=>e_do,
                    AS=>e_as_n, UDS=>e_uds_n, LDS=>e_lds_n, RW=>e_rw_n,
                    DTACK=>e_dtack_n, E=>open, VPA=>e_vpa_n, VMA=>open,
                    LOCK=>e_lock );
+    end generate;
+    g_no_ecpu : if EXTRA_EN /= 1 generate      -- KLAX-165: empty socket, bus idle
+        e_addr  <= (others => '0');
+        e_do    <= (others => '0');
+        e_fc    <= "000";
+        e_as_n  <= '1'; e_uds_n <= '1'; e_lds_n <= '1'; e_rw_n <= '1';
+        e_lock  <= '0';
+    end generate;
 
     -- IPL active low: sound /SINT = IRQ6 (vector 0x78 -> $134C), vblank =
     -- IRQ4. Re-enabled in v49: the v37 mask was diagnostic; the scattered
@@ -1574,10 +1599,15 @@ begin
         port map ( wrclk=>shad_wclk, we=>vshad_we,
                    waddr=>shad_waddr(13 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>v_addr(13 downto 1), q=>vshad_q );
+    g_eshad : if EXTRA_EN = 1 generate
     eshad : entity work.dpram_dc generic map ( awidth => 13 )
         port map ( wrclk=>shad_wclk, we=>eshad_we,
                    waddr=>shad_waddr(13 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>e_addr(13 downto 1), q=>eshad_q );
+    end generate;
+    g_no_eshad : if EXTRA_EN /= 1 generate
+        eshad_q <= (others => '0');
+    end generate;
     vshad2 : entity work.dpram_dc generic map ( awidth => 14 )
         port map ( wrclk=>shad_wclk, we=>vshad2_we,
                    waddr=>shad_waddr(14 downto 1), wdata=>shad_wdata,
@@ -1602,10 +1632,15 @@ begin
     g_no_vshad3 : if VSHAD3_EN /= 1 generate
         vshad3_q <= (others => '0');
     end generate;
+    g_eshad2 : if EXTRA_EN = 1 generate
     eshad2 : entity work.dpram_dc generic map ( awidth => 11 )
         port map ( wrclk=>shad_wclk, we=>eshad2_we,
                    waddr=>shad_waddr(11 downto 1), wdata=>shad_wdata,
                    rdclk=>clk, raddr=>e_addr(11 downto 1), q=>eshad2_q );
+    end generate;
+    g_no_eshad2 : if EXTRA_EN /= 1 generate
+        eshad2_q <= (others => '0');
+    end generate;
 
     -- v63: JSA shadow serves the whole 64KB sound ROM from BRAM.
     jshad : entity work.dpram_dc generic map ( awidth => 15 )
@@ -2336,11 +2371,11 @@ begin
             ee_q     when v_sel_eeprom='1' else
             -- 260000: P1 inputs on D11-D8 (duck/spare/fire/jump, active low);
             -- D0 = step/continue switch (active low)
-            (x"F" & not p1_buttons & "1111111" & not step_btn)
+            (not p1_joy & not p1_buttons & "1111111" & not step_btn)
                                              when v_sel_io='1' and v_addr(5 downto 4)="00" else
             -- 260010: P2 inputs + status: D4 ADEOC (conversion done, from the
             -- ADC model), D3 /SCBSY, D2 /SINT, D1 self-test lever, D0 /VBLANK
-            (x"F" & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
+            (not p2_joy & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
              & svc_n & not vblank_in)
                                              when v_sel_io='1' and v_addr(5 downto 4)="01" else
             -- 260020-2E: ADC0809 result, low byte (read also selects/starts)
@@ -2362,9 +2397,9 @@ begin
             fast_e_data when e_sel_rom='1' and FASTPATH_EN=1 and e_fast_to='0' else
             e_rom_hold when e_sel_rom='1' else
             shr_qb   when e_sel_ram='1' else
-            (x"F" & not p1_buttons & "1111111" & not step_btn)
+            (not p1_joy & not p1_buttons & "1111111" & not step_btn)
                      when e_sel_io='1' and e_addr(5 downto 4)="00" else
-            (x"F" & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
+            (not p2_joy & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
              & svc_n & not vblank_in)
                      when e_sel_io='1' and e_addr(5 downto 4)="01" else
             (x"00" & adc_data) when e_sel_io='1' and e_addr(5 downto 4)="10" else

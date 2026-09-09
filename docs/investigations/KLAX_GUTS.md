@@ -165,11 +165,16 @@ sprites @0x120000 (1 MB), ADPCM @0x240000 (128 KB), tiles @0x280000 (1 MB)
    6502 program, no game data) proves 2800/2A00 routing, WRIO→OKI reset and
    pin 7, the status read, and both ROM clients sharing the port; the JSA-I
    bench is unchanged.
-3. `escape_core` `EXTRA_EN=0` + Klax inputs; GHDL boot bench on the Escape
-   set with the extra disabled must still fetch the reset PC (Escape's own
-   program will then sit at "waiting for second processor" — expected).
-4. `build_rom.py` `klaxp` table (CRCs from `eprom.cpp`), sprite-plane
-   stride parameter, ADPCM slot; MRA for each Klax set.
+3. `escape_core` `EXTRA_EN=0` + Klax inputs — **done 2026-09-09
+   (KLAX-165)**: the extra TG68K and its two shadows are generate-gated,
+   the extra bus idles with AS high, `p1_joy`/`p2_joy` feed D15:12 of
+   260000/260010 (Escape wrappers leave them at F). `tb_escape_core` boots
+   the Escape set with `G_EXTRA=0` and with the default.
+4. `build_rom.py` `klaxp1`/`klaxp2`/`guts` tables (CRCs from `eprom.cpp`),
+   region-sized planar repack, ADPCM slot at 0x240000, Guts tiles at
+   0x280000 — **done 2026-09-09** (Escape images byte-identical before and
+   after; the new paths cannot be exercised without the sets). MRAs for the
+   Klax sets wait on the packaging decision below.
 5. Guts: decoder variant, mob height/flip/order, prio rule, tile region —
    each with a bench, each one variable.
 6. Device tests need the romsets. Until then the README keeps both games

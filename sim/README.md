@@ -92,3 +92,12 @@ the bench itself, not the command line.
 
 If you are bisecting a boot problem, this bench will look guilty on both sides
 of the bisect. Use it only after raising that bound.
+
+## `run_tb.sh` only elaborates what the bench needs
+
+`ghdl -i` imports every file, `ghdl -m` analyses and elaborates only the
+units the named bench reaches. A syntax or binding error in `escape_core.vhd`
+does **not** fail `tb_escape_jsa` or `tb_prio`; it fails the first bench that
+instantiates the core. After editing `escape_core.vhd` (or anything it
+instantiates), run `tb_escape_core` before committing — JSA2-164 shipped a
+missing generic to the branch for an hour because only the JSA bench was run.
