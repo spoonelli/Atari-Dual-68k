@@ -98,9 +98,13 @@ Both files are in [`releases/`](releases/) in this repository.
    matches by prefix and picks the newest-looking name.
 2. Copy `Escape from the Planet of the Robot Monsters (set 1).mra` to
    `_Arcade/`, replacing any earlier copy (older MRAs reference the old
-   rbf name).
-3. Put your own MAME `eprom.zip` romset in `games/mame/`. **No ROM data is
-   included** — the MRA assembles the game from your verified dumps.
+   rbf name). A `(set 2).mra` for MAME's `eprom2` clone (all-rev-1
+   program) is alongside it; it is implemented but has not yet been
+   verified on a MiSTer, so treat it as a test item.
+3. Put your own MAME `eprom.zip` romset in `games/mame/` (set 2 also wants
+   `eprom2.zip` next to it, as its parent supplies the shared chips). **No
+   ROM data is included** — the MRA assembles the game from your verified
+   dumps.
 4. Launch the game from the Arcade menu.
 
 ## Self-Test and First boot
