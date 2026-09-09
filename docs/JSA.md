@@ -172,3 +172,31 @@ Run: `./sim/run_tb.sh tb_escape_jsa` — needs the user-generated (never
 committed) `sim/work/combined_words.hex`; the TB serves the 6502 ROM from word
 offset `0x100000/2` of it via `rom_words` and checks reset-vector fetch,
 execution from PC 0x4000, and the first response-latch write.
+
+## JSA-II mode (`BOARD=2`, JSA2-164)
+
+For the Klax prototypes and Guts n' Glory (`docs/investigations/KLAX_GUTS.md`
+§2). Same 6502, RAM, YM2151, bank window, timed IRQ, SCOM link and mirror
+decode; the differences, all from MAME `atarijsa.cpp` (`atarijsa2_map`,
+`atari_jsa_oki_base_device::wrio_w / mix_w`, `atari_jsa_ii_device::rdio_r`):
+
+| | JSA-I (`BOARD=1`) | JSA-II (`BOARD=2`) |
+|---|---|---|
+| 2800 read | N/C (FF) | OKI6295 status (`/RDV`) |
+| 2A00 write | TMS5220 data | OKI6295 command (`/WRV`) |
+| WRIO D3 | TMS "squeak" clock | OKI pin 7 (sample-rate select) |
+| WRIO D2 / D1 | TMS /RS, /WS strobes | D2 = OKI reset (active low), D1 unused |
+| MIX D0 | — (D7:6 = TMS volume) | OKI volume: 1 = unity, 0 = half |
+| RDIO D4 | TMS READY | reads 0 (MAME: unused) |
+| Speech device | `TMS5220.vhd` | `third_party/jt6295` (Verilog; stubbed under GHDL like jt51) |
+
+OKI clock: board clock / 6 = 1.193 MHz (`JSA_MASTER_CLOCK/3`), pin 7 from
+the latch, so the reset-time rate is /165 until the firmware's first WRIO
+write (LS273 clears at POR, like the YM reset bit). The chip's ADPCM ROM is
+the combined-image slot **0x240000–0x27FFFF**; its byte reads are a second
+client of the board's ROM request port behind the 6502 fetch, one 4-byte
+group cached (`oki_cache`). Mixer: OKI route 0.75 (MAME) × MIX D0, through
+the `uvol_tms` user slider. Benches: `./sim/run_tb.sh tb_escape_jsa2 300us`
+(decode, WRIO→OKI, status read, both ROM clients, with a purpose-built 6502
+program from `sim/tools/make_jsa2_hex.py` — no game data) and
+`./sim/run_oki_tb.sh` (jt6295 itself under iverilog, synthetic phrase table).

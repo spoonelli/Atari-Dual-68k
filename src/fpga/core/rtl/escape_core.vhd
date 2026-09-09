@@ -2208,7 +2208,7 @@ begin
     end process;
 
     jsa : entity work.escape_jsa
-        generic map ( YM_ENABLE => (YM_ENABLE = 1) )
+        generic map ( YM_ENABLE => (YM_ENABLE = 1), BOARD => JSA_BOARD )
         port map ( clk=>clk, reset_n=>reset_n,
             pause      => pause,
                    snd_res=>snd_res_p or jsa_wdg_kick,

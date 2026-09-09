@@ -415,6 +415,15 @@ is closed.
   ROM paths. MAME read taps settled the two questions that mattered before
   touching the bus: the window is read only in the power-on checksum, and
   the extra CPU never reads the hole. `tb_escape_core` boots both sets.
+- **JSA2-164**: the sound board grows a `BOARD=2` (JSA-II) mode for the Klax
+  prototypes and Guts n' Glory — jotego's `jt6295` in the TMS5220's slot,
+  WRIO/MIX/RDIO bit remaps from `atarijsa.cpp`, the OKI's ADPCM reads as a
+  second client of the board's ROM port. No romset exists here, so the
+  proof is a purpose-built 6502 program under GHDL plus jt6295 alone under
+  iverilog; the JSA-I bench is byte-for-byte unchanged. Same day, the
+  ThunderJaws feasibility read (`investigations/THUNDERJAWS.md`): same CPU
+  pair and JSA-II, different video chip — a separate core from shared
+  blocks, if ever.
 
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)

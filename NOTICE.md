@@ -16,6 +16,7 @@ long-form history; this file is the compliance inventory.
 | TG68K.C 68000/68010 soft CPU (both 68ks) | Tobias Gubener (TobiFlex); patches by MikeJ, Till Harbaum, Rok Krajnc, others | LGPL-3.0-or-later | `src/fpga/core/rtl/tg68kv/` (2 vendored files, LOCK-output change noted in headers) + submodule |
 | T65 6502 soft CPU (JSA-I sound CPU) | Daniel Wallner, Mike Johnson, Wolfgang Scherr, Morten Leikvoll | BSD-style (OpenCores) | `third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/` — its "redistributions in synthesized form" clause is satisfied by this documentation |
 | jt51 YM2151 FM core | Jose Tejada (jotego) | GPL-3.0 | `third_party/jt51/` (submodule) + `src/fpga/core/rtl/jt51v/jt51.v`, `jt51_acc.v` (vendored, per-channel gain change MIX-100, noted in headers) |
+| jt6295 OKI MSM6295 ADPCM core (JSA-II sound board: Klax prototypes / Guts n' Glory variants only; not in the Escape bitstream) | Jose Tejada (jotego) | GPL-3.0 | `third_party/jt6295/` (submodule, unmodified) |
 | psram.sv PSRAM controller | Adam Gastineau (agg23) | MIT (© 2022; text in file header, which MIT requires accompany all copies including binaries) | `third_party/analogue-pocket-utils/psram.sv` |
 | Analogue Platform Framework | Analogue | Proprietary — Analogue Software License Agreement (header of `src/fpga/apf/apf_top.v`). Not OSI; explicitly excluded from this project's GPL-3.0 claim | `src/fpga/apf/` |
 
