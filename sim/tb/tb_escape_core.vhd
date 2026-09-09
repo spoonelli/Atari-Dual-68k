@@ -22,7 +22,9 @@ entity tb_escape_core is
     generic (
         G_TRACE : string  := "";
         G_US    : integer := 60;
-        G_EXTRA : integer := 1        -- KLAX-165: 0 = single-CPU build under test
+        G_EXTRA : integer := 1;       -- KLAX-165: 0 = single-CPU build under test
+        G_JSA   : integer := 1;       -- JSA2-164: 2 = JSA-II board
+        G_VMAP  : integer := 0        -- GUTS-166: 1 = FFxxxx video map
     );
 end tb_escape_core;
 
@@ -52,7 +54,7 @@ begin
     rom_addr2w <= rom_addr(21 downto 2) & '1';
 
     uut : entity work.escape_core
-        generic map ( YM_ENABLE => 0, SHAD_EN => 0, EXTRA_EN => G_EXTRA )   -- GHDL: no jt51; shadows unfilled
+        generic map ( YM_ENABLE => 0, SHAD_EN => 0, EXTRA_EN => G_EXTRA, JSA_BOARD => G_JSA, VIDEO_MAP => G_VMAP )   -- GHDL: no jt51; shadows unfilled
         port map ( clk=>clk, reset_n=>resetn,
                    rom_addr=>rom_addr, rom_data=>rom_data, rom_par=>rom_par, rom_req=>rom_req, rom_ack=>rom_ack,
                    vblank_in=>vblank,
