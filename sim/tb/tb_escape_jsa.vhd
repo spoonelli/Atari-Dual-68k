@@ -9,7 +9,9 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-entity tb_escape_jsa is end tb_escape_jsa;
+entity tb_escape_jsa is
+    generic ( G_BOARD : integer := 1 );   -- JSA2-164: 2 = JSA-II (Klax/Guts firmware)
+end tb_escape_jsa;
 
 architecture tb of tb_escape_jsa is
     signal clk     : std_logic := '0';
@@ -39,7 +41,7 @@ begin
     resn <= '0', '1' after 41 ns;
 
     dut : entity work.escape_jsa
-        generic map ( YM_ENABLE => false )     -- jt51 is Verilog: silence stub
+        generic map ( YM_ENABLE => false, BOARD => G_BOARD )     -- jt51/jt6295 are Verilog: silence stubs
         port map (
             clk       => clk,
             reset_n   => resn,

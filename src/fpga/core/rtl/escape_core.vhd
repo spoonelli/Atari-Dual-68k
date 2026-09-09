@@ -475,6 +475,8 @@ architecture rtl of escape_core is
     signal xs_pend, ys_pend : std_logic_vector(8 downto 0);
     signal intensity : std_logic_vector(3 downto 0);
     signal v_virq, e_virq, vblank_d, v_pc_seen : std_logic;
+    signal v_rpc   : std_logic_vector(23 downto 0) := (others => '0');   -- reset PC as fetched (debug flag)
+    signal v_rpc_v : std_logic := '0';
     signal e_iack_pend : std_logic := '0';
     -- EIRQ_MODE 2 arming detector (see generic comment): completed e-side
     -- reads of the wake-flag word, aged, reset by writes to it
@@ -1989,7 +1991,7 @@ begin
         if rising_edge(clk) then
             if reset_n='0' then
                 extra_release <= '0'; video_off <= '0'; intensity <= (others=>'0');
-                v_virq <= '0'; e_virq <= '0'; e_iack_pend <= '0'; vblank_d <= '0'; v_pc_seen <= '0';
+                v_virq <= '0'; e_virq <= '0'; e_iack_pend <= '0'; vblank_d <= '0'; v_pc_seen <= '0'; v_rpc_v <= '0';
                 e_arm <= '0'; e_flag_cnt <= "00"; e_flag_age <= (others=>'0');
                 e_flag_rd_d <= '0'; e_flag_wr_d <= '0';
                 xscroll <= (others=>'0'); yscroll <= (others=>'0');
@@ -2123,7 +2125,13 @@ begin
                     end case;
                 end if;
 
-                if v_as_n='0' and (v_addr(23 downto 0)=x"000694" or v_addr(23 downto 0)=x"0006A4") then v_pc_seen <= '1'; end if;  -- reset PC: set 1 $694, set 2 $6A4 (debug/bench flag only)
+                -- debug/bench flag: the video CPU reached the reset PC it read
+                -- from the vector table (word 2/3 of its first fetches), so it
+                -- holds for any program - Escape set 1 $694, set 2 $6A4, Klax
+                -- prototypes $632, Guts $45C - without a list here.
+                if v_as_n='0' and v_rw_n='1' and v_dtack_n='0' and v_addr(23 downto 0)=x"000004" then v_rpc(23 downto 16) <= v_di(7 downto 0); end if;
+                if v_as_n='0' and v_rw_n='1' and v_dtack_n='0' and v_addr(23 downto 0)=x"000006" then v_rpc(15 downto 0) <= v_di; v_rpc_v <= '1'; end if;
+                if v_as_n='0' and v_rpc_v='1' and v_addr(23 downto 0)=v_rpc then v_pc_seen <= '1'; end if;
 
                 -- playfield scroll: latched from cfg writes (3F4F00 word0=X, word1=Y)
                 if we_cfg='1' then

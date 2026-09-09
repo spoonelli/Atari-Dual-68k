@@ -156,6 +156,39 @@ Image layout (Guts): main 256 KB @0, JSA @0x100000, chars @0x110000,
 sprites @0x120000 (1 MB), ADPCM @0x240000 (128 KB), tiles @0x280000 (1 MB)
 → 0x380000 = 3.5 MB. Comfortably inside SDRAM on both platforms.
 
+## 4a. Romsets arrived (2026-09-09 evening) — what MAME and the benches say
+
+The owner's `~/Downloads` now holds `klax` (a merged folder: production
+Klax `136075-*` plus `klaxp1/` and `klaxp2/` subfolders holding exactly the
+`eprom.cpp` prototype chips), `guts`, and `thunderj` (with its seven GAL
+dumps). `mame -verifyroms` passes for `guts`, `klax`, `thunderj`, and — via
+a scratch folder that gives `klaxp2` its shared chips — `klaxp1` and
+`klaxp2`. **Nothing was copied into the repo; images and scene dumps live in
+`/tmp` and the gitignored `sim/work/`.**
+
+- `build_rom.py` assembles `klaxp1` (2,621,440 B), `klaxp2` and `guts`
+  (3,670,016 B) with every CRC matching.
+- MAME 0.289 boots both prototypes headless: Klax to its attract/how-to-play
+  screen, Guts into an attract gameplay scene (planes, explosions, ground
+  guns — the priority cases). Scene dumps at frame 2400 (PF, PF-ext, MO,
+  alpha/cfg/SLIP, palette, work RAM + screenshot) sit in
+  `sim/work/scenes/{guts,klaxp1}_f2400/`, made by `sim/tools/mame_scene_dump.lua`.
+- The dumped MO lists confirm §4's format reading from live data: in the
+  Guts scene 105 entries, **w3[3] set in none, w1[15] set in 8** (hflip
+  lives in word 1; word 3's low nibble is a 4-bit height); in the Klax scene
+  w3[3] is set on 4 flipped sprites, as on Escape. Guts' PF-ext colour byte
+  uses values 0/1/2/5 and 15 flipped tiles.
+- Reset vectors: Klax `$632`, Guts `$45C` (stack in Guts' FFxxxx work RAM,
+  SSP `FFFFFF00`). The core's debug "reached reset PC" flag now derives the
+  PC from the vector fetch, so the boot bench needs no per-game list.
+- GHDL, real programs: `tb_escape_jsa` with `G_BOARD=2` boots **Klax's and
+  Guts' actual 6502 firmware** on the JSA-II board mode (reset vector →
+  execution → response latch written after 3281 opcodes in both — their
+  upper 32 KB, Atari's JSA-II kernel, is byte-identical; the game halves
+  differ); `tb_escape_core` with `G_EXTRA=0 G_JSA=2` boots the **Klax
+  main program** to its reset PC, and with `G_VMAP=1` added the **Guts main
+  program** too.
+
 ## 5. Order of work and what can be proven without ROMs
 
 1. `jt6295` submodule + iverilog smoke bench — **done 2026-09-09** (see
