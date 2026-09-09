@@ -163,7 +163,7 @@ blocks the shipped v0.1.1 releases.
 | # | Item | Note |
 |---|---|---|
 | H5 | Ship the refreshed `info.txt` | Committed 2026-08-30, rides the next Pocket release. |
-| H6 | D4: 33-pixel deviation at scroll 50/157 | Suspect already named (un-wrapped `spr_right` in off-screen rejection); one bench-driven attempt. |
+| H6 | D4: 33-pixel deviation at scroll 50/157 | Suspect already named (un-wrapped `spr_right` in off-screen rejection); one bench-driven attempt. **New data point (2026-09-09):** a freshly dumped crowd scene (`scenedump2.lua` idx 108, scroll 222/422) scores VS-MAME coverage 99.81% — 25 pixels MAME draws that the engine drops, "dropped tiles, not draw order". A/B-proven pre-existing (identical with the pre-MOSHADE-162 RTL). Same family as D4; fixture regenerable from MAME in a minute. |
 | H7 | Speech-tail adjudication | The last unmeasured claim in the docs — measure vs MAME audio, then fix or retract with numbers. |
 
 **Both platforms — accuracy, next release after v0.1.2 (shared machine RTL):**
