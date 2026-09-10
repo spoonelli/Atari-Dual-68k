@@ -153,6 +153,7 @@ module tb_mob_perf;
     wire [7:0] disp_pen;
     wire       disp_valid;
     escape_mob dut (
+        .guts(1'b0),
         .clk      ( clk ),
         .reset_n  ( rstn ),
         .x_count  ( x_count ),

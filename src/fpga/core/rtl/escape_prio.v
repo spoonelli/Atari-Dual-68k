@@ -59,6 +59,14 @@ module escape_prio (
     // playfield at this pixel
     input  wire [3:0] pf_color,      // tile colour attribute nibble
     input  wire [3:0] pf_pix,        // playfield 4bpp pixel
+    // GUTS-168: Guts n' Glory's comparator (MAME screen_update_guts, the only
+    // reference for that prototype): MO drawn iff !PFX3 or mopriority >=
+    // pfpriority with pfpriority = (pf >> 5) & 3 = pf_color[2:1]; no
+    // FORCEMC0 / SHADE / M7 terms, no alternate colour-RAM bank. Proven
+    // pixel-exact offline on twelve MAME frames (KLAX_GUTS.md 4c). MPR2
+    // objects are skipped upstream exactly as for Escape and the stain pass
+    // is the same escape_stain.v.
+    input  wire       guts,
 
     // decoded ASIC signals (exported for the bench / debug)
     output wire       forcemc0,
@@ -78,7 +86,7 @@ module escape_prio (
     wire fmc = (~pfx3 &  pf_prio[0] &  pf_prio[1] & ~mo_prio[0])
              | (~pfx3 &  pf_prio[1] &                ~mo_prio[1])
              | (~pfx3 &  pf_prio[0] & ~mo_prio[0] & ~mo_prio[1]);
-    assign forcemc0 = mo_valid & fmc;
+    assign forcemc0 = mo_valid & fmc & ~guts;
 
     // --- PF/M -------------------------------------------------------------
     wire n_pfm = ( mo_prio[0] &  mo_prio[1])
@@ -87,18 +95,20 @@ module escape_prio (
                | (~pf_prio[1] &  mo_prio[1])
                | (~pf_prio[1] &  mo_prio[0])
                | (~pf_prio[0] & ~pf_prio[1] & ~mo_prio[0] & ~mo_prio[1]);
-    assign pfm = mo_valid & ~n_pfm;
+    assign pfm = mo_valid & ~n_pfm & ~guts;
 
     // --- M7 ---------------------------------------------------------------
     wire m7_raw = (mo_pix == 4'd1);
-    assign m7 = mo_valid & m7_raw;
+    assign m7 = mo_valid & m7_raw & ~guts;
 
     // --- SHADE ------------------------------------------------------------
-    assign shade = mo_valid & m7_raw & (mo_color != 4'd0) & ~fmc;
+    assign shade = mo_valid & m7_raw & (mo_color != 4'd0) & ~fmc & ~guts;
 
     // --- layer select -----------------------------------------------------
     // reference: if (!pfm && !m7) -> MO, else -> PF
-    assign mo_win = mo_valid & ~pfm & ~m7;
+    wire [1:0] pf_prio_g = pf_color[2:1];                       // GUTS-168: (pf >> 5) & 3
+    wire       mo_win_g  = mo_valid & (~pfx3 | (mo_prio >= pf_prio_g));
+    assign mo_win = guts ? mo_win_g : (mo_valid & ~pfm & ~m7);
 
     // --- colour RAM index -------------------------------------------------
     // MO branch : pen = mo & DATA_MASK = 0x100 | colour<<4 | pixel  (CRA9=1)

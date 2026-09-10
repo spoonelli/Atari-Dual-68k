@@ -433,6 +433,13 @@ is closed.
   and Guts programs under GHDL; the one slip — a runtime port declared but
   never connected — was caught by a bench that counts ADPCM traffic, not
   by inspection.
+- **GUTS-168** (2026-09-10): the Guts video reading was proven before it
+  was built — twelve MAME frames rendered offline, six pixel-exact, each
+  alternative reading losing somewhere — and only then transcribed into
+  `escape_mob` / `escape_prio` behind a `guts` input, with the Escape path
+  shown byte-identical and the Guts comparator swept exhaustively. The
+  Combat Assignment menu's highlighted panel turned out to be the same
+  stain mechanism as Escape's map.
 
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)

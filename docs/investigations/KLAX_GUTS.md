@@ -299,9 +299,20 @@ ships one core per game. Both come from the same RTL through one selector:
    - tile region: playfield tile fetches address the sprite slot base
      (`0x120000`, `core_top.v` / `escape_mister.v`); Guts fetches playfield
      rows from `0x280000` while MOs stay at `0x120000`.
-   None of the last four can be checked without a Guts scene dump from MAME,
-   so they wait for the romset: dump PF/ext/MO/SLIP/palette at a known
-   frame, extend `mo_priority_model.py` with the Guts rule, then transcribe.
+   **All four done 2026-09-10 (GUTS-168)**, after §4c proved the reading
+   offline: `escape_mob` takes a `guts` input (height from w3[3:0], hflip
+   from a new queue bit carrying w1[15], line-buffer writes "last writer
+   wins"), `escape_prio` takes `guts` (MO wins iff !PFX3 or mo_prio >=
+   pf_color[2:1]; no SHADE/FORCEMC0/M7), the MiSTer wrapper fetches
+   playfield tiles from 0x280000 when the MRA byte says Guts. Proof:
+   `tb_prio` now also sweeps the Guts comparator against the MAME rule on
+   all 524,288 rows; `tb_mob` with `GUTS=1` on the frame-3600 fixture
+   (`sim/tools/make_guts_scene_hex.py`, `mob_vs_mame.py --guts`) agrees with
+   the Guts model on every logged pixel, 0 wrong pens, 0 extras (the 68
+   "missing" are raster line 239, which the bench never logs); with `GUTS=0`
+   the Escape fixture's engine output is byte-identical to the committed
+   tree, and `tb_prio` / `tb_stain` pass unchanged. Device verification
+   pending (MiSTer 165).
 6. Device tests need the romsets. Until then the README keeps both games
    at "not supported".
 

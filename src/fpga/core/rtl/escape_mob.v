@@ -68,7 +68,13 @@ module escape_mob (
     output reg  [7:0]  dbg_trunc,
     output reg  [7:0]  dbg_maxlat,
     output wire        disp_stain_s,    // special pixel here, pen bit 1 set
-    output wire        disp_stain_e     // special pixel here, pen bit 2 set
+    output wire        disp_stain_e,    // special pixel here, pen bit 2 set
+    // GUTS-168: Guts n' Glory's MO list (MAME s_guts_mob_config, proven offline
+    // on twelve frames - KLAX_GUTS.md 4c): height is w3[3:0] (Escape: w3[2:0]),
+    // hflip is w1[15] (Escape: w3[3]), and the list renders FORWARD, i.e. a
+    // later entry paints over an earlier one - in this line buffer that is
+    // "last writer wins" instead of Escape's "first writer wins".
+    input  wire        guts
 );
 
     // MOCHAN-4: per-channel registers behind the packed ports. Keeping the
@@ -300,14 +306,15 @@ module escape_mob (
     always @(posedge clk) clr_x <= disp_x;
 
     always @(posedge clk) begin
+        // GUTS-168: forward render order = last writer wins
         if(build_sel) begin
-            if(wr_en_e && !occ_e) buf1e[wr_xe] <= {wr_hi, wr_pen_e};
-            if(wr_en_o && !occ_o) buf1o[wr_xo] <= {wr_hi, wr_pen_o};
+            if(wr_en_e && (!occ_e || guts)) buf1e[wr_xe] <= {wr_hi, wr_pen_e};
+            if(wr_en_o && (!occ_o || guts)) buf1o[wr_xo] <= {wr_hi, wr_pen_o};
             buf0e[clr_x[8:1]] <= 20'd0;
             buf0o[clr_x[8:1]] <= 20'd0;
         end else begin
-            if(wr_en_e && !occ_e) buf0e[wr_xe] <= {wr_hi, wr_pen_e};
-            if(wr_en_o && !occ_o) buf0o[wr_xo] <= {wr_hi, wr_pen_o};
+            if(wr_en_e && (!occ_e || guts)) buf0e[wr_xe] <= {wr_hi, wr_pen_e};
+            if(wr_en_o && (!occ_o || guts)) buf0o[wr_xo] <= {wr_hi, wr_pen_o};
             buf1e[clr_x[8:1]] <= 20'd0;
             buf1o[clr_x[8:1]] <= 20'd0;
         end
@@ -485,6 +492,7 @@ module escape_mob (
     reg [9:0]  q_link [0:QDEPTH-1];
     reg [15:0] q_w3   [0:QDEPTH-1];
     reg [14:0] q_code [0:QDEPTH-1];     // first tile-row of that sprite
+    reg        q_hf   [0:QDEPTH-1];     // GUTS-168: w1[15], Guts' hflip
     reg [2:0]  q_row  [0:QDEPTH-1];     // row within the tile
     reg        q_pf   [0:QDEPTH-1];     // tile 0 is already in flight...
     reg [1:0]  q_ch   [0:QDEPTH-1];     // ...on this channel
@@ -545,7 +553,8 @@ module escape_mob (
     reg [3:0]  spr_color;
     reg [2:0]  spr_prio;                // w2[6:4] - MPR2:MPR0
     reg [8:0]  spr_x;
-    reg [2:0]  width_t, height_t;
+    reg [2:0]  width_t;
+    reg [3:0]  height_t;                // GUTS-168: 4 bits (Escape uses 3)
     reg        hflip;
     reg [2:0]  tx;                      // next tile to LATCH/blit
     // MOCHAN-4: tx_f is 4 bits. With 3 bits it wrapped to 0 on an 8-tile
@@ -629,7 +638,7 @@ module escape_mob (
     // offset by the sprite height: top = -yfield - (height+1)*8. So
     // ydiff = ly - top = ly + yfield + (height+1)*8. The raw-field compare
     // matched almost nothing (v79 probe: 97 fetches, 12 pixels/frame).
-    wire [8:0] ydiff = (ly + spr_y + {1'b0, height_t, 3'b000} + 9'd8) & 9'h1FF;
+    wire [8:0] ydiff = (ly + spr_y + {2'b0, height_t, 3'b000} + 9'd8) & 9'h1FF;
     wire       ymatch = ydiff < {height_t, 3'b000} + 9'd8;   // (height+1)*8 lines
 
     // MOFETCH-1: the same test one cycle EARLIER, straight off the MO RAM bus
@@ -638,8 +647,8 @@ module escape_mob (
     // reading w1/w2 - see the S_E2/S_E3 loop below. Identical arithmetic, so
     // ymatch_e at S_E3 == ymatch at S_WAIT for the same entry, by construction.
     wire [8:0] e_y     = mo_vdata[15:7];
-    wire [2:0] e_h     = mo_vdata[2:0];
-    wire [8:0] ydiff_e = (ly + e_y + {1'b0, e_h, 3'b000} + 9'd8) & 9'h1FF;
+    wire [3:0] e_h     = {guts & mo_vdata[3], mo_vdata[2:0]};   // GUTS-168: 4-bit height
+    wire [8:0] ydiff_e = (ly + e_y + {2'b0, e_h, 3'b000} + 9'd8) & 9'h1FF;
     wire       ymatch_e = ydiff_e < {e_h, 3'b000} + 9'd8;
 
     // MOFETCH-2: completion edges as wires - the abort block below needs to
@@ -1090,8 +1099,8 @@ module escape_mob (
                 mo_vaddr <= {q_link[0], 2'd2};
                 spr_y    <= q_w3[0][15:7];
                 width_t  <= q_w3[0][6:4];
-                height_t <= q_w3[0][2:0];
-                hflip    <= q_w3[0][3];
+                height_t <= guts ? q_w3[0][3:0] : {1'b0, q_w3[0][2:0]};   // GUTS-168
+                hflip    <= guts ? q_hf[0]      : q_w3[0][3];
                 w3       <= q_w3[0];
                 code_row    <= q_code[0];
                 row_in_tile <= q_row[0];
@@ -1329,7 +1338,7 @@ module escape_mob (
             if(q_pop) begin
                 for(qi = 0; qi < QDEPTH-1; qi = qi + 1) begin
                     q_link[qi] <= q_link[qi+1];  q_w3[qi]  <= q_w3[qi+1];
-                    q_code[qi] <= q_code[qi+1];  q_row[qi] <= q_row[qi+1];
+                    q_code[qi] <= q_code[qi+1];  q_row[qi] <= q_row[qi+1];  q_hf[qi] <= q_hf[qi+1];
                     q_pf[qi]   <= q_pf[qi+1];    q_ch[qi]  <= q_ch[qi+1];
                     q_got[qi]  <= hv[qi+1] ? 1'b1      : q_got[qi+1];
                     q_dat[qi]  <= hv[qi+1] ? hv_dat[qi+1] : q_dat[qi+1];
@@ -1347,6 +1356,7 @@ module escape_mob (
                 q_link[q_tl] <= s_link;
                 q_w3[q_tl]   <= s_w3;
                 q_code[q_tl] <= q_new_code;
+                q_hf[q_tl]   <= mo_vdata[15];
                 q_row[q_tl]  <= s_ydiff[2:0];
                 q_pf[q_tl]   <= 1'b0;
                 q_got[q_tl]  <= 1'b0;

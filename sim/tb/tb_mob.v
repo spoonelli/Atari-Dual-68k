@@ -52,6 +52,7 @@ module tb_mob;
     parameter CACHE_IB = 5;
     parameter CACHE_PF = 0;   // MOBURST-119 sibling-row prefetch
     parameter GFX_SEED = 16'hACE1;
+    parameter GUTS     = 0;   // GUTS-168: Guts n' Glory MO format / order
 
     reg clk = 0;
     always #69.84 clk = ~clk;           // 7.159MHz pixel clock
@@ -196,7 +197,8 @@ module tb_mob;
         .disp_prio( disp_prio ),
         .disp_valid( disp_valid ),
         .disp_stain_s( disp_stain_s ),
-        .disp_stain_e( disp_stain_e )
+        .disp_stain_e( disp_stain_e ),
+        .guts        ( GUTS[0] )
     );
 
     // ---------------- MOPRI-1: playfield pen for this pixel
@@ -225,6 +227,7 @@ module tb_mob;
     wire        pr_forcemc0, pr_shade, pr_m7, pr_pfm, pr_mo_win;
     wire [10:0] pr_pen;
 escape_prio uprio (
+    .guts     ( GUTS[0] ),
     .mo_valid ( disp_valid ),
     .mo_prio  ( disp_prio ),
     .mo_color ( disp_pen[7:4] ),
