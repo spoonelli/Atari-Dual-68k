@@ -257,6 +257,10 @@ ships one core per game. Both come from the same RTL through one selector:
   `game_sel` (absent in old Escape MRAs → 00).
 - MRAs: `Klax (prototype set 1).mra`, `Klax (prototype set 2).mra` (byte
   01, `zip="klaxpN.zip|klax.zip"`), `Guts n' Glory (prototype).mra` (byte 02).
+- Buttons (MiSTer 166): the wrapper builds CD11..CD8 per game — Escape
+  unchanged (jump/fire/duck + the Bomb combo), Klax D8..D11 = Button 1..4
+  straight, Guts D9/D8/D11 = Button 1/2/3 (MAME klaxp/guts ports). Neither
+  prototype has a Start switch on the board; both start from a button.
 
 ## 5. Order of work and what can be proven without ROMs
 
