@@ -158,7 +158,10 @@ entity escape_core is
         -- The block RAMs index on the same low address bits in both maps,
         -- so only the decoder changes. The Guts MO format / priority rule /
         -- tile region are NOT covered by this generic (KLAX_GUTS.md section 4).
-        VIDEO_MAP : integer := 0
+        VIDEO_MAP : integer := 0;
+        -- GAMESEL-167: 1 = the sound board is built with both JSA-I and
+        -- JSA-II and follows game_sel at runtime (MiSTer). 0 = JSA_BOARD alone.
+        JSA_RT : integer := 0
     );
     port (
         clk        : in  std_logic;   -- 7.159091 MHz (CPU + pixel domain)
@@ -227,6 +230,13 @@ entity escape_core is
         -- 260010). Escape's harness leaves these pins open (reads F).
         p1_joy     : in  std_logic_vector(3 downto 0) := "0000";
         p2_joy     : in  std_logic_vector(3 downto 0) := "0000";
+        -- GAMESEL-167: which game this image is. 00 = Escape (either set),
+        -- 01 = Klax prototype, 10 = Guts n' Glory. Runtime on MiSTer (MRA
+        -- index-1 byte); a Pocket build ties it to a constant next to the
+        -- matching EXTRA_EN / JSA_BOARD / VIDEO_MAP generics so synthesis
+        -- prunes the rest. Effects: extra CPU held in reset, video map,
+        -- JSA-II decode, joystick nibble and ADC presence.
+        game_sel   : in  std_logic_vector(1 downto 0) := "00";
         -- hall-effect joystick axes into the ADC0809 (0x80 = centered).
         -- Channel order per MAME eprom: IN0 = P1 Y, IN1 = P1 X, IN2 = P2 Y,
         -- IN3 = P2 X. X axes arrive pre-reversed (0x00 = full right), Y normal
@@ -482,6 +492,12 @@ architecture rtl of escape_core is
     signal intensity : std_logic_vector(3 downto 0);
     signal v_virq, e_virq, vblank_d, v_pc_seen : std_logic;
     signal v_rpc   : std_logic_vector(23 downto 0) := (others => '0');   -- reset PC as fetched (debug flag)
+    signal g_escape, g_klax, g_guts : std_logic;      -- GAMESEL-167 decodes
+    signal vmap_sel : std_logic;
+    signal jsa_is2  : std_logic;
+    signal p1_joy_n, p2_joy_n : std_logic_vector(3 downto 0);
+    signal adc_q_sel : std_logic_vector(7 downto 0);   -- Klax has no ADC0809: reads FF (MAME adc_r)
+    signal j_want, j_done : std_logic := '0';          -- OKI ADPCM reads via the SDRAM arbiter
     signal v_rpc_v : std_logic := '0';
     signal e_iack_pend : std_logic := '0';
     -- EIRQ_MODE 2 arming detector (see generic comment): completed e-side
@@ -511,7 +527,7 @@ architecture rtl of escape_core is
     -- v63: OWN_J retired - the JSA fetches from its own BRAM shadow now,
     -- shrinking this to a two-client arbiter and freeing SDRAM slots for
     -- the video fetch path (playfield corruption relief)
-    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E, OWN_VP, OWN_EP);
+    type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E, OWN_VP, OWN_EP, OWN_J);
     signal rom_owner : rom_owner_t;
     signal last_was_v : std_logic;   -- fair round-robin: alternate priority
     signal rom_addr_i : std_logic_vector(23 downto 0);
@@ -631,7 +647,10 @@ architecture rtl of escape_core is
     signal jshad_q     : std_logic_vector(15 downto 0);
     signal jshad_raddr : std_logic_vector(14 downto 0) := (others=>'0');
     signal jsa_srv     : unsigned(2 downto 0) := "000";
-    signal jsa_rom_data32 : std_logic_vector(31 downto 0) := (others=>'0');
+    signal jsa_rom_data32 : std_logic_vector(31 downto 0) := (others=>'0');   -- SDRAM-served (OKI slot)
+    signal jsa_bram_data32 : std_logic_vector(31 downto 0) := (others=>'0');  -- jshad-served (6502 program)
+    signal jsa_data32_mux  : std_logic_vector(31 downto 0);
+    signal jsa_from_sdram  : std_logic := '0';
     signal jsa_shad_ack   : std_logic := '0';
     signal jsa_cmd_full, jsa_resp_full, jsa_snd_irq : std_logic;
     signal snd_cmd_we, snd_resp_rd, snd_res_p : std_logic;
@@ -765,7 +784,17 @@ begin
                    DTACK=>v_dtack_n, E=>open, VPA=>v_vpa_n, VMA=>open,
                    LOCK=>v_lock );
 
-    e_resn <= reset_n and (extra_release or dbg_force_extra);
+    -- GAMESEL-167: games without a second CPU hold the socket in reset
+    g_escape <= '1' when game_sel = "00" else '0';
+    g_klax   <= '1' when game_sel = "01" else '0';
+    g_guts   <= '1' when game_sel = "10" else '0';
+    vmap_sel <= '1' when VIDEO_MAP = 1 or g_guts = '1' else '0';
+    jsa_is2  <= '1' when JSA_BOARD = 2 or g_escape = '0' else '0';
+    -- Klax's digital sticks sit on D15:12; Escape and Guts leave those pins open
+    p1_joy_n <= not p1_joy when g_klax = '1' else "1111";
+    p2_joy_n <= not p2_joy when g_klax = '1' else "1111";
+    adc_q_sel <= x"FF" when g_klax = '1' else adc_data;
+    e_resn <= reset_n and (extra_release or dbg_force_extra) and g_escape;
     -- Same part as the video CPU on both variants (schematic 20P "ECPU"),
     -- and run in the same mode - see the video CPU comment above.
     g_ecpu : if EXTRA_EN = 1 generate
@@ -809,7 +838,7 @@ begin
 
     ---------------------------------------------------------------- decoders
     vdec : entity work.escape_decode generic map ( VIDEO_MAP => VIDEO_MAP )
-        port map ( addr=>v_addr(23 downto 0), as_n=>v_as_n,
+        port map ( vmap=>vmap_sel, addr=>v_addr(23 downto 0), as_n=>v_as_n,
                    sel_rom=>v_sel_rom, sel_eeprom=>v_sel_eeprom, sel_eeprom_unlk=>v_sel_unlk,
                    sel_ram=>v_sel_ram, sel_io=>v_sel_io, sel_watchdog=>v_sel_wdog,
                    sel_vidctrl=>v_sel_vctl, sel_colorram=>v_sel_color, sel_pfram=>v_sel_pf,
@@ -817,7 +846,7 @@ begin
                    sel_slip=>v_sel_slip, sel_workram=>v_sel_work, sel_pfpalette=>v_sel_pfpal );
 
     edec : entity work.escape_decode generic map ( VIDEO_MAP => VIDEO_MAP )
-        port map ( addr=>e_addr(23 downto 0), as_n=>e_as_n,
+        port map ( vmap=>vmap_sel, addr=>e_addr(23 downto 0), as_n=>e_as_n,
                    sel_rom=>e_sel_rom, sel_eeprom=>e_unused(0), sel_eeprom_unlk=>e_unused(1),
                    sel_ram=>e_sel_ram, sel_io=>e_unused(2), sel_watchdog=>e_unused(3),
                    sel_vidctrl=>e_unused(4), sel_colorram=>e_unused(5), sel_pfram=>e_unused(6),
@@ -919,6 +948,7 @@ begin
                 v_served <= '0'; e_served <= '0';
             else
                 v_rom_dtack <= '0'; e_rom_dtack <= '0';
+                j_done <= '0';
                 -- v57 serve-once + paced register serves
                 if v_as_n='1' then v_served <= '0'; end if;
                 if e_as_n='1' then e_served <= '0'; end if;
@@ -997,6 +1027,12 @@ begin
                             rom_addr_i <= std_logic_vector(
                                 unsigned(std_logic_vector'(x"0" & ep_addr)) + x"080000");
                             rom_req_i <= '1';
+                        -- GAMESEL-167: OKI6295 ADPCM byte groups (image 0x24xxxx),
+                        -- lowest priority - a few kB/s, latency-tolerant
+                        elsif j_want='1' then
+                            rom_owner <= OWN_J;
+                            rom_addr_i <= jsa_rom_addr;
+                            rom_req_i <= '1';
                         end if;
                     when OWN_V =>
                         if v_as_n='1' then                       -- CPU ended cycle: abort
@@ -1050,6 +1086,18 @@ begin
                             e_pref_data  <= rom_data(31 downto 16);
                             e_pref_addr  <= ep_addr;
                             e_pref_valid <= '1';
+                            rom_owner <= OWN_IDLE;
+                        end if;
+                    when OWN_J =>
+                        if rom_req_i='0' then
+                            if rom_ack='0' then rom_req_i <= '1'; end if;
+                        elsif rom_ack='1' and rom_par_ok='0' then
+                            rom_req_i <= '0';
+                            retry_cnt <= retry_cnt + 1;
+                        elsif rom_ack='1' then
+                            rom_req_i <= '0';
+                            jsa_rom_data32 <= rom_data;       -- both words, as the BRAM serve
+                            j_done <= '1';
                             rom_owner <= OWN_IDLE;
                         end if;
                     when OWN_E =>
@@ -1659,29 +1707,45 @@ begin
     -- two-word serve matching the SDRAM client protocol (data[31:16] = word
     -- at rom_addr, data[15:0] = word at rom_addr+2), 4-phase level handshake.
     -- BRAM read latency is one cycle, hence the capture states.
+    jsa_from_sdram <= '1' when jsa_srv = "101" or (jsa_srv = "100" and jsa_rom_addr(23 downto 18) = "001001") else '0';
+    jsa_data32_mux <= jsa_rom_data32 when jsa_from_sdram = '1' else jsa_bram_data32;
+
     jsa_shadow_serve : process(clk)
     begin
         if rising_edge(clk) then
             if reset_n='0' then
-                jsa_srv <= "000"; jsa_shad_ack <= '0';
+                jsa_srv <= "000"; jsa_shad_ack <= '0'; j_want <= '0';
             else
                 case jsa_srv is
                     when "000" =>
                         if jsa_rom_req='1' and jsa_shad_ack='0' then
-                            jshad_raddr <= jsa_rom_addr(15 downto 1);
-                            jsa_srv <= "001";
+                            if jsa_rom_addr(23 downto 18) = "001001" then
+                                -- GAMESEL-167: OKI ADPCM slot is not shadowed;
+                                -- fetch through the SDRAM arbiter (OWN_J)
+                                j_want  <= '1';
+                                jsa_srv <= "101";
+                            else
+                                jshad_raddr <= jsa_rom_addr(15 downto 1);
+                                jsa_srv <= "001";
+                            end if;
                         elsif jsa_rom_req='0' then
                             jsa_shad_ack <= '0';
+                        end if;
+                    when "101" =>
+                        if j_done='1' then
+                            j_want <= '0';
+                            jsa_shad_ack <= '1';
+                            jsa_srv <= "100";
                         end if;
                     when "001" =>
                         jshad_raddr <= std_logic_vector(
                             unsigned(jsa_rom_addr(15 downto 1)) + 1);
                         jsa_srv <= "010";
                     when "010" =>
-                        jsa_rom_data32(31 downto 16) <= jshad_q;
+                        jsa_bram_data32(31 downto 16) <= jshad_q;
                         jsa_srv <= "011";
                     when "011" =>
-                        jsa_rom_data32(15 downto 0) <= jshad_q;
+                        jsa_bram_data32(15 downto 0) <= jshad_q;
                         jsa_shad_ack <= '1';
                         jsa_srv <= "100";
                     when others =>
@@ -2257,11 +2321,12 @@ begin
     end process;
 
     jsa : entity work.escape_jsa
-        generic map ( YM_ENABLE => (YM_ENABLE = 1), BOARD => JSA_BOARD )
+        generic map ( YM_ENABLE => (YM_ENABLE = 1), BOARD => JSA_BOARD, BOARD_RT => JSA_RT )
         port map ( clk=>clk, reset_n=>reset_n,
             pause      => pause,
                    snd_res=>snd_res_p or jsa_wdg_kick,
-                   rom_addr=>jsa_rom_addr, rom_data=>jsa_rom_data32,
+                   board2=>jsa_is2,
+                   rom_addr=>jsa_rom_addr, rom_data=>jsa_data32_mux,
                    rom_req=>jsa_rom_req, rom_ack=>jsa_shad_ack,
                    cmd_data=>v_do(7 downto 0), cmd_we=>snd_cmd_we,
                    resp_data=>jsa_resp, resp_rd=>snd_resp_rd,
@@ -2385,15 +2450,15 @@ begin
             ee_q     when v_sel_eeprom='1' else
             -- 260000: P1 inputs on D11-D8 (duck/spare/fire/jump, active low);
             -- D0 = step/continue switch (active low)
-            (not p1_joy & not p1_buttons & "1111111" & not step_btn)
+            (p1_joy_n & not p1_buttons & "1111111" & not step_btn)
                                              when v_sel_io='1' and v_addr(5 downto 4)="00" else
             -- 260010: P2 inputs + status: D4 ADEOC (conversion done, from the
             -- ADC model), D3 /SCBSY, D2 /SINT, D1 self-test lever, D0 /VBLANK
-            (not p2_joy & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
+            (p2_joy_n & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
              & svc_n & not vblank_in)
                                              when v_sel_io='1' and v_addr(5 downto 4)="01" else
             -- 260020-2E: ADC0809 result, low byte (read also selects/starts)
-            (x"00" & adc_data) when v_sel_io='1' and v_addr(5 downto 4)="10" else
+            (x"00" & adc_q_sel) when v_sel_io='1' and v_addr(5 downto 4)="10" else
             (x"00" & jsa_resp) when v_sel_io='1' and v_addr(5 downto 4)="11" else
             x"0000" when v_sel_io='1' else
             (others => '0');
@@ -2411,12 +2476,12 @@ begin
             fast_e_data when e_sel_rom='1' and FASTPATH_EN=1 and e_fast_to='0' else
             e_rom_hold when e_sel_rom='1' else
             shr_qb   when e_sel_ram='1' else
-            (not p1_joy & not p1_buttons & "1111111" & not step_btn)
+            (p1_joy_n & not p1_buttons & "1111111" & not step_btn)
                      when e_sel_io='1' and e_addr(5 downto 4)="00" else
-            (not p2_joy & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
+            (p2_joy_n & not p2_buttons & "111" & adc_eoc & (not jsa_cmd_full) & (not jsa_resp_full)
              & svc_n & not vblank_in)
                      when e_sel_io='1' and e_addr(5 downto 4)="01" else
-            (x"00" & adc_data) when e_sel_io='1' and e_addr(5 downto 4)="10" else
+            (x"00" & adc_q_sel) when e_sel_io='1' and e_addr(5 downto 4)="10" else
             (x"00" & jsa_resp) when e_sel_io='1' and e_addr(5 downto 4)="11" else
             (others => '0');
     e_sel_io <= '1' when e_as_n='0' and e_addr(23 downto 16) = x"26" else '0';

@@ -8,7 +8,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 
 entity escape_jsa is
-    generic ( YM_ENABLE : boolean := true; BOARD : integer := 1 );
+    generic ( YM_ENABLE : boolean := true; BOARD : integer := 1; BOARD_RT : integer := 0 );
     port (
         clk       : in  std_logic;
         reset_n   : in  std_logic;
@@ -16,6 +16,7 @@ entity escape_jsa is
         -- below: the stub must track every port the core's port map names).
         pause     : in  std_logic := '0';
         snd_res   : in  std_logic := '0';
+        board2    : in  std_logic := '0';
         rom_addr  : out std_logic_vector(23 downto 0);
         rom_data  : in  std_logic_vector(31 downto 0);
         rom_req   : out std_logic;

@@ -20,6 +20,9 @@ entity escape_decode is
     port (
         addr            : in  std_logic_vector(23 downto 0); -- 68000 byte address
         as_n            : in  std_logic := '0';              -- address strobe (0 = valid)
+        -- GAMESEL-167: runtime map select (MiSTer, one rbf for all games);
+        -- ORed with the generic so a compile-time build needs no wiring.
+        vmap            : in  std_logic := '0';
 
         sel_rom         : out std_logic; -- 000000-05FFFF, 060000-07FFFF (shared), 080000-09FFFF
         sel_eeprom      : out std_logic; -- 0E0000-0E2FFF
@@ -46,7 +49,7 @@ begin
     a  <= unsigned(addr);
     en <= not as_n;
 
-    process (a, en)
+    process (a, en, vmap)
     begin
         sel_rom         <= '0';
         sel_eeprom      <= '0';
@@ -75,7 +78,7 @@ begin
             elsif a >= x"2E0000" and a <= x"2E0001"       then sel_watchdog    <= '1';
             elsif a >= x"360000" and a <= x"36003F"       then sel_vidctrl     <= '1';
             elsif a >= x"3E0000" and a <= x"3E0FFF"       then sel_colorram    <= '1';
-            elsif VIDEO_MAP = 0 then
+            elsif VIDEO_MAP = 0 and vmap = '0' then
                 if    a >= x"3F0000" and a <= x"3F1FFF"   then sel_pfram       <= '1';
                 elsif a >= x"3F2000" and a <= x"3F3FFF"   then sel_moram       <= '1';
                 elsif a >= x"3F4000" and a <= x"3F4EFF"   then sel_alpharam    <= '1';

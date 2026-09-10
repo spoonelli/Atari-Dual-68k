@@ -25,13 +25,17 @@ entity escape_jsa is
         -- except 2800 reads / 2A00 writes go to the OKI instead of N/C / the
         -- TMS, POKEY space is not decoded, and WRIO D3:2 / MIX D0 / RDIO D4
         -- change meaning. docs/investigations/KLAX_GUTS.md section 2.
-        BOARD : integer := 1
+        BOARD : integer := 1;
+        -- GAMESEL-167: 1 = build BOTH boards and pick at runtime with board2
+        -- (MiSTer, one rbf for Escape / Klax / Guts). 0 = BOARD alone.
+        BOARD_RT : integer := 0
     );
     port (
         clk       : in  std_logic;                      -- 7.159091 MHz
         reset_n   : in  std_logic;
         pause      : in  std_logic := '0';   -- MISTER-155: freezes the whole board
         snd_res   : in  std_logic := '0';               -- pulse: 68k write 360020
+        board2    : in  std_logic := '0';               -- BOARD_RT=1: 1 = JSA-II behaviour
 
         -- external program ROM bus (combined-image byte offsets; escape_core protocol)
         rom_addr  : out std_logic_vector(23 downto 0);
@@ -239,6 +243,7 @@ architecture rtl of escape_jsa is
     signal oki_cv    : std_logic := '0';
     signal oki_miss  : std_logic;
     signal rf_oki    : std_logic := '0';   -- the in-flight request belongs to the OKI
+    signal is2       : std_logic;          -- JSA-II behaviour selected (generic or runtime)
 
     -- mixer: YM gain = round(0.60*256*v/7), v = mix_reg(3:1)
     type gain_t is array (0 to 7) of unsigned(7 downto 0);
@@ -341,8 +346,9 @@ begin
                 pref_word(7 downto 0);
 
     -- JSA2-164: the OKI's 4-byte group is a miss when its tag differs
-    oki_ok   <= '1' when BOARD = 2 and oki_cv = '1' and oki_tag = oki_addr(17 downto 2) else '0';
-    oki_miss <= '1' when BOARD = 2 and oki_rst = '0' and oki_ok = '0' else '0';
+    is2 <= '1' when BOARD = 2 else board2 when BOARD_RT = 1 else '0';
+    oki_ok   <= '1' when is2 = '1' and oki_cv = '1' and oki_tag = oki_addr(17 downto 2) else '0';
+    oki_miss <= '1' when is2 = '1' and oki_rst = '0' and oki_ok = '0' else '0';
     oki_rdata <= oki_cache(31 downto 24) when oki_addr(1 downto 0) = "00" else
                  oki_cache(23 downto 16) when oki_addr(1 downto 0) = "01" else
                  oki_cache(15 downto 8)  when oki_addr(1 downto 0) = "10" else
@@ -519,7 +525,7 @@ begin
             -- idle 0, held coin reads 1)
             & coin2 & coin1;
 
-    rdio_d4 <= (not tms_rdy_n) when BOARD = 1 else '0';
+    rdio_d4 <= (not tms_rdy_n) when is2 = '0' else '0';
 
     ---------------------------------------------------------------- YM2151 (jt51)
     ym_cs_n <= not sel_ym;
@@ -563,7 +569,7 @@ begin
               cmd_latch  when sel_r28 = '1' and a16(2 downto 1) = "01" else
               rdio       when sel_r28 = '1' and a16(2 downto 1) = "10" else
               x"00"      when sel_r28 = '1' and a16(2 downto 1) = "11" else
-              oki_dout   when sel_r28 = '1' and a16(2 downto 1) = "00" and BOARD = 2 else  -- /RDV
+              oki_dout   when sel_r28 = '1' and a16(2 downto 1) = "00" and is2 = '1' else  -- /RDV
               x"FF"      when sel_r28 = '1' else
               x"FF"      when sel_pokey = '1' else   -- POKEY absent on Escape
               rom_byte   when sel_rom = '1' else
@@ -631,8 +637,9 @@ begin
     -- both LS273 bits clear at POR, so the chip is held in reset until the
     -- firmware's first WRIO write, like the YM. 2A00 write = command byte
     -- (/WRV), 2800 read = status (/RDV). MIX D0 = 1.0 / 0.5 volume.
-    oki_board : if BOARD = 2 generate
-        oki_rst <= (not reset_n) or (not cpu_res_n) or (not wrio_reg(2));
+    oki_board : if BOARD = 2 or BOARD_RT = 1 generate
+        -- held in reset (no ROM traffic, silence) whenever a JSA-I game runs
+        oki_rst <= (not reset_n) or (not cpu_res_n) or (not wrio_reg(2)) or (not is2);
         oki_ss  <= wrio_reg(3);
         oki_wrn <= '0' when oki_wrctr /= 0 else '1';
         oki_ctl : process(clk)
@@ -709,6 +716,7 @@ begin
             -- CT1 gating deliberately NOT applied yet (polarity unverified;
             -- ungated proves the speech engine - revisit after device test).
             tcoef := TMS_GAIN(to_integer(unsigned(mix_reg(7 downto 6))));
+            if is2 = '1' then tcoef := (others=>'0'); end if;   -- JSA-II game: TMS not fitted
             if uvol_tms = "000" then
                 tcoef := (others=>'0');
             else
@@ -716,7 +724,7 @@ begin
             end if;
             -- JSA-II: OKI route 0.75 (MAME) x MIX D0 (1.0 / 0.5) = 192 / 96,
             -- through the same user slider as the TMS on JSA-I
-            if BOARD = 2 then
+            if is2 = '1' then
                 if mix_reg(0) = '1' then ocoef := to_unsigned(192, 8); else ocoef := to_unsigned(96, 8); end if;
                 if uvol_tms = "000" then
                     ocoef := (others=>'0');
