@@ -91,3 +91,14 @@ does **not** fail `tb_escape_jsa` or `tb_prio`; it fails the first bench that
 instantiates the core. After editing `escape_core.vhd` (or anything it
 instantiates), run `tb_escape_core` before committing — JSA2-164 shipped a
 missing generic to the branch for an hour because only the JSA bench was run.
+
+**`tb_escape_jshad`'s coin-report line is informational.** Its stated
+purpose is the 6502's boot announcement (0xFF) arriving through the jshad
+serve FSM, and that is what passes it. The held-coin report it also tries to
+observe never lands inside the 24 ms window because the 68k has not consumed
+the announcement yet (latch full) — verified identical on the tree before
+GAMESEL-167 (2026-09-10 A/B), so the bench reports it and does not fail on
+it. Since GAMESEL-167 the bench also counts SDRAM requests to the OKI ADPCM
+slot and fails a JSA-II game that shows none (or a JSA-I game that shows any):
+`GARGS='-gG_GAME=1 -gG_JSART=1' ./sim/run_tb.sh tb_escape_jshad 30ms` with the
+Klax image hex in place.

@@ -189,6 +189,36 @@ a scratch folder that gives `klaxp2` its shared chips — `klaxp1` and
   main program** to its reset PC, and with `G_VMAP=1` added the **Guts main
   program** too.
 
+## 4b. One rbf, three games: the runtime selector (GAMESEL-167)
+
+MiSTer ships one `Escape` rbf serving all three games, MRA-selected, the
+way other family cores do (top-level MRA per game, clones under
+`_alternatives/_<Game>/`, a config byte in `<rom index="1">`). The Pocket
+ships one core per game. Both come from the same RTL through one selector:
+
+- `escape_core` port `game_sel` (00 Escape either set, 01 Klax prototype,
+  10 Guts). It holds the second CPU in reset for the single-CPU games,
+  drives the decoder's runtime `vmap` (ORed with the `VIDEO_MAP` generic),
+  switches the sound board to JSA-II behaviour, gates the joystick nibble
+  (Klax only — Escape and Guts leave D15:12 open) and makes the ADC read
+  FF for Klax (no ADC0809 fitted, MAME `adc_r`).
+- `escape_jsa` generic `BOARD_RT=1` builds both the TMS5220 and the OKI and
+  follows the `board2` port; the unselected device is held in reset and
+  muted. `BOARD_RT=0` (Pocket) builds only `BOARD`.
+- On the Pocket the wrapper ties `game_sel` to a constant beside
+  `EXTRA_EN` / `JSA_BOARD` / `VIDEO_MAP`, so synthesis prunes the rest and
+  the Escape build is unchanged.
+- **OKI ADPCM reads** cannot come from the 64 KB `jshad` BRAM that serves the
+  6502 program; requests to image `0x24xxxx` are routed to the core's SDRAM
+  arbiter as a new lowest-priority owner (`OWN_J`), a few kB/s and
+  latency-tolerant behind the two CPUs.
+- MiSTer loader: the planar→chunky repack now covers exactly the two
+  graphics slots (`0x120000–0x21FFFF`, `0x280000–0x37FFFF`); the ADPCM slot
+  is written raw. `Arcade-Escape.sv` latches the index-1 byte into
+  `game_sel` (absent in old Escape MRAs → 00).
+- MRAs: `Klax (prototype set 1).mra`, `Klax (prototype set 2).mra` (byte
+  01, `zip="klaxpN.zip|klax.zip"`), `Guts n' Glory (prototype).mra` (byte 02).
+
 ## 5. Order of work and what can be proven without ROMs
 
 1. `jt6295` submodule + iverilog smoke bench — **done 2026-09-09** (see

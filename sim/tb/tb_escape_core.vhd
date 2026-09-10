@@ -24,11 +24,14 @@ entity tb_escape_core is
         G_US    : integer := 60;
         G_EXTRA : integer := 1;       -- KLAX-165: 0 = single-CPU build under test
         G_JSA   : integer := 1;       -- JSA2-164: 2 = JSA-II board
-        G_VMAP  : integer := 0        -- GUTS-166: 1 = FFxxxx video map
+        G_VMAP  : integer := 0;       -- GUTS-166: 1 = FFxxxx video map
+        G_GAME  : integer := 0;       -- GAMESEL-167: runtime game_sel (0 Escape, 1 Klax, 2 Guts)
+        G_JSART : integer := 0        -- GAMESEL-167: 1 = both sound boards built, runtime pick
     );
 end tb_escape_core;
 
 architecture tb of tb_escape_core is
+    signal oki_reqs : integer := 0;
     signal clk    : std_logic := '0';
     signal resetn : std_logic := '0';
     signal done   : boolean := false;
@@ -54,11 +57,12 @@ begin
     rom_addr2w <= rom_addr(21 downto 2) & '1';
 
     uut : entity work.escape_core
-        generic map ( YM_ENABLE => 0, SHAD_EN => 0, EXTRA_EN => G_EXTRA, JSA_BOARD => G_JSA, VIDEO_MAP => G_VMAP )   -- GHDL: no jt51; shadows unfilled
+        generic map ( YM_ENABLE => 0, SHAD_EN => 0, EXTRA_EN => G_EXTRA, JSA_BOARD => G_JSA, VIDEO_MAP => G_VMAP, JSA_RT => G_JSART )   -- GHDL: no jt51; shadows unfilled
         port map ( clk=>clk, reset_n=>resetn,
                    rom_addr=>rom_addr, rom_data=>rom_data, rom_par=>rom_par, rom_req=>rom_req, rom_ack=>rom_ack,
                    vblank_in=>vblank,
                    p1_buttons=>"0000", p2_buttons=>"0000",
+                   game_sel=>std_logic_vector(to_unsigned(G_GAME, 2)),
                    alpha_vaddr=>alpha_vaddr, alpha_vdata=>alpha_vdata,
                    dbg_v_pc_fetch=>dbg_v, dbg_e_running=>dbg_e );
 
@@ -159,12 +163,25 @@ begin
         end if;
     end process;
 
+    -- GAMESEL-167: count SDRAM requests the core issues for the OKI ADPCM slot
+    oki_cnt : process(clk)
+        variable prev : std_logic := '0';
+    begin
+        if rising_edge(clk) then
+            if rom_req = '1' and prev = '0' and rom_addr(23 downto 18) = "001001" then
+                oki_reqs <= oki_reqs + 1;
+            end if;
+            prev := rom_req;
+        end if;
+    end process;
+
     check : process
     begin
         wait for G_US * 1 us;
         report "=== escape_core (synthesizable) ===";
         report "  video CPU fetched reset PC: " & std_logic'image(dbg_v);
         report "  extra CPU released (360010 D0): " & std_logic'image(dbg_e);
+        report "  OKI ADPCM slot SDRAM requests:  " & integer'image(oki_reqs);
         if dbg_v = '1' then
             report "ESCAPE-CORE OK: hardware design boots the real program in sim" severity note;
         else
