@@ -424,6 +424,15 @@ is closed.
   ThunderJaws feasibility read (`investigations/THUNDERJAWS.md`): same CPU
   pair and JSA-II, different video chip — a separate core from shared
   blocks, if ever.
+- **KLAX-165 / GUTS-166 / GAMESEL-167** (2026-09-09 → 10): the romsets
+  arrived and MAME verified them; single-CPU option and Klax sticks, the
+  Guts FFxxxx decoder map, and then the one selector that makes MiSTer a
+  one-rbf three-game core (MRA index-1 byte) while the Pocket builds one
+  core per game from constants. The OKI's samples had to leave the sound
+  board's BRAM path for the SDRAM arbiter. Every step ran the real Klax
+  and Guts programs under GHDL; the one slip — a runtime port declared but
+  never connected — was caught by a bench that counts ADPCM traffic, not
+  by inspection.
 
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)
