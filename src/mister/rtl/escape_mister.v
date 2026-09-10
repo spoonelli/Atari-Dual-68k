@@ -935,7 +935,9 @@ reg [2:0]  pfq_count = 3'd0;
 reg [1:0]  pfq_wr = 2'd0, pfq_rd = 2'd0;
 reg [1:0]  vg_done_last = 2'd0;
 
-// GUTS-168: Guts' playfield tiles live in their own 1 MB slot at 0x280000
+// GUTS-168: Guts video mode follows the MRA byte; Guts' playfield tiles live
+// in their own 1 MB slot at 0x280000 (declared here, before first use)
+wire        game_guts     = (game_sel == 2'b10);
 wire [23:0] pf_tile_base  = game_guts ? 24'h280000 : 24'h120000;
 wire [23:0] pf_fetch_addr = pf_tile_base + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
 
@@ -1124,7 +1126,6 @@ wire [1:0]  mo_prio;
 wire        mo_valid;
 wire        mo_stain_s, mo_stain_e;      // MOSTAIN-1 second-pass markers
 
-wire game_guts = (game_sel == 2'b10);       // GUTS-168: Guts video mode follows the MRA byte
 escape_mob umob (
     .guts     ( game_guts ),
     .clk       ( clk_sys ),
