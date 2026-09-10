@@ -74,6 +74,8 @@ module escape_mister (
     input  wire        ioctl_download,
     input  wire        ioctl_wr,
     input  wire [24:0] ioctl_addr,
+    // GAMESEL-167: 00 Escape, 01 Klax prototype, 10 Guts n' Glory (MRA index-1 byte)
+    input  wire [1:0]  game_sel,
     input  wire [7:0]  ioctl_dout,
     output wire        ioctl_wait,
 
@@ -281,7 +283,11 @@ wire [31:0] spr_word = { chunky2(iv0, iv1, iv2, iv3, 3'd0),
                          chunky2(iv0, iv1, iv2, iv3, 3'd4),
                          chunky2(iv0, iv1, iv2, iv3, 3'd6) };
 wire [31:0] raw_word = { dlb0, dlb1, dlb2, ioctl_dout };
-wire        in_spr   = (ioctl_addr >= SPR_BASE);
+// GAMESEL-167: only the planar graphics regions are repacked - the sprite/tile
+// slot at 0x120000 (1 MB) and Guts' own tile slot at 0x280000 (1 MB). The
+// JSA-II ADPCM slot at 0x240000 is written through raw.
+wire        in_spr   = (ioctl_addr >= SPR_BASE   && ioctl_addr < 25'h0220000) ||
+                       (ioctl_addr >= 25'h0280000 && ioctl_addr < 25'h0380000);
 
 always @(posedge clk_sdram) begin
     if (ioctl_wr && ioctl_download) begin
@@ -1383,7 +1389,8 @@ assign audio_l = pause ? 16'd0 : core_audio_l_w;
 assign audio_r = pause ? 16'd0 : core_audio_r_w;
 
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
-              .TASLOCK_EN(TASLOCK_EN), .VSHAD3_EN(1), .CPU_TYPE(1)) ecore (
+              .TASLOCK_EN(TASLOCK_EN), .VSHAD3_EN(1), .CPU_TYPE(1),
+              .JSA_RT(1)) ecore (                       // GAMESEL-167: both sound boards, runtime pick
     .clk        ( clk_sys ),
     .reset_n    ( core_reset_n ),
     .rom_addr   ( core_rom_addr ),
@@ -1407,6 +1414,9 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .vblank_in  ( vblank_w ),
     .p1_buttons ( p1_btn ),
     .p2_buttons ( p2_btn ),
+    .p1_joy     ( {p1_up, p1_down, p1_left, p1_right} ),   // GAMESEL-167: Klax digital sticks
+    .p2_joy     ( {p2_up, p2_down, p2_left, p2_right} ),
+    .game_sel   ( game_sel ),
     .adc_p1x    ( adc_p1x ),
     .adc_p1y    ( adc_p1y ),
     .adc_p2x    ( adc_p2x ),

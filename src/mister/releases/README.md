@@ -31,7 +31,7 @@ screens; high scores and operator settings persist.
 | Dual 68010s + shared RAM + mailbox handshake | ✅ genuinely concurrent on hardware |
 | SDRAM subsystem (open-row controller, bank-partitioned MO tile mirror, MO/CPU interleaved arbiter) | ✅ bench-gated; crowd performance measured at Pocket parity |
 | Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay |
-| Sound (JSA-I: 6502 + YM2151 + TMS5220 speech) | ✅ full pipeline; liveness watchdog self-heals a wedged sound CPU |
+| Sound (JSA-I: 6502 + YM2151 + TMS5220 speech; JSA-II: 6502 + YM2151 + OKI6295 for the prototypes) | ✅ full pipeline; liveness watchdog self-heals a wedged sound CPU; JSA-II bench-proven on the real Klax/Guts firmware, device verification pending |
 | Inputs (buttons, hall-stick model, keyboard) | ✅ incl. in-game calibration screens |
 | OSD (Video / Audio / Pause options / Debug pages; pause, rotate, CRT adjust) | ✅ build identity in the about line `ESCAPE v<date> by spoonelli` |
 | High scores / operator settings | ✅ persist across power cycles |
@@ -96,15 +96,28 @@ Both files are in [`releases/`](releases/) in this repository.
    the framework matches against either spelling. **Delete any older
    `escape*.rbf`, `Escape_*.rbf` or `Arcade-Escape*.rbf`**; the framework
    matches by prefix and picks the newest-looking name.
-2. Copy `Escape from the Planet of the Robot Monsters (set 1).mra` to
-   `_Arcade/`, replacing any earlier copy (older MRAs reference the old
-   rbf name). A `(set 2).mra` for MAME's `eprom2` clone (all-rev-1
-   program) is alongside it; it is implemented but has not yet been
-   verified on a MiSTer, so treat it as a test item.
-3. Put your own MAME `eprom.zip` romset in `games/mame/` (set 2 also wants
-   `eprom2.zip` next to it, as its parent supplies the shared chips). **No
-   ROM data is included** — the MRA assembles the game from your verified
-   dumps.
+2. Copy the MRAs you want to `_Arcade/`, replacing any earlier copy
+   (older MRAs reference the old rbf name). One rbf serves every game on
+   this board:
+   - `Escape from the Planet of the Robot Monsters (set 1).mra` — the game
+     this core was built for.
+   - `Escape ... (set 2).mra` — MAME's `eprom2` clone (all-rev-1 program).
+     Belongs under `_Arcade/_alternatives/_Escape from the Planet of the
+     Robot Monsters/` in the official layout.
+   - `Klax (prototype set 1).mra`, `Klax (prototype set 2).mra` — the two
+     Klax prototypes, which ran on this board with a JSA-II sound board
+     (MAME `klaxp1`/`klaxp2`, clones of `klax`; official layout
+     `_alternatives/_Klax/`).
+   - `Guts n' Glory (prototype).mra` — Atari's unreleased Guts n' Glory
+     (MAME `guts`), same board, JSA-II, its own video map.
+   The prototypes are **test items** until they have been verified on a
+   MiSTer; the MRA tells the core which game it is loading (a one-byte
+   index-1 block), so old Escape MRAs keep working unchanged.
+3. Put your own MAME romsets in `games/mame/`: `eprom.zip` (set 2 also
+   wants `eprom2.zip` beside it), `klaxp1.zip` / `klaxp2.zip` with
+   `klax.zip` beside them (the parent supplies the shared chips), or
+   `guts.zip`. **No ROM data is included** — each MRA assembles its game
+   from your verified dumps.
 4. Launch the game from the Arcade menu.
 
 ## Self-Test and First boot

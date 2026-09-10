@@ -272,10 +272,17 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.ps2_key(ps2_key)
 );
 
-// Only ROM index 0 feeds the loader.  The machine has no DIP switches (the
-// cabinet is configured through its 93C46 EEPROM), so there is no index-1
-// config blob the way the Atari System 1 core carries its slapstic type.
+// ROM index 0 feeds the loader.  The machine has no DIP switches (the cabinet
+// is configured through its EEPROM); the only configuration an MRA carries is
+// GAMESEL-167's index-1 byte saying which game the image is: 00 Escape (set 1
+// or 2), 01 Klax prototype, 10 Guts n' Glory.  Absent (old Escape MRAs) it
+// stays 00.
 wire rom_wr = ioctl_wr && ioctl_download && (ioctl_index == 16'd0);
+reg  [1:0] game_sel = 2'b00;
+always @(posedge clk_sys) begin
+	if (ioctl_wr && ioctl_download && ioctl_index == 16'd1 && ioctl_addr == 27'd0)
+		game_sel <= ioctl_dout[1:0];
+end
 
 /////////////////////////   KEYBOARD   ///////////////////////////
 reg kb_up1, kb_dn1, kb_lf1, kb_rt1, kb_jump1, kb_fire1, kb_duck1, kb_bomb1;
@@ -337,6 +344,7 @@ escape_mister machine
 	.ioctl_addr     (ioctl_addr[24:0]),
 	.ioctl_dout     (ioctl_dout),
 	.ioctl_wait     (ioctl_wait),
+	.game_sel       (game_sel),
 
 	.SDRAM_A        (SDRAM_A),
 	.SDRAM_BA       (SDRAM_BA),
