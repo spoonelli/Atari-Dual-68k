@@ -56,6 +56,8 @@ def main():
     ap.add_argument('--work', default=os.path.join(REPO, 'sim', 'work'))
     ap.add_argument('--mo', default=os.path.join(REPO, 'sim', 'build',
                                                  'mob_pixels.txt'))
+    ap.add_argument('--rom', default=None, help='combined image (default sim/work/atari_escape.rom)')
+    ap.add_argument('--guts', action='store_true', help='GUTS-168: score against the Guts MO model')
     a = ap.parse_args()
 
     if not os.path.exists(a.mo):
@@ -64,10 +66,14 @@ def main():
 
     moram = words(os.path.join(a.work, 'game_mo.hex'), 4096)
     cfg = words(os.path.join(a.work, 'game_cfg.hex'), 128)
-    with open(os.path.join(a.work, 'atari_escape.rom'), 'rb') as fh:
+    with open(a.rom or os.path.join(a.work, 'atari_escape.rom'), 'rb') as fh:
         rom = fh.read()
-    bm = mame_mo_model.draw(moram, cfg[0x40:0x80], rom,
-                            a.xscroll, a.yscroll, W, H)
+    if a.guts:
+        import guts_render
+        bm = guts_render.guts_mo_draw(moram, cfg[0x40:0x80], rom, a.xscroll, a.yscroll)
+    else:
+        bm = mame_mo_model.draw(moram, cfg[0x40:0x80], rom,
+                                a.xscroll, a.yscroll, W, H)
     # MOSTAIN-2: split the reference the way the engine reports it. A sprite
     # whose MO priority has bit 2 set is "special": atarimo puts it in the
     # bitmap, but screen_update_eprom `continue`s on it in the merge loop, so

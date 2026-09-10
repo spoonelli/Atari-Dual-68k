@@ -935,7 +935,9 @@ reg [2:0]  pfq_count = 3'd0;
 reg [1:0]  pfq_wr = 2'd0, pfq_rd = 2'd0;
 reg [1:0]  vg_done_last = 2'd0;
 
-wire [23:0] pf_fetch_addr = 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
+// GUTS-168: Guts' playfield tiles live in their own 1 MB slot at 0x280000
+wire [23:0] pf_tile_base  = game_guts ? 24'h280000 : 24'h120000;
+wire [23:0] pf_fetch_addr = pf_tile_base + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0};
 
 always @(posedge clk_sys) begin
     case (vis_x[2:0])
@@ -1122,7 +1124,9 @@ wire [1:0]  mo_prio;
 wire        mo_valid;
 wire        mo_stain_s, mo_stain_e;      // MOSTAIN-1 second-pass markers
 
+wire game_guts = (game_sel == 2'b10);       // GUTS-168: Guts video mode follows the MRA byte
 escape_mob umob (
+    .guts     ( game_guts ),
     .clk       ( clk_sys ),
     .reset_n   ( core_reset_n ),
     .x_count   ( x_count ),
@@ -1198,6 +1202,7 @@ wire        alpha_vis  = (pix != 2'b00) || act_opaque;
 wire        pr_mo_win, pr_shade, pr_m7, pr_pfm, pr_forcemc0;
 wire [10:0] pr_pen;
 escape_prio uprio (
+    .guts     ( game_guts ),
     .mo_valid ( mo_valid ),
     .mo_prio  ( mo_prio ),
     .mo_color ( mo_pen[7:4] ),

@@ -424,6 +424,22 @@ is closed.
   ThunderJaws feasibility read (`investigations/THUNDERJAWS.md`): same CPU
   pair and JSA-II, different video chip — a separate core from shared
   blocks, if ever.
+- **KLAX-165 / GUTS-166 / GAMESEL-167** (2026-09-09 → 10): the romsets
+  arrived and MAME verified them; single-CPU option and Klax sticks, the
+  Guts FFxxxx decoder map, and then the one selector that makes MiSTer a
+  one-rbf three-game core (MRA index-1 byte) while the Pocket builds one
+  core per game from constants. The OKI's samples had to leave the sound
+  board's BRAM path for the SDRAM arbiter. Every step ran the real Klax
+  and Guts programs under GHDL; the one slip — a runtime port declared but
+  never connected — was caught by a bench that counts ADPCM traffic, not
+  by inspection.
+- **GUTS-168** (2026-09-10): the Guts video reading was proven before it
+  was built — twelve MAME frames rendered offline, six pixel-exact, each
+  alternative reading losing somewhere — and only then transcribed into
+  `escape_mob` / `escape_prio` behind a `guts` input, with the Escape path
+  shown byte-identical and the Guts comparator swept exhaustively. The
+  Combat Assignment menu's highlighted panel turned out to be the same
+  stain mechanism as Escape's map.
 
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)

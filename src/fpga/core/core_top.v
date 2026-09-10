@@ -2540,7 +2540,12 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire        mo_stain_s = mo_stain_s_raw & ~m_mokill;
     wire        mo_stain_e = mo_stain_e_raw & ~m_mokill;
 
+// GUTS-168: the Escape Pocket build ties the Guts video mode off; the Guts
+// Pocket core will set it (and the 0x280000 playfield tile base) from its
+// build macro.
+wire game_guts = 1'b0;
 escape_mob umob (
+    .guts     ( game_guts ),
     .clk      ( clk_sys_7159 ),
     .reset_n  ( core_reset_n ),
     .x_count  ( x_count ),
@@ -2658,6 +2663,7 @@ escape_mob umob (
     wire        pr_mo_win, pr_shade, pr_m7, pr_pfm, pr_forcemc0;
     wire [10:0] pr_pen;
 escape_prio uprio (
+    .guts     ( game_guts ),
     .mo_valid ( mo_show ),
     .mo_prio  ( mo_prio ),
     .mo_color ( mo_pen[7:4] ),

@@ -24,6 +24,7 @@ module tb_prio;
     wire [10:0] pen;
 
 escape_prio dut (
+    .guts(1'b0),
     .mo_valid ( mo_valid ),
     .mo_prio  ( mo_prio ),
     .mo_color ( mo_color ),
@@ -38,6 +39,32 @@ escape_prio dut (
     .pen      ( pen )
 );
 
+    // GUTS-168: a second comparator in Guts mode, checked in-line against the
+    // rule transcribed from MAME screen_update_guts (the only reference):
+    //   MO wins iff mo_valid && (!PFX3 || mo_prio >= pf_color[2:1]);
+    //   pen = MO ? 0x100|colour<<4|pix : 0x200|colour<<4|pix; no SHADE, no
+    //   FORCEMC0, no M7, no PF/M.
+    wire       g_forcemc0, g_shade, g_m7, g_pfm, g_mo_win;
+    wire [10:0] g_pen;
+escape_prio dut_guts (
+    .guts(1'b1),
+    .mo_valid ( mo_valid ),
+    .mo_prio  ( mo_prio ),
+    .mo_color ( mo_color ),
+    .mo_pix   ( mo_pix ),
+    .pf_color ( pf_color ),
+    .pf_pix   ( pf_pix ),
+    .forcemc0 ( g_forcemc0 ),
+    .shade    ( g_shade ),
+    .m7       ( g_m7 ),
+    .pfm      ( g_pfm ),
+    .mo_win   ( g_mo_win ),
+    .pen      ( g_pen )
+);
+    wire        g_exp_win = mo_valid && (!pf_pix[3] || (mo_prio >= pf_color[2:1]));
+    wire [10:0] g_exp_pen = g_exp_win ? {3'b001, mo_color, mo_pix} : {2'b01, 1'b0, pf_color, pf_pix};
+    integer g_bad;
+
     integer fd;
     integer v, p, mc, mx, pc, px;
     integer rows;
@@ -47,7 +74,7 @@ escape_prio dut (
         // header documents the column order for the python checker
         $fwrite(fd, "# mo_valid mo_prio mo_color mo_pix pf_color pf_pix ");
         $fwrite(fd, "forcemc0 shade m7 pfm mo_win pen\n");
-        rows = 0;
+        rows = 0; g_bad = 0;
         for (v = 0; v <= 1; v = v + 1)
         for (p = 0; p < 4; p = p + 1)
         for (mc = 0; mc < 16; mc = mc + 1)
@@ -65,9 +92,18 @@ escape_prio dut (
                     mo_valid, mo_prio, mo_color, mo_pix, pf_color, pf_pix,
                     forcemc0, shade, m7, pfm, mo_win, pen);
             rows = rows + 1;
+            if (g_mo_win !== g_exp_win || g_pen !== g_exp_pen ||
+                g_forcemc0 !== 1'b0 || g_shade !== 1'b0 || g_m7 !== 1'b0 || g_pfm !== 1'b0) begin
+                if (g_bad < 10)
+                    $display("GUTS PRIO MISMATCH v=%0d mp=%0d mc=%0d mx=%0d pc=%0d px=%0d: win %0d exp %0d pen %03x exp %03x",
+                             mo_valid, mo_prio, mo_color, mo_pix, pf_color, pf_pix, g_mo_win, g_exp_win, g_pen, g_exp_pen);
+                g_bad = g_bad + 1;
+            end
         end
         $fclose(fd);
         $display("TB_PRIO DONE: %0d rows -> sim/build/prio_sweep.txt", rows);
+        if (g_bad == 0) $display("GUTS PRIO CHECK PASS: Guts-mode comparator matches screen_update_guts on all %0d rows", rows);
+        else            $display("GUTS PRIO CHECK FAIL: %0d mismatching rows", g_bad);
         $finish;
     end
 

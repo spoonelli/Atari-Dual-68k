@@ -140,6 +140,7 @@ module tb_stain;
     wire       disp_valid;
     wire       disp_stain_s, disp_stain_e;
     escape_mob dut (
+        .guts(1'b0),
         .clk      ( clk ),
         .reset_n  ( rstn ),
         .x_count  ( x_count ),
