@@ -1351,8 +1351,19 @@ sync2 s_sk (clk_sys, skip_test, skip_s);
 // the same split the Pocket uses via core_top's synch_3.
 sync2 s_v3 (clk_sys, vshad3_on, vshad3_s);
 
-wire [3:0] p1_btn = {p1_duck | p1_bomb, 1'b0, p1_fire | p1_bomb, p1_jump | p1_bomb};
-wire [3:0] p2_btn = {p2_duck | p2_bomb, 1'b0, p2_fire | p2_bomb, p2_jump | p2_bomb};
+// GAMESEL-167: the four physical buttons (MRA order 1..4 = the Escape names
+// jump/fire/duck/bomb) land on CD11..CD8 per game, from MAME eprom.cpp:
+//   Escape  D8 jump, D9 fire, D11 duck; Bomb presses all three (the combo)
+//   Klax    D8..D11 = Button 1..4 straight, no combo (klaxp ports)
+//   Guts    D9 = Button 1, D8 = Button 2, D11 = Button 3, D10 unused (guts ports)
+wire [3:0] p1_btn_esc = {p1_duck | p1_bomb, 1'b0, p1_fire | p1_bomb, p1_jump | p1_bomb};
+wire [3:0] p2_btn_esc = {p2_duck | p2_bomb, 1'b0, p2_fire | p2_bomb, p2_jump | p2_bomb};
+wire [3:0] p1_btn_klx = {p1_bomb, p1_duck, p1_fire, p1_jump};
+wire [3:0] p2_btn_klx = {p2_bomb, p2_duck, p2_fire, p2_jump};
+wire [3:0] p1_btn_gut = {p1_duck, 1'b0, p1_jump, p1_fire};
+wire [3:0] p2_btn_gut = {p2_duck, 1'b0, p2_jump, p2_fire};
+wire [3:0] p1_btn = (game_sel == 2'b01) ? p1_btn_klx : (game_sel == 2'b10) ? p1_btn_gut : p1_btn_esc;
+wire [3:0] p2_btn = (game_sel == 2'b01) ? p2_btn_klx : (game_sel == 2'b10) ? p2_btn_gut : p2_btn_esc;
 
 // ===========================================================================
 // the machine

@@ -140,6 +140,12 @@ or the unanswered ones stay unmapped. Note the framework treats your
 global User/Menu button as "Undefine" inside this flow: assigning a
 core button to it silently clears the slot instead.
 
+**Prototypes (test items):** Klax has an 8-way stick and four buttons
+mapped straight to the board's button bits (MAME names them Button 1..4;
+no combo); Guts n' Glory uses the analogue stick and three buttons in
+MAME's order. Neither prototype has a Start switch on the board - they
+start from a button. Coins go through the sound board as on Escape.
+
 ## OSD options
 
 - **Video page** — aspect ratio, **Rotate** (No / CCW / CW) and

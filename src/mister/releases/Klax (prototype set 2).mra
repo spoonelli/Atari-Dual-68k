@@ -11,10 +11,11 @@
 	<mameinfo parent="klax" cpp="eprom" input="klaxp"/>
 	<display type="raster" rotate="0"/>
 	<!-- GAMESEL-167: index-1 byte 01 = Klax prototype (single 68000, JSA-II).
-	     Klax's controls: 8-way stick + two buttons per player (MAME maps four;
-	     the prototype uses Flip and Fast-drop). Pause on the left shoulder as
-	     on the Escape MRA. -->
-	<buttons names="Flip,Drop,Button 3,Button 4,Start,Coin,Pause" default="A,B,X,Y,Start,Select,L"/>
+	     Controls: 8-way stick + four buttons per player straight onto D8..D11
+	     (MAME klaxp names them Button 1..4; no Escape-style combo). Start and
+	     coin are not on this board's switch port - the prototype starts from
+	     a button; Pause on the left shoulder as on the Escape MRA. -->
+	<buttons names="Button 1,Button 2,Button 3,Button 4,Start,Coin,Pause" default="A,B,X,Y,Start,Select,L"/>
 
 	<!--
 	  ROM STREAM LAYOUT (Klax prototype on Escape hardware, KLAX_GUTS.md)

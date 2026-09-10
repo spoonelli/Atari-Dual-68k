@@ -12,7 +12,8 @@
 	<display type="raster" rotate="0"/>
 	<!-- GAMESEL-167: index-1 byte 10 = Guts n' Glory (single 68000, JSA-II,
 	     FFxxxx video map, own tile ROM region). Controls: analogue stick +
-	     three buttons per player (button 1 = D9, button 2 = D8, button 3 = D11). -->
+	     three buttons per player; the core places them on D9 / D8 / D11 as
+	     MAME's guts ports read them, so the names here are in MAME's order. -->
 	<buttons names="Button 1,Button 2,Button 3,Start,Coin,Pause" default="B,A,X,Start,Select,L"/>
 
 	<!--
