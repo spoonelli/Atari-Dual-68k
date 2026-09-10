@@ -189,6 +189,45 @@ a scratch folder that gives `klaxp2` its shared chips — `klaxp1` and
   main program** to its reset PC, and with `G_VMAP=1` added the **Guts main
   program** too.
 
+## 4c. Guts video reading proven offline, pixel-exact (2026-09-10)
+
+Before any RTL for §4's MO/priority items, the reading was checked on real
+frames: `sim/tools/mame_scene_dump.lua` (MAP=guts, twelve attract frames
+2400…5700, RAM grabbed in the same `frame_done` as the snapshot —
+`video:snapshot()` re-renders from current RAM, so the previous-frame
+buffer that Escape's `scenedump2.lua` needed pairs *worse* here, 94 % vs
+99 %) and `sim/tools/guts_render.py`, a transcription of
+`screen_update_guts` + `s_guts_mob_config` on top of the Escape tooling's
+playfield/alpha/palette decode and `apply_stain`. `sim/tools/guts_sweep.py`
+scores it against four alternatives per frame:
+
+| frame | documented | reverse order | Escape MO format | pf priority bits 5:4 | MO always on top |
+|---|---|---|---|---|---|
+| 2400 | 99.40 | 99.20 | 99.35 | 99.23 | 99.40 |
+| 2700 | 99.84 | 99.61 | 99.84 | 99.76 | 99.84 |
+| 3000 | 99.90 | 99.72 | **99.40** | 99.89 | 99.90 |
+| 3300 | 99.99 | 99.93 | **99.68** | 99.94 | 99.99 |
+| 3600 | **100.00** | 99.80 | 100.00 | 99.95 | 100.00 |
+| 3900 | **100.00** | 99.85 | 100.00 | 99.97 | 100.00 |
+| 4200 | **100.00** | 100.00 | 100.00 | 92.57* | **92.11** |
+| 4500 | **100.00** | 100.00 | 100.00 | 92.57* | **92.11** |
+| 4800 | 99.94 | 99.94 | 99.87 | 99.94 | 99.91 |
+| 5100 | **100.00** | 100.00 | 100.00 | 100.00 | 99.96 |
+| 5400 | 99.95 | 99.95 | 99.95 | 99.95 | **99.47** |
+| 5700 | **100.00** | 100.00 | 100.00 | 100.00 | 99.92 |
+
+(\* that control runs without the stain pass, so its menu-frame numbers are
+confounded; it still loses on 3600/3900.) Six frames are pixel-exact; the
+sub-1 % residue on the others sits under moving sprites (MAME's partial
+updates within the frame). Every alternative loses somewhere the
+documented reading does not: forward render order (2400–3900), hflip in
+w1[15] with a 4-bit height (3000, 3300), the comparator's priority bits
+(3600, 3900) and the comparator itself (4200–5700). Frames 4200/4500 are
+the Combat Assignment menu: the highlighted panel is **the stain** from two
+MPR2 objects — the same `apply_stain` as Escape's map, so `escape_stain.v`
+serves Guts unchanged. Fixtures: `sim/work/scenes/` (gitignored), results
+in `sweep_results.txt` beside them.
+
 ## 4b. One rbf, three games: the runtime selector (GAMESEL-167)
 
 MiSTer ships one `Escape` rbf serving all three games, MRA-selected, the
