@@ -143,6 +143,30 @@ field):
 The official distribution is now the auto-update route; the custom db is
 retired.
 
+## MiSTer — family layout for the prototypes (from 0.2)
+
+One `Escape_YYYYMMDD.rbf` serves every game on this board; the MRA tells
+the core which one through a one-byte `<rom index="1">` block (GAMESEL-167:
+00 Escape, 01 Klax prototype, 02 Guts n' Glory — absent in older Escape
+MRAs, which therefore keep working). The MRAs follow the MiSTer-devel
+convention other family cores use (jotego's `jtriders`/`jtsimson` trees are
+the model): one top-level MRA per distinct game, clones and regional sets
+under `_alternatives/_<Game>/`, folder named after the parent game.
+
+| MRA | MAME set | Where in `releases/` |
+|---|---|---|
+| `Escape from the Planet of the Robot Monsters (set 1).mra` | `eprom` (parent) | top level |
+| `Escape from the Planet of the Robot Monsters (set 2).mra` | `eprom2` (clone) | `_alternatives/_Escape from the Planet of the Robot Monsters/` |
+| `Guts n' Glory (prototype).mra` | `guts` (parent) | top level |
+| `Klax (prototype set 1).mra`, `Klax (prototype set 2).mra` | `klaxp1`/`klaxp2` (clones of `klax`) | `_alternatives/_Klax/` |
+
+The Klax prototypes are the one wrinkle: MAME files them under production
+Klax, whose parent is served by RetroShrimp's `Arcade-Klax_MiSTer` core with
+its own `_Klax` alternatives folder in the official distribution. Every MRA
+names its own rbf, so the two cores' MRAs can share that folder; the pull
+request that adds ours should say so explicitly and copy the Klax core's
+author, whose README excludes the prototypes as "different hardware".
+
 ## Division of labour
 
 | Concern | Pocket | MiSTer |
