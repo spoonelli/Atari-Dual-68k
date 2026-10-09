@@ -15,7 +15,11 @@ module escape_core #(
     parameter FASTPATH_EN=1,
     parameter EIRQ_MODE=2,
     parameter TASLOCK_EN=1,
-    parameter CPU_TYPE=1
+    parameter CPU_TYPE=1,
+    parameter JSA_BOARD=1,
+    parameter EXTRA_EN=1,
+    parameter VIDEO_MAP=0,
+    parameter JSA_RT=0
 ) (
     input wire clk,
     input wire reset_n,
@@ -45,6 +49,9 @@ module escape_core #(
     input wire vblank_in,
     input wire [3:0] p1_buttons,
     input wire [3:0] p2_buttons,
+    input wire [3:0] p1_joy,
+    input wire [3:0] p2_joy,
+    input wire [1:0] game_sel,
     input wire [7:0] adc_p1x,
     input wire [7:0] adc_p1y,
     input wire [7:0] adc_p2x,
