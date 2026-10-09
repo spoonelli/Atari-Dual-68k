@@ -173,10 +173,11 @@ jobs:
         run: |
           mkdir -p mister-release
           # MiSTer naming convention: CoreName_YYYYMMDD.rbf. The .mra's
-          # <rbf>escape</rbf> matches escape_*.rbf by prefix, so the dated
+          # <rbf>Escape</rbf> matches Escape_*.rbf by prefix (Main compares
+          # case-insensitively; MiSTer-devel's official tag is Escape), so the dated
           # name needs no manifest change.
           cp src/mister/output_files/Arcade-Escape.rbf \
-             "mister-release/escape_$(date -u +%Y%m%d).rbf"
+             "mister-release/Escape_$(date -u +%Y%m%d).rbf"
           cp src/mister/releases/*.mra mister-release/
           # user-facing install README; docs/MISTER.md stays the engineering record
           cp src/mister/releases/README.md mister-release/README.md

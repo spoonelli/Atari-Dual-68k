@@ -6,7 +6,7 @@
 	<manufacturer>Atari Games</manufacturer>
 	<rotation>horizontal</rotation>
 	<category>Arcade</category>
-	<rbf>escape</rbf>
+	<rbf>Escape</rbf>
 	<mameinfo parent="eprom" cpp="eprom" input="eprom"/>
 	<display type="raster" rotate="0"/>
 	<!-- On an MRA launch this element OVERRIDES the core's J1/jn lines, so

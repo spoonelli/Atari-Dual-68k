@@ -7,7 +7,7 @@
 	<manufacturer>Atari Games</manufacturer>
 	<rotation>horizontal</rotation>
 	<category>Arcade</category>
-	<rbf>escape</rbf>
+	<rbf>Escape</rbf>
 	<mameinfo parent="guts" cpp="eprom" input="guts"/>
 	<display type="raster" rotate="0"/>
 	<!-- GAMESEL-167: index-1 byte 10 = Guts n' Glory (single 68000, JSA-II,
