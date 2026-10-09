@@ -313,6 +313,16 @@ ships one core per game. Both come from the same RTL through one selector:
    the Escape fixture's engine output is byte-identical to the committed
    tree, and `tb_prio` / `tb_stain` pass unchanged. Device verification
    pending (MiSTer 165).
+   **GUTS-169 (2026-10-09):** GUTS-168 left Escape's GAL 100V exception in
+   place in Guts mode — special (MPR2) pixels of pen 1 still drew, where
+   MAME's Guts rule (the one the offline proof matched) skips every special.
+   None of the twelve sampled Guts frames contains a pen-1 special (the
+   Combat Assignment panels use pens 2 and 4 only), so no fixture could
+   show it; `sim/tools/make_guts_pen1_special.py` builds a control that
+   does: 64 pixels drawn before the gate, 0 after. The Escape fixture output
+   is byte-identical, the frame-3600 Guts fixture still agrees with the
+   model on every logged pixel, `tb_prio` and `tb_stain` pass. In MiSTer
+   167, device verification pending.
 6. Device tests need the romsets. Until then the README keeps both games
    at "not supported".
 
