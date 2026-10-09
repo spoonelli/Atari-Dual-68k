@@ -63,9 +63,10 @@ module escape_prio (
     // reference for that prototype): MO drawn iff !PFX3 or mopriority >=
     // pfpriority with pfpriority = (pf >> 5) & 3 = pf_color[2:1]; no
     // FORCEMC0 / SHADE / M7 terms, no alternate colour-RAM bank. Proven
-    // pixel-exact offline on twelve MAME frames (KLAX_GUTS.md 4c). MPR2
-    // objects are skipped upstream exactly as for Escape and the stain pass
-    // is the same escape_stain.v.
+    // pixel-exact offline on twelve MAME frames (KLAX_GUTS.md 4c). In Guts
+    // mode escape_mob.v holds back EVERY MPR2 pixel (GUTS-169), including the
+    // pen-1 ones Escape's GAL 100V lets through, and the stain pass is the
+    // same escape_stain.v.
     input  wire       guts,
 
     // decoded ASIC signals (exported for the bench / debug)

@@ -223,10 +223,16 @@ module escape_mob (
     // its unreachable routes.  MAME's screen_update `continue`s on
     // mopriority & 4 BEFORE computing SHADE, so MAME never dims them and
     // this core inherited that; the owner's PCB capture dims them.
+    // GUTS-169: that write term is Escape's GAL. Guts n' Glory's only
+    // reference is MAME's screen_update_guts, which skips EVERY special
+    // object, and the offline proof (KLAX_GUTS.md 4c) matched MAME with that
+    // rule - so in Guts mode no special pixel reaches the comparator. Before
+    // this gate a pen-1 special drew as a solid sprite block in Guts mode
+    // (sim/tools/make_guts_pen1_special.py control: 64 px drawn, now 0).
     wire occ0 = (disp_q0[19:11] == {built_fp0, built_ly0}) && (disp_q0[3:0] != 4'd0);
     wire occ1 = (disp_q1[19:11] == {built_fp1, built_ly1}) && (disp_q1[3:0] != 4'd0);
-    wire hit0 = occ0 && (!disp_q0[10] || disp_q0[3:0] == 4'd1);
-    wire hit1 = occ1 && (!disp_q1[10] || disp_q1[3:0] == 4'd1);
+    wire hit0 = occ0 && (!disp_q0[10] || (!guts && disp_q0[3:0] == 4'd1));
+    wire hit1 = occ1 && (!disp_q1[10] || (!guts && disp_q1[3:0] == 4'd1));
     // MOPAIR-131: per-bank occupancy of the BUILD buffer, for first-write-wins
     // on each half of the pair independently.
     wire [19:0] bld_qe = build_sel ? disp_q1e : disp_q0e;
