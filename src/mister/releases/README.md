@@ -230,6 +230,6 @@ Quartus 17.0+ (CI uses Quartus Lite 18.1 in
 `theypsilon/quartus-lite-c5:18.1`): open `Arcade-Escape.qpf` and
 compile, or see `.github/workflows/build.yml`. All sources are vendored
 under `rtl/` — no submodules. Third-party provenance and licences:
-`NOTICE.md` (jt51 GPL-3.0, TG68K LGPL-3.0, T65 BSD-style, RTL base
+`NOTICE.md` (jt51 and jt6295 GPL-3.0, TG68K LGPL-3.0, T65 BSD-style, RTL base
 GPL-3.0; two files each of jt51/TG68K are vendored with documented
 modifications under `rtl/core/`).
