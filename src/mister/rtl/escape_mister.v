@@ -51,16 +51,14 @@
 //    download writer below (see the SPRITE REPACK block).  The Pocket does
 //    the same transform offline in support/build_rom.py.
 //
-// 6. EEPROM persistence (BUILD 103, rtl/ee_save.vhd) is NOT wired here.  That
-//    engine talks to the APF bridge and data slots directly, so it is Pocket
-//    -only; escape_core's ee_* ports all carry defaults and are left open.
-//    High scores and operator settings therefore do not survive a power cycle
-//    on MiSTer yet.  The MiSTer-native route is an <nvram index="4" size="512">
-//    element in the .mra plus the matching hps_io ioctl index-4 wiring.
-//    Because ee_save.vhd is not compiled here, its two "MLAB" ramstyle
-//    attributes - which exist only because the Pocket has zero spare M10K -
-//    cost this build nothing, so they are deliberately left alone rather than
-//    forked.
+// 6. EEPROM persistence (NVRAM-170).  The Pocket's ee_save.vhd talks to the
+//    APF bridge, so it is Pocket-only and not compiled here.  MiSTer uses the
+//    framework's own route: each MRA declares <nvram index="4" size="512"/>,
+//    and rtl/escape_hps_bridge.v (instantiated in Arcade-Escape.sv) loads the
+//    saved file into escape_core's EEPROM port B at launch and serves it back
+//    when Main saves - on opening the OSD after the game has written the
+//    EEPROM, or on "Save settings".  Before NVRAM-170 (builds up to 167) high
+//    scores did not survive a power cycle on MiSTer.
 //============================================================================
 `default_nettype none
 
@@ -74,10 +72,17 @@ module escape_mister (
     input  wire        ioctl_download,
     input  wire        ioctl_wr,
     input  wire [24:0] ioctl_addr,
-    // GAMESEL-167: 00 Escape, 01 Klax prototype, 10 Guts n' Glory (MRA index-1 byte)
+    // GAMESEL-167: 00 Escape, 01 Klax prototype, 10 Guts n' Glory (MRA index-1 byte),
+    // already in clk_sys (escape_hps_bridge, NVRAM-170)
     input  wire [1:0]  game_sel,
     input  wire [7:0]  ioctl_dout,
     output wire        ioctl_wait,
+    // NVRAM-170: EEPROM port B (clk_sys), driven by escape_hps_bridge
+    input  wire [8:0]  ee_saddr,
+    input  wire [7:0]  ee_sdin,
+    input  wire        ee_swe,
+    output wire [7:0]  ee_sq,
+    output wire        ee_wrpulse,
 
     // ---- SDRAM chip -------------------------------------------------------
     output wire [12:0] SDRAM_A,
@@ -1444,6 +1449,11 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .step_btn   ( start1_s ),
     .pause      ( pause ),
     .skip_test  ( skip_s ),
+    .ee_saddr   ( ee_saddr ),
+    .ee_sdin    ( ee_sdin ),
+    .ee_swe     ( ee_swe ),
+    .ee_sq      ( ee_sq ),
+    .ee_wrpulse ( ee_wrpulse ),
     .irq_strict ( 1'b0 ),
     .vshad3_on  ( vshad3_s ),
     .uvol_ym    ( uvol_ym ),

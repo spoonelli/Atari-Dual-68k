@@ -102,6 +102,13 @@ jobs:
       - name: SDRAM refresh interval vs JEDEC (tb_sdram_refresh)
         run: ./sim/run_sdram_refresh_tb.sh
 
+      # NVRAM-170. escape_hps_bridge carries the MRA game byte and the EEPROM
+      # load/save across clk_ram -> clk_sys. Proven able to fail: its control
+      # is the old clk_sys latch from builds 164-167, which must miss the
+      # 28 ns hps_io strobe at some of the five phases (it misses 8 of 10).
+      - name: Game select + EEPROM load/save bridge (tb_hps_bridge)
+        run: ./sim/run_hps_bridge_tb.sh
+
       - name: Compile Arcade-Escape
         run: |
           docker run --rm -v "$PWD":/work -w /work/src/mister \

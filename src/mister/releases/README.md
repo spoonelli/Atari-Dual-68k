@@ -18,7 +18,8 @@ handshake, as the board does (68000 selectable — the dedicated cabinet that se
 - All three video layers come through the schematic's paired line-buffer sprite engine.
 
 - The hall-effect stick model includes the game's own in-game calibration
-screens; high scores and operator settings persist.
+screens; high scores and operator settings are saved to the SD card
+(see [High scores and settings](#high-scores-and-settings)).
 
 - The machine RTL is identical to the Analogue Pocket release - plan to continue dual path development wherever feasible.  
 
@@ -34,7 +35,7 @@ screens; high scores and operator settings persist.
 | Sound (JSA-I: 6502 + YM2151 + TMS5220 speech; JSA-II: 6502 + YM2151 + OKI6295 for the prototypes) | ✅ full pipeline; liveness watchdog self-heals a wedged sound CPU; JSA-II bench-proven on the real Klax/Guts firmware, device verification pending |
 | Inputs (buttons, hall-stick model, keyboard) | ✅ incl. in-game calibration screens |
 | OSD (Video / Audio / Pause options / Debug pages; pause, rotate, CRT adjust) | ✅ build identity in the about line `ESCAPE v<date> by spoonelli` |
-| High scores / operator settings | ✅ persist across power cycles |
+| High scores / operator settings | ✅ saved per game to `config/nvram/` when the OSD opens — see below (new in 0.2; earlier MiSTer builds did not save) |
 
 ## Accuracy
 
@@ -145,6 +146,19 @@ mapped straight to the board's button bits (MAME names them Button 1..4;
 no combo); Guts n' Glory uses the analogue stick and three buttons in
 MAME's order. Neither prototype has a Start switch on the board - they
 start from a button. Coins go through the sound board as on Escape.
+
+## High scores and settings
+
+The board keeps high scores and operator settings in a 512-byte EEPROM.
+The core loads it from `config/nvram/<MRA name>.nvm` when a game starts,
+and MiSTer writes it back **when you open the OSD** after the game has
+changed it, or when you choose *Save settings*. Each MRA has its own file,
+so Escape, set 2, the Klax prototypes and Guts n' Glory never share scores.
+
+So after a new high score, open the OSD once (it can be closed straight
+away) before you switch the MiSTer off. A first launch with no file starts
+from a blank EEPROM, exactly like a new board: the game initialises its
+own defaults.
 
 ## OSD options
 

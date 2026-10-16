@@ -62,4 +62,9 @@
 	<rom index="1">
 		<part>01</part>
 	</rom>
+	<!-- NVRAM-170: the board's 2804 EEPROM (512 bytes: high scores, operator
+	     settings). Main loads the saved file after the ROMs and saves it when
+	     the OSD opens after the game has written the EEPROM, or on "Save
+	     settings". One file per MRA name. -->
+	<nvram index="4" size="512"/>
 </misterromdescription>
