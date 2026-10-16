@@ -309,3 +309,25 @@ Interact (**+**) menu. Saving on a clean core exit still happens.
   affect persistence, but it does mean a wild store into 0x0E0000-0E03FF can
   scribble on the EEPROM where real hardware would have ignored it - and now
   that scribble persists. Worth closing separately.
+
+## 8. MiSTer (NVRAM-170)
+
+This document describes the Pocket's save engine. `ee_save.vhd` talks to the
+APF bridge, so it is not part of the MiSTer build; MiSTer uses the
+framework's own NVRAM route instead (from milestone 0.2):
+
+- Each MRA declares `<nvram index="4" size="512"/>`. Main loads
+  `config/nvram/<MRA name>.nvm` after the ROMs and sends it as an index-4
+  download; with no file nothing is sent and the EEPROM starts erased (0xFF),
+  as on a fresh board.
+- `src/mister/rtl/escape_hps_bridge.v` writes each byte into the same port B
+  of `escape_core`'s EEPROM RAM the Pocket uses, through a clk_ram → clk_sys
+  handshake that holds the HPS off with `ioctl_wait`.
+- For saving, a scrubber copies port B into a 512-byte mirror on the hps_io
+  clock. `ee_wrpulse` raises `ioctl_upload_req`; Main saves when the OSD is
+  next opened, or on *Save settings*. A new high score followed by a
+  power-off without opening the OSD is therefore lost on MiSTer.
+- The file is the same 512-byte layout as the Pocket `.sav` (byte *i* =
+  EEPROM location *i*). One file per MRA, so the games never share scores.
+- Proof: `sim/tb/tb_hps_bridge.v` (`./sim/run_hps_bridge_tb.sh`, a MiSTer CI
+  gate). Device verification pending.
