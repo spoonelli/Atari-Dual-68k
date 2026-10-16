@@ -265,7 +265,7 @@ docs/ARCHITECTURE.md                     hardware map, roadmap, schematic findin
 docs/DEVIATIONS.md                       where this core is not the board, measured
 docs/ROMS.md, docs/POCKET_TEST.md        ROM building; on-device test guide
 third_party/                             Arcade-Atari-system1_MiSTer submodule (RTL base),
-                                         jt51 submodule, analogue-pocket-utils (vendored)
+                                         jt51 and jt6295 submodules, analogue-pocket-utils (vendored)
 ```
 
 ## Get it
@@ -417,7 +417,11 @@ Thanks: LMSS, DJS, LCS, TBPL, EG
   builds from the git submodule with licence and history intact; **two files are
   modified vendored copies** — `src/fpga/core/rtl/jt51v/jt51.v` and `jt51_acc.v`,
   carrying this project's per-channel user-gain change (MIX-100) — and the build
-  compiles those in place of the submodule's. Jotego's FPGA arcade
+  compiles those in place of the submodule's. Also for
+  [`jt6295`](https://github.com/jotego/jt6295), the OKI MSM6295 ADPCM core behind
+  the JSA-II sound board the Klax prototypes and Guts n' Glory use (GPL-3.0,
+  unmodified submodule; in the MiSTer rbf, not in the Escape Pocket bitstream).
+  Jotego's FPGA arcade
   work is foundational to this whole scene — support it at
   [Patreon](https://www.patreon.com/jotego).
 
@@ -440,6 +444,7 @@ downstream users keep the weaker terms on these files:
 |---|---|
 | [`MiSTer-devel/Arcade-Atari-system1_MiSTer`](https://github.com/MiSTer-devel/Arcade-Atari-system1_MiSTer) (RTL base) | GPL-3.0 |
 | [`jotego/jt51`](https://github.com/jotego/jt51) (submodule + 2 modified files) | GPL-3.0 |
+| [`jotego/jt6295`](https://github.com/jotego/jt6295) (submodule, unmodified) | GPL-3.0 |
 | **TG68K** (`rtl/tg68kv/`, plus 2 files from the submodule) | **LGPL-3.0**-or-later |
 | **T65** (`third_party/.../lib/T65/`) | **BSD-3**-style (OpenCores) |
 | **`psram.sv`** (`third_party/analogue-pocket-utils/`) | **MIT** |
