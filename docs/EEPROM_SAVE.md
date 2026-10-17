@@ -324,9 +324,14 @@ framework's own NVRAM route instead (from milestone 0.2):
   of `escape_core`'s EEPROM RAM the Pocket uses, through a clk_ram → clk_sys
   handshake that holds the HPS off with `ioctl_wait`.
 - For saving, a scrubber copies port B into a 512-byte mirror on the hps_io
-  clock. `ee_wrpulse` raises `ioctl_upload_req`; Main saves when the OSD is
-  next opened, or on *Save settings*. A new high score followed by a
-  power-off without opening the OSD is therefore lost on MiSTer.
+  clock, and `ee_wrpulse` marks the EEPROM dirty. Saving follows the
+  Arcade-Cave convention (NVRAM-171): the root-menu **Save NVRAM** saves now;
+  **Autosave NVRAM** (default Off) saves when the OSD opens, only if the game
+  changed the EEPROM since the last save; Main's *Save settings* also saves.
+  MiSTer never saves without the OSD, so a new high score followed by a
+  power-off without saving is lost. (NVRAM-170 raised the request on every
+  write; Escape rewrites a four-byte counter every 10-20 s, so "Saving..."
+  showed on nearly every menu change.)
 - The file is the same 512-byte layout as the Pocket `.sav` (byte *i* =
   EEPROM location *i*). One file per MRA, so the games never share scores.
 - Proof: `sim/tb/tb_hps_bridge.v` (`./sim/run_hps_bridge_tb.sh`, a MiSTer CI
