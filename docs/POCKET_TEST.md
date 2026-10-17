@@ -9,14 +9,18 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
 
 ## Install
 
-1. **Get the bitstream**: download the `bitstream` artifact from the latest
-   green [Actions run](https://github.com/spoonelli/Atari-Dual-68k/actions)
-   (or your fork's), unzip, then build the SD package (correct Analogue layout,
-   no ROM):
+1. **Get the package**: download `AtariDual68k-pocket-v<version>.zip` from the
+   [Releases page](https://github.com/spoonelli/Atari-Dual-68k/releases) and
+   merge its `Cores/ Platforms/ Assets/` onto the SD root. It carries no ROM
+   data; `build_rom.py` is at the top level of the zip.
+   *Testing a development build instead?* Download the `bitstream` artifact
+   from the latest green
+   [Actions run](https://github.com/spoonelli/Atari-Dual-68k/actions) (or your
+   fork's), unzip, then build the SD package (correct Analogue layout, no ROM)
+   and merge it the same way:
    ```bash
    ./support/package.sh path/to/bitstream/output/bitstream.rbf_r
    ```
-   and merge the resulting zip's `Cores/ Platforms/ Assets/` onto the SD root.
    > **Updating from a build older than EEPROM saves?** Copy the whole
    > `Cores/` folder across, not just `bitstream.rbf_r` — the save slot is
    > declared in `data.json`, and a bitstream-only update leaves the core
@@ -42,7 +46,7 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
      (see [`ROMS.md`](ROMS.md)). This project never distributes ROM data —
      and no platform artwork either; the shipped image is an original text
      placeholder you can replace on your SD.
-3. Insert SD, power on, open **Escape: Robot Monsters** from the Pocket menu. It asks
+3. Insert SD, power on, open **Esc Robot Monst** from the Pocket menu. It asks
    for the ROM (required slot) on launch.
 
 ## Controls
@@ -59,7 +63,7 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
 
 ### The Interact menu
 
-Pocket **+** button. Eleven entries:
+Pocket **+** button. Twelve entries:
 
 | Entry | |
 |---|---|
@@ -70,11 +74,13 @@ Pocket **+** button. Eleven entries:
 | Music Volume, Speech Volume | |
 | EEPROM Autosave | on by default; see below |
 | ROM Shadow 0x54000 | **leave on** — see [`RELEASE_NOTES.md`](RELEASE_NOTES.md) |
+| Developer HUD | off by default; gates the build stamp, the diagnostic HUD and its probes (build 114+) |
 
 > **The Pocket renders only the first 16 interact variables.** Anything past
 > index 16 is invisible on device — which is exactly how the ROM Shadow toggle
 > came to be unreachable while sitting at index 27 in a 28-entry menu. That cap
-> is the reason the menu was trimmed from 28 entries to these 11, and the reason
+> is the reason the menu was trimmed from 28 entries to 11 (Developer HUD, added
+> at build 114, makes 12), and the reason
 > development controls must not be added back to it. The RTL and its bridge
 > decodes are untouched; the controls are simply not exposed.
 
@@ -87,7 +93,7 @@ EEPROM and persist across power-offs, exactly as the cabinet did.
   second after the game finishes writing it, so a score survives an unclean
   power-off, not just a clean core exit. Turn it off and the save still happens
   when you exit the core normally.
-- With the debug overlay on (**L**), the 7th segment of the bottom strip is the
+- With **Developer HUD** ticked and the debug overlay up (**L1**), the 7th segment of the bottom strip is the
   save indicator: red = virgin EEPROM · teal = save file loaded · amber =
   unsaved change pending · blue = snapshot taken, Pocket has not confirmed ·
   green = written to SD · magenta = the Pocket refused the write.
@@ -99,20 +105,22 @@ The full test procedure, and what to do if scores do *not* persist, is in
 
 ## The build number, and the diagnostic HUD
 
-Every build shows a cyan **build number** in the bottom-right corner, on a
-clean screen and with the HUD up alike. Check it matches the zip you flashed —
+Every build shows a cyan **build number** in the bottom-right corner once
+**Developer HUD** is ticked in the core menu — with the HUD hidden and with it
+up alike (from build 115 the stamp follows that gate, so a player's screen
+carries no plate). Check it matches the zip you flashed —
 this is the only on-device guard against flashing the wrong file. It reads two
 hex digits (the low half of `BUILD_ID`); see "Build number" below.
 
-**The HUD is OFF by default and nothing else draws over the picture.** Press
-**L** to bring it up. It is a development tool, not a fault, and it is not
+**The HUD is OFF by default and nothing else draws over the picture.** Tick
+**Developer HUD** in the core menu, then press **L1** to bring it up. It is a development tool, not a fault, and it is not
 removed from release builds — the forensics pages are how problems get
 diagnosed from a photo.
 
 With the HUD up:
 
-- **L** toggles it back off
-- **R** cycles **7 HUD pages** (0-6), shown in the rightmost digit of the hex row:
+- **L1** toggles it back off
+- **R1** cycles **7 HUD pages** (0-6), shown in the rightmost digit of the hex row:
   - **0** — default: JSA/sound status, coin/credit counters, extra-CPU bus-cycle length
   - **1** — second-processor window: extra-68k PC (frame-latched) + last mailbox response
   - **2** — main-CPU window: video-CPU PC, last main write address, crash forensics
@@ -121,14 +129,16 @@ With the HUD up:
   - **5** — cadence page: video- and world-CPU logic frames per 256 video frames,
     plus video-CPU bus cycles/frame. `0100` hex = 1.0000 updates/frame;
     MAME's reference is `00FF`/`0100` (see [`PERF_CADENCE.md`](investigations/PERF_CADENCE.md))
-- **R (hold)** = hide motion objects · **L2 (hold)** = hide the alpha layer ·
+  - **6** — MO telemetry (MOTEL-129): line-end truncation count + worst 16-line
+    fetch latency, with the video-decodable frame counter
+- **R1 (hold)** = hide motion objects · **L2 (hold)** = hide the alpha layer ·
   **R2 (hold)** = video-fetch kill test (screen garbles while held — a probe,
   not a fault)
 
 The three hold-to-act probes above only respond **while the HUD is on**, so a
-player cannot blank the sprites or the screen by accident. `R` still advances
+player cannot blank the sprites or the screen by accident. `R1` still advances
 the page counter with the HUD hidden; the page it lands on is whatever appears
-when you next press **L**.
+when you next press **L1**.
 
 ### Build number
 
@@ -145,7 +155,7 @@ a photo of the HUD report the same number.
 
 ## Reporting problems
 
-Press **L** to bring up the HUD, then **R** to reach page 2 (main-CPU
+Tick **Developer HUD**, press **L1** to bring up the HUD, then **R1** to reach page 2 (main-CPU
 forensics) or page 1 (second-processor window). A photo or short video showing
 the on-screen build number plus one of those pages usually contains everything
 needed to diagnose an issue — the forensics pages latch crash addresses and

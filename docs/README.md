@@ -23,11 +23,11 @@ If you only read one file: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 | Doc | What it covers |
 |---|---|
 | [`RELEASE_NOTES.md`](RELEASE_NOTES.md) | **Start here.** What works, what is known-imperfect, what is not implemented. |
-| [`POCKET_TEST.md`](POCKET_TEST.md) | Installing and running on the Pocket; the diagnostic HUD and its 7 pages. |
+| [`POCKET_TEST.md`](POCKET_TEST.md) | Installing and running on the Pocket; the Developer HUD gate, the diagnostic HUD and its 7 pages. |
 | [`ROMS.md`](ROMS.md) | Building your own ROM image. No ROM data is distributed. |
 | [`CONTROLS.md`](CONTROLS.md) | Player controls, the hall-effect stick model, and the debug controls. |
 | [`EEPROM_SAVE.md`](EEPROM_SAVE.md) | How high scores persist, and what to do if they do not. |
-| [`DISTRIBUTION.md`](DISTRIBUTION.md) | Auto-update support: the Pocket cores inventory and the MiSTer custom database. |
+| [`DISTRIBUTION.md`](DISTRIBUTION.md) | Auto-update support: the Pocket cores inventory, the official MiSTer distribution (the interim custom database, retired 2026-09-03, kept as a record), and the MiSTer family layout for the 0.2 prototypes. |
 
 ### How it is built
 
@@ -37,7 +37,7 @@ If you only read one file: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 | [`DEVIATIONS.md`](DEVIATIONS.md) | **Where this core is not the board**, measured. §D is the open-gap list. |
 | [`ROMMAP.md`](ROMMAP.md) | Memory and ROM layout. |
 | [`CPU_AND_ARBITER.md`](CPU_AND_ARBITER.md) | CPU type, and the shared-RAM arbitration / TAS interlock. |
-| [`JSA.md`](JSA.md) | The JSA-I audio subsystem. |
+| [`JSA.md`](JSA.md) | The JSA-I audio subsystem (Escape), and the JSA-II mode with the OKI6295 (Klax, Guts — milestone 0.2). |
 | [`TIMING.md`](TIMING.md) | Timing closure, and the structural hold-margin floor. |
 | [`SLAPSTIC.md`](SLAPSTIC.md) | Why the security chip is deliberately absent. |
 | [`MISTER.md`](MISTER.md) | The MiSTer (DE10-Nano) port: current status, architecture, distribution, benches. |
@@ -66,6 +66,9 @@ reference doc above, the reference doc wins.
 | [`BUILDS_FOR_REVIEW.md`](investigations/BUILDS_FOR_REVIEW.md) | The build-128→132 decision ladder and its telemetry guide. |
 | [`CAPTURE_SWEEP_0826.md`](investigations/CAPTURE_SWEEP_0826.md) | Automated artifact sweep of the build-124→128 re-test captures. |
 | [`MISTER_PORT_RECORD.md`](investigations/MISTER_PORT_RECORD.md) | The MiSTer port's build-by-build record, wrong turns included — the arbiter saga lives here. |
+| [`KLAX_GUTS.md`](investigations/KLAX_GUTS.md) | Klax prototypes and Guts n' Glory on this core: the exact deltas from Escape, and the one-rbf game selector (milestone 0.2). |
+| [`MAP_HALFTONE.md`](investigations/MAP_HALFTONE.md) | The factory-map halftone: how the board dims travelled routes, found against the owner's PCB capture; fixed MOSHADE-162 (milestone 0.2). |
+| [`THUNDERJAWS.md`](investigations/THUNDERJAWS.md) | Could this core run ThunderJaws? Research only — ThunderJaws is future work. |
 | evidence captures | The video captures and crops backing the above are kept off-repo (large, and some contain copyrighted game art). Each investigation names the capture it used. |
 
 ---
@@ -73,7 +76,7 @@ reference doc above, the reference doc wins.
 ## How to read these
 
 The **reference docs** above were swept against the code and the current
-measurements for v0.1.0; if one still disagrees with the code, the doc is
+measurements for v0.1.1; if one still disagrees with the code, the doc is
 wrong — please file it. The **investigation records** are deliberately left
 as written, wrong turns included, and several of their conclusions were later
 superseded; each is a snapshot of what was believed at the time, not a claim

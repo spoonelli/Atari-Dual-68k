@@ -6,6 +6,27 @@ including the arbiter saga and its wrong turns — is preserved separately in
 [`investigations/MISTER_PORT_RECORD.md`](investigations/MISTER_PORT_RECORD.md);
 where that record disagrees with this page, this page wins.
 
+> **Milestone 0.2 (unreleased, test builds 162–169, branch
+> `milestone-0.2-mister`).** Nothing below this box describes 0.2 unless it
+> says so. One `Escape_YYYYMMDD.rbf` (MRA tag `<rbf>Escape</rbf>`) serves all
+> five sets: a one-byte `<rom index="1">` block in each MRA selects the game
+> (GAMESEL-167: 00 Escape, 01 Klax prototype, 02 Guts n' Glory; absent in
+> older Escape MRAs, which keep working). Builds add, in order: the
+> factory-map halftone (162, H8), Escape set 2 (163), the Klax prototypes
+> (164), the Guts video mode (165), per-game button mapping (166), the Guts
+> special-sprite fix and the `Escape` rbf/MRA naming (167), EEPROM saving via
+> MRA `<nvram index="4" size="512"/>` and `src/mister/rtl/escape_hps_bridge.v`
+> plus a game-byte clock-crossing fix that had made 164–167 usually boot Klax
+> and Guts as Escape (168), and Arcade-Cave-style saving — root-menu
+> "Autosave NVRAM" (default Off) and "Save NVRAM", Main's *Save settings*
+> also saves, file `config/nvram/<MRA name>.nvm` — with the clone MRAs in the
+> family layout under `_alternatives/` (169; see
+> [`DISTRIBUTION.md`](DISTRIBUTION.md)). `jt6295` is compiled into the single
+> rbf since GAMESEL-167. Device status: the owner's first run of MiSTer 168
+> booted and played all five MRAs, and a 2026-10-17 capture of the level-3
+> map matches the PCB reference capture; the full test plan is pending.
+> Controls per game: [`CONTROLS.md`](CONTROLS.md).
+
 ## Status
 
 Plays on real hardware at **measured performance parity with the Analogue
@@ -27,8 +48,9 @@ verbatim with the Pocket build.
   update_all db is retired — [`DISTRIBUTION.md`](DISTRIBUTION.md).
 - **Release zips**: `mister-v*` pre-release tags on this repository.
 
-Install, controls (defaults Jump=Y/left, Fire=B/bottom, Duck=A/right,
-Bomb=X/top; the define-flow traps), OSD options, and the authentic
+Install, controls (Escape's defaults: Jump=Y/left, Fire=B/bottom, Duck=A/right,
+Bomb=X/top; the define-flow traps; the 0.2 prototypes have their own per-game
+defaults, see [`CONTROLS.md`](CONTROLS.md)), OSD options, and the authentic
 "Waiting for Second Processor" boot hold are documented in the distribution
 repo's README, which also ships inside the release zip.
 

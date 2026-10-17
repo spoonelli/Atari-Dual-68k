@@ -22,7 +22,7 @@ have packaged silently — the same shape of hole that let a ROM ship as
 The art lives outside the repository, exactly like the romset:
 
 ```
-/Users/lloyd/Documents/Lloyd Projects/artwork/eprom.bin
+<your artwork dir>/eprom.bin
 ```
 
 It is a **165 x 521** image, 2 bytes per pixel, 171,930 bytes — note the

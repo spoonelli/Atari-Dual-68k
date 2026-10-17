@@ -1,8 +1,15 @@
-# JSA-I sound board — implementation spec
+# JSA-I and JSA-II sound boards — implementation spec
 
 Block B of the core: the Atari JSA-I audio board used by Escape from the Planet of
 the Robot Monsters (YM2151 + TMS5220; **no POKEY** on Escape's JSA-I, the socket is
-present but unpopulated — MAME's eprom driver instantiates none).
+present but unpopulated — MAME's eprom driver instantiates none). Most of this
+document is JSA-I, which is what the shipped releases contain.
+
+**JSA-II** (YM2151 + OKI6295, for the Klax prototypes and Guts n' Glory) is
+milestone 0.2 work: implemented and benched, unreleased, device verification
+pending. It is a `BOARD=2` build of the same entity, or — on MiSTer — a
+`BOARD_RT=1` build carrying both boards and switching at runtime. See
+[JSA-II mode](#jsa-ii-mode-board2-jsa2-164) at the end.
 
 Behavioral reference: `reference/atarijsa.cpp` (+ `atarijsa.h`, `eprom.cpp`), MAME,
 BSD-3-Clause. **Re-implemented, no code copied.** RTL: `src/fpga/core/rtl/escape_jsa.vhd`.
@@ -12,8 +19,9 @@ BSD-3-Clause. **Re-implemented, no code copied.** RTL: `src/fpga/core/rtl/escape
 | Block   | Source | License |
 |---------|--------|---------|
 | 6502    | `third_party/Arcade-Atari-system1_MiSTer/rtl/lib/T65/` (`T65.vhd`, `T65_MCode.vhd`, `T65_ALU.vhd`, `T65_Pack.vhd`) — already compiled into the GHDL sim library by `sim/run_tb.sh`, and System 1's own audio board (`rtl/atarisys1/AUDIO.vhd`) shows the reference wiring (Enable-pin clock-enable at 1.7 MHz on a 7 MHz clock). | BSD-style 3-clause (FPGAArcade/OpenCores, Wallner/Johnson/Scherr/Leikvoll) |
-| YM2151  | `third_party/jt51` submodule (jotego/jt51), `hdl/jt51.v` top | GPL-3.0 (same as repo) |
-| TMS5220 | **stub** (interface + silence) — see "TMS5220 stub" below | n/a |
+| YM2151  | `third_party/jt51` submodule (jotego/jt51), `hdl/jt51.v` top; `jt51.v` and `jt51_acc.v` are vendored into `src/fpga/core/rtl/jt51v/` (per-channel user gain, MIX-100), the rest come from the submodule | GPL-3.0 (same as repo) |
+| TMS5220 | real core — `src/fpga/core/rtl/TMS5220.vhd`, vendored from the System 1 tree with the LANE3z lattice-filter fix; see "TMS5220 speech — real core, wired" below | GPL-3.0 (d18c7db) |
+| OKI6295 (JSA-II only) | `third_party/jt6295` submodule (jotego/jt6295) — in the MiSTer rbf, pruned from the Pocket Escape bitstream | GPL-3.0 |
 
 ## Clocks
 
@@ -40,11 +48,11 @@ note was wrong).
 | `2802` (+mirror) | R | **/RDP** command latch read (68k→6502); clears input-buffer-full + 6502 NMI |
 | `2804` (+mirror) | R | **/RDIO** status/coin port (bit table below) |
 | `2806` (+mirror) | R/W | **/IRQACK** — read *or* write clears the timed interrupt |
-| `2A00` (+mirror) | W | **/VOICE** TMS5220 data latch (stubbed) |
+| `2A00` (+mirror) | W | **/VOICE** TMS5220 data latch |
 | `2A02` (+mirror) | W | **/WRP** response latch write (6502→68k); sets output-buffer-full + main /SINT |
 | `2A04` (+mirror) | W | **/WRIO** control port (bit table below) |
 | `2A06` (+mirror) | W | **/MIX** mixer register (bit table below) |
-| `2C00-2C0F` (+mirror 0x03F0) | R/W | POKEY — absent on Escape; reads return 0xFF, writes ignored |
+| `2C00-2C0F` (+mirror 0x03F0) | R/W | POKEY — absent on Escape; reads return 0xFF, writes ignored. Not decoded on JSA-II either (same 0xFF) |
 | `3000-3FFF` | R | **banked ROM**: one of 4 pages of 0x1000 from ROM offsets `0x0000/0x1000/0x2000/0x3000`, bank = WRIO[7:6]; reset bank = 0 |
 | `4000-FFFF` | R | static ROM = ROM offsets `0x4000-0xFFFF` |
 
@@ -61,7 +69,7 @@ Escape's reset vector (image offset 0x10FFFC/D) points at 0x4000.
 | D7 | self-test. MAME quirk: its double inversion nets to constant 0 in normal play; we present `test_mode` (1 = test switch on, 0 = normal) |
 | D6 | /input-buffer-full — **0 when a 68k command is pending** (main→sound ready, active low) |
 | D5 | output-buffer-full — **1 while the response latch is full** (active high) |
-| D4 | TMS5220 /READY pin state per MAME: bit **set when the chip is ready** (readyq low). Stub drives 1 (always ready) |
+| D4 | TMS5220 /READY pin state per MAME: bit **set when the chip is ready** (readyq low). Driven by the real TMS5220's /READY |
 | D3 | +5V (reads 1) |
 | D2 | +5V (reads 1) |
 | D1 | coin 2, **1 = coin switch closed** (MAME models the port active-high; Pocket buttons arrive active-high, passed straight through) |
@@ -74,24 +82,26 @@ Escape's reset vector (image offset 0x10FFFC/D) points at 0x4000.
 | D7:6 | ROM bank select for 0x3000-0x3FFF (page = bank × 0x1000 of the ROM region) |
 | D5 | coin counter 2 (ignored) |
 | D4 | coin counter 1 (ignored) |
-| D3 | "squeak" — TMS5220 clock tweak: 5220 clock = 3.579545×2 MHz / (16 − (5 | (D3<<1))), i.e. /11 vs /9 (stub: latched, unused) |
-| D2 | TMS5220 read strobe /RS (active low) (stub: latched) |
-| D1 | TMS5220 write strobe /WS (active low) (stub: latched) |
+| D3 | "squeak" — TMS5220 clock tweak: 5220 clock = 3.579545×2 MHz / (16 − (5 | (D3<<1))), i.e. /11 vs /9 (drives the TMS5220 clock select) |
+| D2 | TMS5220 read strobe /RS (active low) |
+| D1 | TMS5220 write strobe /WS (active low) |
 | D0 | YM2151 reset, **active low** (0 = hold jt51 in reset). Reset value 0 ⇒ YM held reset until the program releases it |
 
 ### /MIX write (0x2A06) — resets to 0x00
 
 | Bit | Meaning | Gain law (MAME) |
 |-----|---------|-----------------|
-| D7:6 | TMS5220 volume 0-3 | vol/3 × route-gain 1.0, gated by YM CT1 |
+| D7:6 | TMS5220 volume 0-3 | vol/3 × route-gain 1.0, gated by YM CT1 (MAME; the RTL does not apply the CT1 gate yet — see below) |
 | D5:4 | POKEY volume 0-3 | vol/3 × 0.40, gated by CT1 (no POKEY on Escape) |
 | D3:1 | YM2151 volume 0-7 | vol/7 × route-gain **0.60 per channel** (stereo) |
 | D0 | low-pass filter enable (unimplemented in MAME too; latched only) |
 
 Implementation: YM gain = Q8 coefficient table `round(0.6×256×v/7)` =
-{0,22,44,66,88,110,132,154}, applied to jt51 `xleft/xright`; TMS path adds
-silence for now. YM CT1 output gates the TMS (and would-be POKEY) volume;
-CT2 unused on JSA-I.
+{0,22,44,66,88,110,132,154}, applied to jt51 `xleft/xright`; the TMS path
+mixes the real speech output at `mix[7:6]/3`. In MAME the YM CT1 output gates
+the TMS (and would-be POKEY) volume; **the RTL deliberately does not apply that
+gate yet** (`escape_jsa.vhd` mixer: polarity unverified, revisit after a device
+test), so speech is mixed ungated. CT2 unused on JSA-I.
 
 ## Interrupts
 
@@ -118,23 +128,30 @@ the 68k bus decode in `escape_core` (fully wired — an early stub that idled th
 flags is long gone).
 Schematic note: on the real board these travel over the serial **SCOM** link
 (sheet 2); we model the latch semantics directly, which is what the programs
-observe.
+observe, plus the link's transit time (SCHEM-95): a command byte sets the 68k's
+busy flag at once but reaches the 6502 (input-buffer-full, NMI) only after
+`SCOM_XFER` = 80 clocks (~11 µs, 8 bits plus framing at 894.9 kHz). Instant
+delivery let a fast main CPU NMI-storm the sound 6502 (`DEVIATIONS.md` C3).
 
 ## Program ROM bus
 
 The 6502 exposes the same request/ack protocol as `escape_core`: `rom_addr`
-(combined-image byte address, here always `0x100000 + resolved 16-bit offset`,
-even), `rom_req` raised and held until `rom_ack`, data in `rom_data[31:16]` =
+(combined-image byte address: `0x100000 + resolved 16-bit offset`, even, for
+6502 fetches; on JSA-II also `0x240000 +` a 4-byte-aligned group address for OKI
+ADPCM reads), `rom_req` raised and held until `rom_ack`, data in `rom_data[31:16]` =
 word at addr, `[15:0]` = word at addr|1. ROM bytes are big-endian in the 16-bit
 image words: even byte = bits 15:8.
 
-**Since v63 those requests never reach SDRAM.** `escape_core` serves the
-`0x100000` window from a dedicated 32 KB dual-port BRAM shadow (`jshad`,
-`escape_core.vhd` — write side filled during ROM download, gated by
+**Since v63 the 6502's requests never reach SDRAM.** `escape_core` serves the
+`0x100000` window from a dedicated 64 KB dual-port BRAM shadow (`jshad`,
+32K × 16, `escape_core.vhd` — write side filled during ROM download, gated by
 `jshad_we` on the `0x10xxxx` address range), so 6502 fetches cost BRAM
 latency, add no SDRAM traffic, and cannot be starved by the 68k pair. The
 last-word + prefetch-word cache in `escape_jsa` still smooths sequential code.
-No third arbiter client exists or is needed.
+On JSA-I that leaves no third arbiter client. **On JSA-II the OKI ADPCM reads
+(image `0x24xxxx`) are not shadowed**: `escape_core`'s ROM-request arbiter grants
+them as owner `OWN_J`, lowest priority (GAMESEL-167), so they reach SDRAM on the
+same request port as the CPUs' legacy fetches — a few kB/s, latency-tolerant.
 
 ## Command-latch watchdog (JSAWDG-133)
 
@@ -163,7 +180,9 @@ jt51 is Verilog; the repo's GHDL flow is VHDL-only (mcode has no mixed-language
 support). `escape_jsa` therefore takes `YM_ENABLE : boolean` (default **true**):
 
 * synthesis (Quartus, mixed-language): leave true — the `jt51` component binds
-  to `third_party/jt51/hdl/jt51.v` (add jt51's `hdl/*.v` to the project files).
+  to the vendored `src/fpga/core/rtl/jt51v/jt51.v` (with `jt51_acc.v` beside it;
+  the remaining jt51 files come from `third_party/jt51/hdl/`, listed one by one in
+  `ap_core.qsf`), and on JSA-II builds `jt6295` binds to `third_party/jt6295/hdl/`.
 * GHDL sim: instantiate with `YM_ENABLE => false` — the if-generate skips the
   component, and a stub drives `dout=0x00` (never busy), `irq_n=1`, `ct1=1`,
   silence. `sim/tb/tb_escape_jsa.vhd` does this.
@@ -175,8 +194,14 @@ execution from PC 0x4000, and the first response-latch write.
 
 ## JSA-II mode (`BOARD=2`, JSA2-164)
 
+*Milestone 0.2 — implemented, unreleased, device verification pending.*
+
 For the Klax prototypes and Guts n' Glory (`docs/investigations/KLAX_GUTS.md`
-§2). Same 6502, RAM, YM2151, bank window, timed IRQ, SCOM link and mirror
+§2). Two ways to build it: `BOARD=2` alone gives a JSA-II-only board; `BOARD_RT=1`
+(GAMESEL-167, set through `escape_core`'s `JSA_RT` generic on MiSTer) builds both
+boards and picks from the `board2` input, which `escape_core` drives
+from `game_sel` — the single MiSTer rbf runs Escape on JSA-I and Klax/Guts on
+JSA-II. The TMS mix is forced to zero whenever JSA-II is active. Same 6502, RAM, YM2151, bank window, timed IRQ, SCOM link and mirror
 decode; the differences, all from MAME `atarijsa.cpp` (`atarijsa2_map`,
 `atari_jsa_oki_base_device::wrio_w / mix_w`, `atari_jsa_ii_device::rdio_r`):
 
@@ -195,8 +220,10 @@ the latch, so the reset-time rate is /165 until the firmware's first WRIO
 write (LS273 clears at POR, like the YM reset bit). The chip's ADPCM ROM is
 the combined-image slot **0x240000–0x27FFFF**; its byte reads are a second
 client of the board's ROM request port behind the 6502 fetch, one 4-byte
-group cached (`oki_cache`). Mixer: OKI route 0.75 (MAME) × MIX D0, through
-the `uvol_tms` user slider. Benches: `./sim/run_tb.sh tb_escape_jsa2 300us`
-(decode, WRIO→OKI, status read, both ROM clients, with a purpose-built 6502
-program from `sim/tools/make_jsa2_hex.py` — no game data) and
+group cached (`oki_cache`), and `escape_core` serves them through the SDRAM
+arbiter (`OWN_J`, see "Program ROM bus"). Mixer: OKI route 0.75 (MAME) × MIX D0, through
+the `uvol_tms` user slider. Benches: `python3 sim/tools/make_jsa2_hex.py` first (writes
+`sim/work/jsa2_words.hex`), then `./sim/run_tb.sh tb_escape_jsa2 300us`
+(decode, WRIO→OKI, status read, both ROM clients, with that purpose-built 6502
+program — no game data) and
 `./sim/run_oki_tb.sh` (jt6295 itself under iverilog, synthetic phrase table).

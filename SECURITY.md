@@ -10,8 +10,8 @@ the ROM-building script the user invokes locally.
 | Release line | Supported |
 |---|---|
 | Latest Pocket release (`v0.1.x`) | ✅ |
-| Latest MiSTer pre-release (`mister-v0.1.x`) | ✅ (field-testing) |
-| Development builds and superseded releases | ❌ — upgrade first |
+| Latest MiSTer pre-release (`mister-v0.1.x`), as carried by the official MiSTer distribution | ✅ |
+| Development builds (including the unreleased milestone 0.2 test builds) and superseded releases | ❌ — upgrade first |
 
 ## Reporting a vulnerability
 
@@ -27,10 +27,14 @@ you ask otherwise.
 ## What is in scope
 
 - **Release integrity.** Install only from this repository's
-  [Releases](https://github.com/spoonelli/Atari-Dual-68k/releases). The
-  MiSTer auto-update database pins every file by MD5 and size; a
-  mismatch there, or a release asset that differs from what CI built,
-  is a security report.
+  [Releases](https://github.com/spoonelli/Atari-Dual-68k/releases) or, for
+  MiSTer, the official MiSTer distribution (a stock `update_all` installs
+  `_Arcade/cores/Escape_YYYYMMDD.rbf` from
+  [`MiSTer-devel/Arcade-Escape_MiSTer`](https://github.com/MiSTer-devel/Arcade-Escape_MiSTer)).
+  This project's own custom update database was retired on 2026-09-03 when
+  the core was adopted into MiSTer-devel. A release asset that differs from
+  what CI built, or a file in the distribution repository's `releases/`
+  folder that differs from the matching release here, is a security report.
 - **`build_rom.py` input handling.** The script parses user-supplied
   zip files. Every chip is CRC32-verified against known-good values and
   mismatches are refused, but a crafted archive that escapes the

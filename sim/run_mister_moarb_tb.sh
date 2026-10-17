@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Playfield fetch service on the MiSTer SDRAM arbiter.
+# MOARB crowd-load bench on the MiSTer SDRAM arbiter (MOARB-146/147).
 #
-# Drives the REAL src/mister/rtl/escape_mister.v through power-on -> ROM
-# download (core in reset) -> reset release -> one measured frame, and counts
-# the playfield fetches the arbiter actually serves.  See sim/tb/tb_mister_moarb.v.
+# Scores an arbiter policy in numbers before it touches a device: MO tiles
+# served per scanline, MO fetch latency, and fastpath grants per line, under
+# crowd-scene MO demand plus fastpath pressure, alongside the real playfield
+# pipeline.  See sim/tb/tb_mister_moarb.v.
 #
-# Usage: ./sim/run_mister_pf_tb.sh
+# Usage: ./sim/run_mister_moarb_tb.sh
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"

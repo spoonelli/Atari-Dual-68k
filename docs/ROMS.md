@@ -26,9 +26,11 @@ way MAME's clone lookup does. Set 2 is implemented but not yet verified on a
 device (see the README's supported-sets table). The tool also assembles the
 Klax prototype and Guts n' Glory images (`klaxp1`/`klaxp2`/`guts`, detected
 from their first main chip; 2.5 MB and 3.5 MB, with the JSA-II ADPCM at
-`0x240000` and Guts' tile region at `0x280000`) — those need the single-CPU
-JSA-II core builds described in `investigations/KLAX_GUTS.md`, which are not
-shipped.
+`0x240000` and Guts' tile region at `0x280000`). Those images are for the
+future Klax and Guts Pocket cores (`spoonelli.klaxp`, `spoonelli.guts`), which
+are not built yet; the milestone 0.2 MiSTer test builds that run these games
+use MRAs and the MAME zips instead (see [MiSTer](#mister) below and
+`investigations/KLAX_GUTS.md`).
 
 Every chip is **CRC32-verified** against MAME's known-good values, and its size
 is checked. A missing chip, a short chip, or a wrong/modified dump aborts the
@@ -104,5 +106,8 @@ mechanisms, in order of how much they are worth:
 
 The MiSTer front end does not use this tool: it reads the MAME zip directly via
 an `.mra` manifest, and its loader applies the same two sprite transforms in
-RTL. The MiSTer core is **not part of this release**; its docs (`docs/MISTER.md`)
-and the `.mra` live on the `mister-port` branch.
+RTL. The MiSTer core is **not part of this release**; it is released
+separately and is in the official MiSTer distribution — see
+[`MISTER.md`](MISTER.md). Its RTL and MRAs live on the `mister` branch
+(milestone 0.2 work, including the set-2, Klax and Guts MRAs, on
+`milestone-0.2-mister`).

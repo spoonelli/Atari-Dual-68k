@@ -1,8 +1,25 @@
 # The FACTORY MAP "halftone" — how the board dims travelled routes (MOSHADE-162)
 
-**Status (2026-09-09):** root cause found and fixed in RTL on branch
-`milestone-0.2`; device verification at a level ≥ 2 map still pending.
-Checklist item H8. Both platforms (shared machine RTL).
+**Status (updated 2026-10-17): device-confirmed on MiSTer; Pocket pending.**
+The fix is in the shared machine RTL on both milestone branches,
+`milestone-0.2` (Pocket) and `milestone-0.2-mister` (MiSTer), and is carried
+by test builds Pocket 37 and 38 and MiSTer 162–169 — none released yet; the
+shipped Pocket v0.1.1 and mister-v0.1.2 still follow MAME here. On the
+owner's first run of MiSTer 168 the level-3 factory map matches the PCB
+capture (section 6). Pocket 37/38 are not yet tested. Checklist item H8.
+
+*Status as first written (2026-09-09):* root cause found and fixed in RTL on
+branch `milestone-0.2`; device verification at a level ≥ 2 map still
+pending. Both platforms (shared machine RTL).
+
+**Evidence source.** The reference is the original hardware, not MAME: the
+owner's own Escape PCB, first observed and filmed on its arcade CRT, then on
+2026-09-01 captured directly into a computer (converter + line-in,
+1920×1080 at 60 fps) — several minutes of gameplay that the project takes as
+its baseline for performance, timing and screen behaviour ("board over
+MAME"). The map evidence is that direct capture at frame 24402 / t406–410
+(level-3 map) and t180–183 (level-1 map). The captures are the owner's and
+are not distributed.
 
 ## The symptom
 
@@ -144,7 +161,20 @@ and unchanged.
 - **Device verification** at a level ≥ 2 map on both platforms against the
   PCB capture t406–t410: travelled nodes and START box dim same-hue, no black,
   no slivers; level-1 map unchanged (all bright); gameplay shadows unchanged.
-- Report both inaccuracies upstream (`eprom.cpp`) with the GAL equations.
+  **MiSTer: done (2026-10-17, build 168, owner's first run).** The owner's
+  capture of the MiSTer level-3 factory map matches the PCB capture at frame
+  24402 / t406–410: the travelled routes and the START box dim in the same
+  hue, the level-1 map is all bright, the "you are here" node blinks every
+  10 frames (10 grey / 10 box, a 20-frame cycle — 3 Hz at 60 fps), identical
+  to the PCB capture (measured frame by frame: runs of 9–11 frames on the PCB
+  capture, capture jitter; exactly 10/10 on MiSTer), and the map's timing
+  matches. The colours of the two captures differ, but they came through
+  different capture paths, so the difference is not attributed to the core;
+  judging palette accuracy needs a same-path capture (a post-0.2 item —
+  MAME's palette formula is self-described as crude, so it cannot settle
+  it). **Pocket 37/38: still to do** (checklist G7).
+- Report both inaccuracies upstream (`eprom.cpp`) with the GAL equations
+  (checklist H15). Still open.
 - The `reference/map_level3_mame.png` render shows black nodes rather than
   MAME's bright ones; its provenance is unknown — do not cite it.
 

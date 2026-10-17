@@ -3,8 +3,10 @@
 An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68010 board
 whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**).
 
-The core implements the **`eprom` configuration only** — two 68000-family
-CPUs (68010 by default, 68000 selectable) and JSA-I audio. See [Other games on this hardware](#other-games-on-this-hardware).
+The shipped releases implement the **`eprom` configuration only** — two 68000-family
+CPUs (68010 by default, 68000 selectable) and JSA-I audio. Milestone 0.2
+(unreleased, test builds) adds Escape set 2 on both platforms and, on MiSTer
+first, the Klax prototypes and Guts n' Glory. See [Other games on this hardware](#other-games-on-this-hardware).
 
 > Built for the [Analogue Pocket](https://www.analogue.co/pocket) via the openFPGA framework.
 > This project ships **no ROMs**. You must supply your own dumps.
@@ -24,10 +26,10 @@ Development continues on visual polish and final timing feel.
 | ROM loading (data slot → SDRAM + CRAM + BRAM shadows) | ✅ verified, self-checked |
 | Dual 68010s + shared RAM + mailbox handshake | ✅ genuinely concurrent on hardware |
 | Hot-code BRAM shadows + speculative prefetch | ✅ shipped — shadow hit rate 61% video / 37% extra CPU |
-| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay — crowd, door, spawn-flash and factory-map fixtures all at 100.0000% agreement *and* coverage, draw order proven order-compatible |
+| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay — crowd, door, spawn-flash and factory-map fixtures all at 100.0000% agreement *and* coverage, draw order proven order-compatible (shipped releases; milestone 0.2 departs from MAME on the factory map by design, because the board does — MOSHADE-162, [`DEVIATIONS.md`](docs/DEVIATIONS.md) C6/C7) |
 | Sound (JSA-I: 6502 + YM2151 + **TMS5220 speech**) | ✅ full pipeline, bench-verified; no audio bus-trace diff vs MAME; liveness watchdog self-heals a wedged sound CPU |
 | Inputs (buttons, hall-stick via ADC0809, dock analog) | ✅ incl. in-game calibration screens |
-| Watchdog, freeze-rescue, on-device forensics HUD | ✅ 7 debug pages behind L / R — **off by default**, all builds; page 6 is a video-decodable frame counter so slowdown is measurable from any capture |
+| Watchdog, freeze-rescue, on-device forensics HUD | ✅ 7 debug pages behind L1 / R1 once **Developer HUD** is ticked — **off by default**, all builds; page 6 is a video-decodable frame counter so slowdown is measurable from any capture |
 | EEPROM (2804) | ✅ high scores and settings persist across a power cycle |
 
 **Known issues:** speech phrase tails clip slightly. A non-integer 240→1080
@@ -63,43 +65,47 @@ Full hardware map, roadmap, and schematic findings: [`docs/ARCHITECTURE.md`](doc
 ## Other games on this hardware
 
 MAME's `eprom.cpp` driver covers five sets on this board family.
-**`eprom` is the shipped target; `eprom2` is implemented for milestone 0.2 and
-awaits device verification.** The core has never been run against the other
-three — their rows describe what they would require, not partial support.
+**`eprom` is the shipped target. The other four are implemented for
+milestone 0.2 (unreleased)** — `eprom2` on both platforms, the Klax
+prototypes and Guts n' Glory on MiSTer first. None of the 0.2 sets is in a
+shipped release; the README's rows move to "supported" only when a release
+carries them.
 
 | Set | Title | Status |
 |---|---|---|
 | **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
-| `eprom2` | Escape … (set 2) | **Implemented (EPROM2-163, 2026-09-09) — sim-booted, device verification pending.** Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra`. Boots in `tb_escape_core`; not yet run on a Pocket or MiSTer. |
-| `klaxp1` | Klax (prototype set 1) | Not supported. Documented prototype romset; under future evaluation. |
-| `klaxp2` | Klax (prototype set 2) | Not supported. Documented prototype romset; under future evaluation. |
-| `guts` | Guts n' Glory (prototype) | Not supported. Documented prototype romset; under future evaluation. |
+| `eprom2` | Escape … (set 2) | **Implemented (EPROM2-163, 2026-09-09) — sim-booted, device verification pending.** Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra` (MiSTer test builds 163+). Boots in `tb_escape_core`; Pocket test build 38 carries it, not yet device-tested. |
+| `klaxp1` | Klax (prototype set 1) | **Implemented for milestone 0.2 (KLAX-165, GAMESEL-167) — MiSTer test builds 164+.** Real program boots in simulation; first device run on MiSTer 168 boots and plays; full device test pending. Pocket core (`spoonelli.klaxp`) later. |
+| `klaxp2` | Klax (prototype set 2) | As `klaxp1` (the two sets differ only in the main pair). |
+| `guts` | Guts n' Glory (prototype) | **Implemented for milestone 0.2 (video-map mode GUTS-166, special-sprite fix GUTS-169) — MiSTer test builds 165+.** Real program boots in simulation; first device run on MiSTer 168 boots and plays; full device test pending. Pocket core (`spoonelli.guts`) later. |
 
-Two structural differences make the Klax and Guts prototypes future work
-rather than near-misses:
+Two structural differences set the Klax and Guts prototypes apart from
+Escape:
 
 - **They are single-CPU.** The second 68000-family CPU is `eprom`/`eprom2` only
   (`docs/ARCHITECTURE.md`). The shared-RAM mailbox, the TAS interlock and the
   dual-CPU arbitration — most of this project's hard-won machinery — simply go
-  unused. So they are *simpler* than Escape, but they exercise a configuration
-  this core has never run.
+  unused: the core holds the second CPU in reset for these games.
 - **They use JSA-II, which adds an OKI6295.** Escape uses JSA-I (YM2151 +
   TMS5220). Since JSA2-164 the sound board RTL has a `BOARD=2` mode with
   `jotego/jt6295` in the TMS5220's place, bench-proven on synthetic stimulus
-  (`sim/tb/tb_escape_jsa2.vhd`, `sim/tb/tb_jt6295.v`); no Klax or Guts
-  program has run through it yet because no romset is on hand. The plan and
-  every measured delta are in `docs/investigations/KLAX_GUTS.md`.
+  (`sim/tb/tb_escape_jsa2.vhd`, `sim/tb/tb_jt6295.v`) and then with the real
+  Klax and Guts programs once the romsets arrived (MAME-verified 2026-09-09).
+  The plan and every measured delta are in
+  [`docs/investigations/KLAX_GUTS.md`](docs/investigations/KLAX_GUTS.md).
 
-`support/build_rom.py` now recognises `klaxp1`, `klaxp2` and `guts` folders
+`support/build_rom.py` recognises `klaxp1`, `klaxp2` and `guts` folders
 or zips and assembles their images (KLAX-165: JSA-II ADPCM at `0x240000`,
-Guts tiles at `0x280000`), CRC-checked like Escape — but those images are
-for core builds that do not exist yet (`EXTRA_EN=0`, `JSA_BOARD=2`, and for
-Guts the video-map variant), and no such romset has been run through the
-tool.
+Guts tiles at `0x280000`), CRC-checked like Escape. On MiSTer the MRAs load
+the MAME zips directly; the images are for the future Pocket cores.
 
-**Roadmap position:** the Klax and Guts n' Glory prototype romsets are
-documented above and are under evaluation for the 0.2 milestone (both need
-JSA-II, i.e. an OKI6295); no support timeline is committed for them.
+**Roadmap position:** MiSTer 0.2 comes first — one `Escape` rbf serves all
+five sets, the MRA selecting the game (GAMESEL-167). Pocket 0.2 is Escape set
+2 plus the factory-map fix; the Klax and Guts Pocket cores follow later as
+separate packages from the same tree. ThunderJaws (Atari, 1990 — Escape's
+CPU and sound architecture with a different video chip, the Atari VAD; MAME
+`thunderj.cpp`) is future work; the research is in
+[`docs/investigations/THUNDERJAWS.md`](docs/investigations/THUNDERJAWS.md).
 
 ## Related: the MiSTer port
 
@@ -108,12 +114,14 @@ hardware, with its own platform work landed: it now runs the same open-row
 SDRAM controller as the Pocket (ported after arbiter-level fixes proved the
 per-transaction cost was the real constraint — the playfield shares the one
 SDRAM there, where the Pocket gives it a separate PSRAM), fetch-return
-crossings carry the same settle-stage arrangement the Pocket uses, an
-on-screen build stamp shows at every core load, credits render as a
-core-drawn overlay (OSD trigger, mappable button, or keyboard C), and the
-OSD has music/speech sliders. It still trails the Pocket core in accumulated
-device hours and is released separately, not as part of this package.
-Details: [`docs/MISTER.md`](docs/MISTER.md).
+crossings carry the same settle-stage arrangement the Pocket uses, the OSD
+follows the MiSTer-devel menu conventions (its footer, `ESCAPE v<date> by
+spoonelli`, identifies the build; the old credits pages were retired in
+mister-v0.1.2), and the OSD has music/speech sliders. It still trails the
+Pocket core in accumulated device hours and is released separately, not as
+part of this package, and since 2026-09-03 is in the official MiSTer
+distribution. Its milestone 0.2 work lives on the
+`milestone-0.2-mister` branch. Details: [`docs/MISTER.md`](docs/MISTER.md).
 
 ## Hardware being implemented
 
@@ -128,7 +136,7 @@ present, serial SCOM sound link).
 | CPUs ×2      | Both drawings specify **68010**; production shipped **68000 and 68010 alike**, @ 7.16 MHz, shared RAM | TG68K, either selectable, defaults to 68010 (see C5) |
 | Sound        | Atari **JSA-I** (6502 + YM2151 + TMS5220) via serial SCOM | ✅ T65 + [jt51](https://github.com/jotego/jt51) + TMS5220 (System 1 core, patched) |
 | Video        | Atari motion objects + playfield + alpha | ✅ re-architected line engine, MAME-scene verified |
-| Protection   | **SLAPSTIC** (present on board)          | watch-item; MAME boots without it |
+| Protection   | **SLAPSTIC** (present on board)          | deliberately absent — never banked by the game, and MAME instantiates none ([`SLAPSTIC.md`](docs/SLAPSTIC.md)) |
 | Palette      | 2048-color, per-layer color RAM + intensity | ✅ incl. authentic attract dimming |
 | Output       | 336×240 visible, 456×262 @ ~59.9 Hz      | ✅ native timing via APF scaler |
 
@@ -178,11 +186,38 @@ checked rather than asserted:
 - **Pixels**: motion-object output replays MAME scene dumps at **100.0000%
   agreement and coverage** on crowd, door, spawn-flash and factory-map
   fixtures, with draw order proven prefix-compatible by a dedicated gate.
+  That is the shipped v0.1.x record; since MOSHADE-162 (milestone 0.2,
+  unreleased) the core departs from MAME on the factory map by design, where
+  the board's GAL equations and the PCB capture disagree with MAME
+  ([`DEVIATIONS.md`](docs/DEVIATIONS.md) C6/C7).
 
 Escape's game logic is IRQ- and frame-driven rather than cycle-counted, so at
 equal frame pacing the gameplay is indistinguishable from the arcade. This
 places the core at the accurate end of the class most MiSTer/openFPGA arcade
 cores occupy.
+
+### References: original hardware
+
+The owner's original Escape PCB was first observed, photographed and filmed
+on its arcade CRT; on 2026-09-01 several minutes of gameplay were captured
+directly from the board into a computer (converter and line-in capture,
+1920×1080, 60 fps). That direct capture is the baseline for performance,
+walk-cycle timing, slowdowns and screen behaviour, and it outranks MAME on
+any timing or behaviour question — the project's "schematic over MAME" rule
+extends to "board over MAME". Findings against it so far: the factory-map
+halftone (travelled routes dim on the board while MAME leaves them bright;
+checklist H8, fixed in milestone 0.2 —
+[`MAP_HALFTONE.md`](docs/investigations/MAP_HALFTONE.md)), and a 2026-10-17
+MiSTer capture of the level-3 map that matches it: the same nodes dimmed,
+the "you are here" marker blinks every 10 frames, identical to the PCB
+capture, and the screen timing agrees. The captures are the owner's own and
+are not distributed. The hierarchy:
+
+1. **The original PCB capture** — timing, pacing and on-screen behaviour.
+2. **The SP-332 schematics and the board's GAL fuse maps** — structure, decode
+   and logic equations.
+3. **MAME** (`eprom.cpp`) — the behavioural reference for everything the
+   board captures do not cover.
 
 ## Architectural decisions — for the cycle-accuracy conversation
 
@@ -238,7 +273,7 @@ The decisions, and why:
   routines, a per-frame video-decodable frame counter so any screen capture
   becomes a pacing measurement, and an on-device forensics HUD. Claims in
   this README link to the numbers they rest on; when a claim inverted (the
-  CPU-type saga, chronicled above), the inversion history stays visible.
+  CPU-type saga, chronicled below), the inversion history stays visible.
 
 If "cycle accurate" means *every bus cycle lands on the same clock edge as a
 1989 board*, this is not that, and does not claim to be. If it means *the
@@ -272,7 +307,7 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
 
 | Platform | Release tag | Package |
 |---|---|---|
-| **Analogue Pocket** | [`v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/v0.1.0) (plain `v*` tags) | `AtariDual68k-pocket-v*.zip` |
+| **Analogue Pocket** | [`v0.1.1`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/v0.1.1) (plain `v*` tags) | `AtariDual68k-pocket-v*.zip` |
 | **MiSTer (DE10-Nano)** | [`mister-v0.1.2`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.2) here, and the standard-layout distribution repo [**Arcade-Escape_MiSTer**](https://github.com/spoonelli/Arcade-Escape_MiSTer) (`releases/` folder), forked into [MiSTer-devel](https://github.com/MiSTer-devel/Arcade-Escape_MiSTer) — a stock `update_all` installs it as `Escape_YYYYMMDD.rbf` ([DISTRIBUTION.md](docs/DISTRIBUTION.md)). | `AtariDual68k-mister-*.zip` / `Arcade-Escape_YYYYMMDD.rbf` |
 
 Download the packaged zip from the
@@ -291,7 +326,8 @@ always points at the current Pocket release.
    themselves to `/Saves/eprom/common/` — you do not create that file.
 
 Requires Pocket firmware 1.1+ set up for unofficial cores. The core boots to a
-clean picture; the diagnostic HUD is off until you press **L1**. What works,
+clean picture; the diagnostic HUD stays off until you tick **Developer HUD**
+in the core menu and press **L1**. What works,
 what is known-imperfect and what is missing:
 [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md).
 
@@ -314,10 +350,11 @@ No local FPGA toolchain needed — GitHub Actions compiles the bitstream for you
    ```
 6. **ROM**: build `atari_escape.rom` from your own verified dumps per
    [`docs/ROMS.md`](docs/ROMS.md) and place it at `Assets/eprom/common/` on the SD.
-7. Unzip the package onto the SD, launch **Atari Dual 68k** on the Pocket.
+7. Unzip the package onto the SD, launch **Esc Robot Monst** on the Pocket.
 
-Every build shows a small cyan build number in the bottom-right corner while the
-HUD is up — check it matches the zip you flashed. The diagnostic HUD is **off by
+Every build shows a small cyan build number in the bottom-right corner once
+'Developer HUD' is ticked in the core menu — check it matches the zip you
+flashed. The diagnostic HUD is **off by
 default** and additionally gated behind the 'Developer HUD' menu toggle; with it
 enabled, press **L1** to bring it up, **R1** to cycle its 7 pages (0-6; page 6
 carries a video-decodable frame counter), **L2** to toggle the trace view.

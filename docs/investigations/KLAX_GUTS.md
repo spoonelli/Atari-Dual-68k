@@ -8,6 +8,13 @@ romset is on the development machine**, so nothing here has been run;
 the plan is bench-first with synthetic stimulus, then device tests when
 sets exist.
 
+*(That was true when written. The romsets arrived the same evening and
+were MAME-verified (§4a); the real programs then booted in GHDL, and by
+MiSTer 168 both Klax prototypes and Guts boot and play on the owner's
+MiSTer. Sections 1–4 are kept as the pre-romset reading; §4a onward
+records what happened next. Status as of 2026-10-17: MiSTer test builds
+164–169, unreleased; MiSTer 0.2 first, Pocket cores after.)*
+
 ## 1. What the driver says
 
 | | `eprom` (shipped) | `klaxp1` / `klaxp2` | `guts` |
@@ -81,6 +88,11 @@ the chip's 18-bit address drops straight in — Escape's image does not change).
 stubbed under GHDL; its own behaviour is checked by an iverilog bench
 (`sim/tb/tb_jt6295.v`, Docker `hdlc/iverilog`) with a synthetic phrase table.
 
+*(Superseded by GAMESEL-167, §4b: the OKI's ADPCM reads no longer share the
+sound board's ROM port — the 64 KB `jshad` BRAM that serves the 6502 cannot
+hold them — but go to the core's SDRAM arbiter as a lowest-priority owner,
+`OWN_J`. The image slot at 0x240000 is unchanged.)*
+
 ## 3. Klax: everything else
 
 - **No extra CPU.** `escape_core` generic `EXTRA_EN` (new) = 0: the second
@@ -95,7 +107,7 @@ stubbed under GHDL; its own behaviour is checked by an iverilog bench
   Klax proto uses two buttons in play (MAME maps four).
 - **Video: none.** Same tilemaps, same MO config, same priority PAL
   transcription (MOSHADE-162 included), same alpha ROM.
-- **ROM image.** `build_rom.py` gains a `klaxp` table: main pair 128 KB at
+- **ROM image.** `build_rom.py` gains `klaxp1` / `klaxp2` tables: main pair 128 KB at
   0; JSA CPU at 0x100000; chars at 0x110000; sprites at 0x120000 from four
   64 KB planes (`RGN_FRAC(1,4)` over 0x40000 — the chunky repack takes the
   plane stride as a parameter); ADPCM at 0x240000 (`klaxadp0.1f`,
@@ -113,7 +125,7 @@ stubbed under GHDL; its own behaviour is checked by an iverilog bench
 | FF0000–FF1FFF | 3F8000–3F9FFF | 8 KB | playfield ext (colour attribute, D15:8) |
 | FF8000–FF9FFF | 3F0000–3F1FFF | 8 KB | playfield picture |
 | FFA000–FFBFFF | 3F2000–3F3FFF | 8 KB | motion objects |
-| FFC000–FFCF7F | 3F4000–3F4EFF | ~4 KB | alphanumerics (+ MOB config at the end of the alpha block? — MAME maps 3F4F00–3F4F7F inside the alpha share on Escape; **verify** where Guts keeps scroll/MOB config; MAME's guts_map has no separate mobconfig, so `write16` on the alpha share covers FFCF00–FFCF7F too) |
+| FFC000–FFCF7F | 3F4000–3F4EFF | ~4 KB | alphanumerics (+ MOB config at the end of the alpha block? — MAME maps 3F4F00–3F4F7F inside the alpha share on Escape; **verify** where Guts keeps scroll/MOB config; MAME's guts_map has no separate mobconfig, so `write16` on the alpha share covers FFCF00–FFCF7F too. *Settled for the build (GUTS-166): FFCF00–FFCF7F decodes as the scroll/MOB-config block, mirroring Escape's 3F4F00, and `tb_escape_vmap` probes its edges; Guts boots and plays on MiSTer 168. No separate MAME trace of the config writes was made.*) |
 | FFCF80–FFCFFF | 3F4F80–3F4FFF | 128 B | SLIP |
 | FFD000–FFFFFF | 3F5000–3F7FFF | 12 KB | work RAM |
 | 3E0000–3E0FFF | same | 4 KB | colour RAM |
@@ -123,6 +135,11 @@ the 3Fxxxx block for FFxxxx with the ext RAM at the bottom instead of the
 top; the RAM blocks themselves are the same sizes. 160000–16FFFF shared RAM
 still exists (single CPU), EEPROM and unlock unchanged, ADC at 260020 as
 Escape.
+
+*(As built, there is no `VARIANT` generic: the decoder took a `VIDEO_MAP`
+generic plus a runtime `vmap` input (GUTS-166, GAMESEL-167), and
+`escape_mob` / `escape_prio` below take a runtime `guts` input (GUTS-168).
+The `VARIANT` wording in this section is the plan as first written.)*
 
 Motion objects (`s_guts_mob_config` vs `s_mob_config`): **height is 4 bits**
 (word 3 mask 0x000F, up to 16 tiles tall — Escape: 3 bits), **H-flip is
@@ -189,6 +206,53 @@ a scratch folder that gives `klaxp2` its shared chips — `klaxp1` and
   main program** to its reset PC, and with `G_VMAP=1` added the **Guts main
   program** too.
 
+## 4b. One rbf, three games: the runtime selector (GAMESEL-167)
+
+MiSTer 0.2 will ship one `Escape` rbf serving all three games, MRA-selected,
+the way other family cores do (top-level MRA per game, clones under
+`_alternatives/_<Game>/`, a config byte in `<rom index="1">`). The Pocket
+will ship one core per game. Both come from the same RTL through one selector:
+
+- `escape_core` port `game_sel` (00 Escape either set, 01 Klax prototype,
+  10 Guts). It holds the second CPU in reset for the single-CPU games,
+  drives the decoder's runtime `vmap` (ORed with the `VIDEO_MAP` generic),
+  switches the sound board to JSA-II behaviour, gates the joystick nibble
+  (Klax only — Escape and Guts leave D15:12 open) and makes the ADC read
+  FF for Klax (no ADC0809 fitted, MAME `adc_r`).
+- `escape_jsa` generic `BOARD_RT=1` builds both the TMS5220 and the OKI and
+  follows the `board2` port; the unselected device is held in reset and
+  muted. `BOARD_RT=0` (Pocket) builds only `BOARD`.
+- On the Pocket the wrapper ties `game_sel` to a constant beside
+  `EXTRA_EN` / `JSA_BOARD` / `VIDEO_MAP`, so synthesis prunes the rest and
+  the Escape build is unchanged.
+- **OKI ADPCM reads** cannot come from the 64 KB `jshad` BRAM that serves the
+  6502 program; requests to image `0x24xxxx` are routed to the core's SDRAM
+  arbiter as a new lowest-priority owner (`OWN_J`), a few kB/s and
+  latency-tolerant behind the two CPUs.
+- MiSTer loader: the planar→chunky repack now covers exactly the two
+  graphics slots (`0x120000–0x21FFFF`, `0x280000–0x37FFFF`); the ADPCM slot
+  is written raw. `Arcade-Escape.sv` latches the index-1 byte into
+  `game_sel` (absent in old Escape MRAs → 00).
+  **Correction (NVRAM-170, MiSTer 168):** as first built, that latch ran on
+  clk_sys and sampled a 28 ns clk_ram write strobe, so builds 164–167 caught
+  the byte only now and then and usually booted Klax and Guts as Escape. A
+  bench control reproducing the old latch missed 8 of 10 strobes; the 168
+  latch catches all of them. Device results on 164–167 that show Escape
+  where Klax or Guts was chosen are this bug, not the game logic.
+- MRAs: `Klax (prototype set 1).mra`, `Klax (prototype set 2).mra` (byte
+  01, `zip="klaxpN.zip|klax.zip"`), `Guts n' Glory (prototype).mra` (byte 02).
+  Every MRA says `<rbf>Escape</rbf>` since MiSTer 167. Since MiSTer 169
+  (ALT-172) the two Klax MRAs sit in `_alternatives/_Klax/` (and Escape set 2
+  in `_alternatives/_Escape from the Planet of the Robot Monsters/`); Guts
+  and Escape set 1 stay top-level. `_alternatives/_Klax/` is shared with
+  RetroShrimp's Arcade-Klax_MiSTer core — each MRA names its own rbf, so the
+  two coexist, and the release PR says so. The CI ROM-data gate scans every
+  MRA recursively.
+- Buttons (MiSTer 166): the wrapper builds CD11..CD8 per game — Escape
+  unchanged (jump/fire/duck + the Bomb combo), Klax D8..D11 = Button 1..4
+  straight, Guts D9/D8/D11 = Button 1/2/3 (MAME klaxp/guts ports). Neither
+  prototype has a Start switch on the board; both start from a button.
+
 ## 4c. Guts video reading proven offline, pixel-exact (2026-09-10)
 
 Before any RTL for §4's MO/priority items, the reading was checked on real
@@ -228,36 +292,6 @@ MPR2 objects — the same `apply_stain` as Escape's map, so `escape_stain.v`
 serves Guts unchanged. Fixtures: `sim/work/scenes/` (gitignored), results
 in `sweep_results.txt` beside them.
 
-## 4b. One rbf, three games: the runtime selector (GAMESEL-167)
-
-MiSTer ships one `Escape` rbf serving all three games, MRA-selected, the
-way other family cores do (top-level MRA per game, clones under
-`_alternatives/_<Game>/`, a config byte in `<rom index="1">`). The Pocket
-ships one core per game. Both come from the same RTL through one selector:
-
-- `escape_core` port `game_sel` (00 Escape either set, 01 Klax prototype,
-  10 Guts). It holds the second CPU in reset for the single-CPU games,
-  drives the decoder's runtime `vmap` (ORed with the `VIDEO_MAP` generic),
-  switches the sound board to JSA-II behaviour, gates the joystick nibble
-  (Klax only — Escape and Guts leave D15:12 open) and makes the ADC read
-  FF for Klax (no ADC0809 fitted, MAME `adc_r`).
-- `escape_jsa` generic `BOARD_RT=1` builds both the TMS5220 and the OKI and
-  follows the `board2` port; the unselected device is held in reset and
-  muted. `BOARD_RT=0` (Pocket) builds only `BOARD`.
-- On the Pocket the wrapper ties `game_sel` to a constant beside
-  `EXTRA_EN` / `JSA_BOARD` / `VIDEO_MAP`, so synthesis prunes the rest and
-  the Escape build is unchanged.
-- **OKI ADPCM reads** cannot come from the 64 KB `jshad` BRAM that serves the
-  6502 program; requests to image `0x24xxxx` are routed to the core's SDRAM
-  arbiter as a new lowest-priority owner (`OWN_J`), a few kB/s and
-  latency-tolerant behind the two CPUs.
-- MiSTer loader: the planar→chunky repack now covers exactly the two
-  graphics slots (`0x120000–0x21FFFF`, `0x280000–0x37FFFF`); the ADPCM slot
-  is written raw. `Arcade-Escape.sv` latches the index-1 byte into
-  `game_sel` (absent in old Escape MRAs → 00).
-- MRAs: `Klax (prototype set 1).mra`, `Klax (prototype set 2).mra` (byte
-  01, `zip="klaxpN.zip|klax.zip"`), `Guts n' Glory (prototype).mra` (byte 02).
-
 ## 5. Order of work and what can be proven without ROMs
 
 1. `jt6295` submodule + iverilog smoke bench — **done 2026-09-09** (see
@@ -276,7 +310,8 @@ ships one core per game. Both come from the same RTL through one selector:
    region-sized planar repack, ADPCM slot at 0x240000, Guts tiles at
    0x280000 — **done 2026-09-09** (Escape images byte-identical before and
    after; the new paths cannot be exercised without the sets). MRAs for the
-   Klax sets wait on the packaging decision below.
+   Klax sets wait on the packaging decision below. *(Since done: the sets
+   arrived, the packaging was decided, and the MRAs exist — §4b.)*
 5. Guts, one variable at a time:
    - decoder variant — **done 2026-09-09 (GUTS-166)**: `escape_decode`
      `VIDEO_MAP=1` (threaded as `escape_core` `VIDEO_MAP`), `tb_escape_vmap`
@@ -325,8 +360,20 @@ ships one core per game. Both come from the same RTL through one selector:
    167, device verification pending.
 6. Device tests need the romsets. Until then the README keeps both games
    at "not supported".
+   *(Update 2026-10-17: the romsets are on hand and the device tests have
+   begun — on the owner's first run of MiSTer 168, both Klax prototypes and
+   Guts boot and play. The README gate has moved: both games stay "not
+   supported" there until the MiSTer 0.2 release, when the rows flip.
+   MiSTer 169's full device tests are still to run.)*
 
-Platform packaging decision (owner's call, not made here): compile-time
+**Packaging decided (owner):** MiSTer — one rbf (`Escape_YYYYMMDD.rbf`),
+the game picked by the MRA's index-1 byte, clones in the `_alternatives/`
+family layout (§4b); Pocket — one core per game, `spoonelli.eprom`
+untouched, `spoonelli.klaxp` and `spoonelli.guts`, built after MiSTer 0.2
+from constants on the same selector. The paragraph below is the question as
+it was first posed, kept as record.
+
+*Platform packaging decision (owner's call, not made here):* compile-time
 `VARIANT` means one bitstream per game — a separate Pocket core per game
 (`spoonelli.klaxp`, `spoonelli.guts`) and separate MiSTer rbfs — versus a
 runtime variant byte (MRA `<rom index="1">` / Pocket data slot) in one

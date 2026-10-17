@@ -1,4 +1,4 @@
-# Atari Dual 68k — v0.1.0 release notes
+# Atari Dual 68k — v0.1.x release notes
 
 An openFPGA core for the **Analogue Pocket** that implements Atari's
 *Escape from the Planet of the Robot Monsters* (1989) — the dual-68010 arcade
@@ -6,8 +6,9 @@ board, not an emulator port. The RTL is an independent re-implementation
 worked out from Atari's SP-332 schematic package, with MAME's `eprom.cpp`
 driver as a behavioural cross-check.
 
-**This is v0.1.0, the first public release.** It plays the game from the first
-coin to the end, and it has real, measured gaps. This document is the honest
+**This is v0.1.x: v0.1.0 was the first public release, and v0.1.1 (the current
+release) is a metadata patch on it** — see "Notes for this release". It plays
+the game from the first coin to the end, and it has real, measured gaps. This document is the honest
 list. Nothing here is
 hidden in a footnote; if you are deciding whether to install it, read the
 "Known imperfect" and "Not implemented" sections and decide from those.
@@ -16,6 +17,53 @@ hidden in a footnote; if you are deciding whether to install it, read the
 > instrumented on-device HUD captures, or from CI synthesis reports. The
 > figures quoted are real measurements, not estimates. Where something has
 > *not* been confirmed on a physical Pocket, it says so explicitly.
+
+---
+
+## Unreleased — milestone 0.2
+
+Nothing in this section is in a shipped release. These are test builds handed
+to the owner for device checks; the sections after this one describe the
+shipped v0.1.x core. Build numbers and work tags are different series (KLAX-165
+is in MiSTer 164, GUTS-166 in 165, GUTS-169 in 167, NVRAM-170 in 168,
+NVRAM-171 and ALT-172 in 169).
+
+**Pocket** — Pocket 0.2 is Escape set 2 plus the factory-map fix. Neither
+test build has been run on a device yet.
+
+| Build | Adds |
+|---|---|
+| 37 | **Factory-map halftone** (H8, MOSHADE-162): travelled routes and the START box dim on the between-level map, as on the owner's PCB capture, where MAME leaves them bright ([`DEVIATIONS.md`](DEVIATIONS.md) C6/C7, [`MAP_HALFTONE.md`](investigations/MAP_HALFTONE.md)). |
+| 38 | **Escape set 2** (`eprom2`, EPROM2-163): `build_rom.py` builds a set-2 image; the core serves set 2's tenth program pair. |
+
+The Klax and Guts n' Glory Pocket cores (`spoonelli.klaxp`, `spoonelli.guts`)
+come later, as separate packages from the same tree.
+
+**MiSTer** — MiSTer 0.2 comes first. One rbf (`Escape_YYYYMMDD.rbf`, MRA tag
+`<rbf>Escape</rbf>`) serves all five sets, the MRA selecting the game.
+
+| Build | Adds |
+|---|---|
+| 162 | Factory-map halftone (as Pocket 37) |
+| 163 | Escape set 2 MRA |
+| 164 | Klax prototypes `klaxp1`/`klaxp2` (single CPU, JSA-II with the OKI6295 via `jt6295`) |
+| 165 | Guts n' Glory video mode |
+| 166 | Per-game button mapping |
+| 167 | Guts special-sprite fix (GUTS-169); MRAs say `<rbf>Escape</rbf>`; rbf named `Escape_YYYYMMDD.rbf` |
+| 168 | High scores saved on MiSTer (NVRAM-170, MRA `<nvram index="4" size="512"/>`); fixes a clock-crossing bug that made 164–167 usually boot Klax and Guts as Escape; `jt6295` licence notice |
+| 169 | Arcade-Cave-style saving (NVRAM-171): "Autosave NVRAM" (default Off) and "Save NVRAM" in the OSD root menu, and *Save settings* also saves; file `config/nvram/<MRA name>.nvm`. Clone MRAs in the MiSTer family layout (ALT-172): set 1 and Guts at the top level, set 2 and both Klax prototypes under `_alternatives/` |
+
+**Device status:** the owner's first run of MiSTer 168 booted and played all
+five MRAs. A MiSTer capture of the level-3 factory map (2026-10-17) matches the
+PCB reference capture: the same nodes dimmed, the "you are here" marker blinks
+every 10 frames, identical to the PCB capture, and the screen timing agrees.
+Colour differences between those two captures are not attributed to the core
+(different capture paths); a same-path comparison is a post-0.2 palette item.
+The full test plan is still pending on MiSTer 169, and Pocket 37/38 are not yet
+device-tested.
+
+ThunderJaws remains future work; the research is in
+[`investigations/THUNDERJAWS.md`](investigations/THUNDERJAWS.md).
 
 ---
 
@@ -150,12 +198,14 @@ there is no operating condition worse than the one signed off.
 
 ## Not implemented
 
-- **Any game other than `eprom`.** `eprom2` (the set-2 program-ROM revisions
+- **Any game other than `eprom`** (in v0.1.1). `eprom2` (the set-2 program-ROM revisions
   on identical hardware) is the next supported-set target. The *Klax* and
   *Guts n' Glory* prototype romsets are documented and remain under future
   evaluation: those configurations are single-CPU and use JSA-II with an
   OKI6295, a device not present in this RTL. `build_rom.py` builds only the
   MAME `eprom` set and rejects chips whose CRCs do not match it.
+  *(As of v0.1.1. Milestone 0.2, unreleased, implements all four — see
+  "Unreleased — milestone 0.2" above.)*
 - **Save states / sleep.** None. `core.json` declares `sleep_supported: false`.
   Closing the core loses your position; only the EEPROM (high scores and
   operator settings) survives.
@@ -197,8 +247,9 @@ again to hide it. **R1** cycles 7 pages (0–6):
 | 5 | **Cadence** — the performance figure described above |
 | 6 | **MO telemetry** (MOTEL-129): line-end truncation count + worst 16-line fetch latency, with the frame counter |
 
-A small cyan **build number** sits in the bottom-right corner at all times,
-HUD or no HUD. Check it matches the build you installed — it is the only guard
+A small cyan **build number** sits in the bottom-right corner once
+**Developer HUD** is ticked (from build 115 it follows that gate; before that it
+showed at all times), with the HUD up or not. Check it matches the build you installed — it is the only guard
 against flashing the wrong file, and it has caught that mistake before. It
 shows the low two hex digits of the build id, so it distinguishes builds within
 a run of 256 rather than absolutely.
