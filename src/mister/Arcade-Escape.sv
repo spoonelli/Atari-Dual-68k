@@ -193,6 +193,12 @@ localparam CONF_STR = {
 	"-;",
 	"O[6],Service Mode,Off,On;",
 	"-;",
+	// NVRAM-171: the Arcade-Cave idiom and default. Autosave saves the EEPROM
+	// (high scores, operator settings) when the OSD opens, only if the game
+	// changed it; Save NVRAM saves now. Main's own "Save settings" also saves.
+	"O[32],Autosave NVRAM,Off,On;",
+	"T[33],Save NVRAM;",
+	"-;",
 	"R[0],Reset;",
 	"-;",
 	"J1,Jump,Fire,Duck,Bomb,Start,Coin,Pause;",
@@ -289,8 +295,10 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 //             prototype, 02 Guts n' Glory; absent (Escape MRAs) = 00.
 //             NVRAM-170: builds 164-167 latched it on clk_sys and missed the
 //             28 ns hps_io strobe about four times in five.
-//   index 4 - NVRAM-170: the 512-byte EEPROM, loaded at launch and saved by
-//             Main when the OSD opens after the game has written it.
+//   index 4 - NVRAM-170: the 512-byte EEPROM, loaded at launch. Saved
+//             (NVRAM-171, Cave convention) when the OSD opens if Autosave
+//             NVRAM is on and the game changed it, on Save NVRAM, or on
+//             Main's Save settings.
 wire rom_wr = ioctl_wr && ioctl_download && (ioctl_index == 16'd0);
 wire [1:0] game_sel;
 wire [8:0] ee_saddr;
@@ -309,6 +317,9 @@ escape_hps_bridge hps_bridge
 	.ioctl_din      (ioctl_din),
 	.nv_wait        (nv_wait),
 	.upload_req     (nv_upload_req),
+	.osd_status     (OSD_STATUS),
+	.autosave       (status[32]),
+	.save_now       (status[33]),
 	.game_sel       (game_sel),
 	.ee_saddr       (ee_saddr),
 	.ee_sdin        (ee_sdin),

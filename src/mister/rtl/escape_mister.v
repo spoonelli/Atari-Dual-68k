@@ -56,9 +56,11 @@
 //    framework's own route: each MRA declares <nvram index="4" size="512"/>,
 //    and rtl/escape_hps_bridge.v (instantiated in Arcade-Escape.sv) loads the
 //    saved file into escape_core's EEPROM port B at launch and serves it back
-//    when Main saves - on opening the OSD after the game has written the
-//    EEPROM, or on "Save settings".  Before NVRAM-170 (builds up to 167) high
-//    scores did not survive a power cycle on MiSTer.
+//    when Main saves.  NVRAM-171 follows the Arcade-Cave convention: OSD
+//    "Autosave NVRAM" (default Off) saves when the OSD opens if the game has
+//    changed the EEPROM; "Save NVRAM" saves now; Main's "Save settings" also
+//    saves.  Before NVRAM-170 (builds up to 167) high scores did not survive
+//    a power cycle on MiSTer.
 //============================================================================
 `default_nettype none
 

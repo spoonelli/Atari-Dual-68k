@@ -27,11 +27,16 @@
 //      re-reads port B continuously (3 clk_sys per byte, a full pass every
 //      ~215 us), is read on clk_ram, so ioctl_din follows ioctl_addr with
 //      one clk_ram of latency - hps_io's upload has no wait states.
-//    - WHEN: ee_wrpulse marks the EEPROM dirty; upload_req goes high and
-//      Main saves the next time the OSD is opened (MENU_SAVE_CHECK) or on
-//      "Save settings". Main names the file after the MRA, so every game
-//      keeps its own. The format is the Pocket's .sav format (512 bytes,
-//      the EEPROM's low byte per word).
+//    - WHEN (NVRAM-171, the Arcade-Cave convention): ee_wrpulse marks the
+//      EEPROM dirty. upload_req pulses only (a) at the instant the OSD
+//      opens, if "Autosave NVRAM" is on (default Off) and the EEPROM is
+//      dirty, or (b) when "Save NVRAM" is chosen. Main also saves on its own
+//      "Save settings". NVRAM-170 raised the request on every game write;
+//      Escape rewrites a four-byte counter every 10-20 s in attract, and
+//      Main polls the request on every main-menu redraw, so "Saving..."
+//      appeared on nearly every menu change. Main names the file after the
+//      MRA, so every game keeps its own. The format is the Pocket's .sav
+//      format (512 bytes, the EEPROM's low byte per word).
 //============================================================================
 `default_nettype none
 
@@ -48,7 +53,10 @@ module escape_hps_bridge (
     input  wire [15:0] ioctl_index,
     output wire  [7:0] ioctl_din,        // upload data for ioctl_addr
     output wire        nv_wait,          // OR into ioctl_wait
-    output wire        upload_req,       // to hps_io ioctl_upload_req
+    output reg         upload_req = 1'b0,// to hps_io ioctl_upload_req (one-clock pulses)
+    input  wire        osd_status,       // OSD_STATUS (synchronised here)
+    input  wire        autosave,         // "Autosave NVRAM" (clk_ram, from status)
+    input  wire        save_now,         // "Save NVRAM" trigger (clk_ram, from status)
 
     // machine (clk_sys)
     output reg   [1:0] game_sel = 2'b00,
@@ -152,13 +160,18 @@ module escape_hps_bridge (
     reg [2:0] wr_s = 3'b000;
     reg       dirty = 1'b0;
     reg       up_d  = 1'b0;
+    reg [2:0] osd_s = 3'b000;
+    reg       sv_d  = 1'b0;
     always @(posedge clk_ram) begin
-        wr_s <= {wr_s[1:0], wr_t};
-        up_d <= ioctl_upload;
+        wr_s  <= {wr_s[1:0], wr_t};
+        up_d  <= ioctl_upload;
+        osd_s <= {osd_s[1:0], osd_status};
+        sv_d  <= save_now;
         if (ioctl_upload && !up_d) dirty <= 1'b0;
         if (wr_s[2] != wr_s[1])     dirty <= 1'b1;
+        upload_req <= (autosave && dirty && osd_s[1] && !osd_s[2])
+                   || (save_now && !sv_d);
     end
-    assign upload_req = dirty;
 endmodule
 
 `default_nettype wire

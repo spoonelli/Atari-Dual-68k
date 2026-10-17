@@ -9,8 +9,12 @@
 //     EEPROM exactly; a 513th byte is ignored; the load does not mark dirty.
 //  T3 save: after a scrub pass, an upload (hps_io order: addr 0 first, din
 //     sampled at each strobe, then addr+1) returns the EEPROM exactly.
-//  T4 dirty: a CPU write raises upload_req; an upload clears it; a write
-//     during the upload raises it again; the new byte reaches the save.
+//  T4 save request, Arcade-Cave rule (NVRAM-171): upload_req pulses only
+//     at the OSD-open edge when Autosave is on and the EEPROM is dirty, or on
+//     the Save NVRAM trigger. Autosave Off -> no request; writes while the
+//     OSD stays open -> no request (the NVRAM-170 "Saving..." on every menu
+//     change); reopening with nothing new -> no request; Save NVRAM ->
+//     request even when clean; a write during an upload -> dirty again.
 // Run: ./sim/run_hps_bridge_tb.sh   (prints HPS BRIDGE PASS / FAIL)
 `timescale 1ns/1ps
 `default_nettype none
@@ -26,6 +30,9 @@ module tb_hps_bridge;
     reg  [15:0] ioctl_index = 0;
     wire  [7:0] ioctl_din;
     wire        nv_wait, upload_req;
+    reg         osd_status = 0, autosave = 0, save_now = 0;
+    integer     req_count = 0;
+    always @(posedge clk_ram) if (upload_req) req_count = req_count + 1;
     wire  [1:0] game_sel;
     wire  [8:0] ee_saddr;
     wire  [7:0] ee_sdin;
@@ -38,7 +45,8 @@ module tb_hps_bridge;
         .ioctl_download(ioctl_download), .ioctl_upload(ioctl_upload),
         .ioctl_wr(ioctl_wr), .ioctl_addr(ioctl_addr), .ioctl_dout(ioctl_dout),
         .ioctl_index(ioctl_index), .ioctl_din(ioctl_din), .nv_wait(nv_wait),
-        .upload_req(upload_req), .game_sel(game_sel),
+        .upload_req(upload_req), .osd_status(osd_status), .autosave(autosave),
+        .save_now(save_now), .game_sel(game_sel),
         .ee_saddr(ee_saddr), .ee_sdin(ee_sdin), .ee_swe(ee_swe),
         .ee_sq(ee_sq), .ee_wrpulse(ee_wrpulse));
 
@@ -73,6 +81,23 @@ module tb_hps_bridge;
     integer errors = 0, old_miss = 0, k, ph;
     reg [7:0] img [0:511];
     reg [7:0] got;
+
+    task open_osd;  begin @(posedge clk_ram); osd_status <= 1; repeat (10) @(posedge clk_ram); end endtask
+    task close_osd; begin @(posedge clk_ram); osd_status <= 0; repeat (10) @(posedge clk_ram); end endtask
+    // Main's save: index-4 upload of all 512 bytes; checks one expected byte
+    task do_upload(input [8:0] a, input [7:0] want);
+        integer j, bad;
+        begin
+            ioctl_index <= 16'd4; ioctl_upload <= 1; ioctl_addr <= 0; bad = 0;
+            for (j = 0; j < 512; j = j + 1) begin
+                repeat (3) @(posedge clk_ram);
+                if (j == a && ioctl_din !== want) bad = 1;
+                ioctl_addr <= ioctl_addr + 1;
+            end
+            ioctl_upload <= 0; repeat (4) @(posedge clk_ram);
+            if (bad) begin errors = errors + 1; $display("UPLOAD FAIL: byte %0d is not %02x", a, want); end
+        end
+    endtask
 
     task hps_byte(input [26:0] a, input [7:0] d);
         begin
@@ -118,8 +143,8 @@ module tb_hps_bridge;
         repeat (10) @(posedge clk_sys);
         k = 0;
         for (i = 0; i < 512; i = i + 1) if (ee[i] !== img[i]) k = k + 1;
-        $display("T2 NVRAM load: %0d/512 bytes wrong; upload_req=%0d after load", k, upload_req);
-        if (k != 0 || upload_req !== 1'b0) errors = errors + 1;
+        $display("T2 NVRAM load: %0d/512 bytes wrong; dirty=%0d after load", k, dut.dirty);
+        if (k != 0 || dut.dirty !== 1'b0) errors = errors + 1;
 
         // ---------------- T3
         repeat (3 * 512 + 50) @(posedge clk_sys);  // one full scrub pass
@@ -136,25 +161,44 @@ module tb_hps_bridge;
         if (k != 0) errors = errors + 1;
 
         // ---------------- T4
+        // a) Autosave Off (the default): a write, then the OSD opens -> nothing
         cpu_write(9'd77, 8'hC3);
-        repeat (10) @(posedge clk_ram);
-        if (upload_req !== 1'b1) begin errors = errors + 1; $display("T4 FAIL: CPU write did not raise upload_req"); end
         repeat (3 * 512 + 50) @(posedge clk_sys);
-        ioctl_upload <= 1; ioctl_addr <= 0;
+        k = req_count; open_osd(); close_osd();
+        if (req_count != k) begin errors = errors + 1; $display("T4a FAIL: request with Autosave Off"); end
+        // b) Autosave On: the OSD opens while dirty -> exactly one request; the save carries byte 77
+        autosave <= 1;
+        k = req_count; open_osd();
+        if (req_count != k + 1) begin errors = errors + 1; $display("T4b FAIL: %0d requests on OSD open, want 1", req_count - k); end
+        do_upload(9'd77, 8'hC3);
+        // c) OSD stays open while the game keeps writing -> no further request
+        k = req_count;
+        cpu_write(9'd78, 8'h11); repeat (200) @(posedge clk_ram);
+        cpu_write(9'd79, 8'h22); repeat (200) @(posedge clk_ram);
+        if (req_count != k) begin errors = errors + 1; $display("T4c FAIL: %0d requests while the OSD stayed open", req_count - k); end
+        close_osd();
+        // d) reopen after those writes -> one request; reopen with nothing new -> none
+        k = req_count; open_osd();
+        if (req_count != k + 1) begin errors = errors + 1; $display("T4d FAIL: no request after writes"); end
+        repeat (3 * 512 + 50) @(posedge clk_sys);
+        do_upload(9'd79, 8'h22); close_osd();
+        k = req_count; open_osd(); close_osd();
+        if (req_count != k) begin errors = errors + 1; $display("T4d FAIL: request with nothing changed"); end
+        // e) Save NVRAM with a clean EEPROM -> one request
+        autosave <= 0;
+        k = req_count;
+        @(posedge clk_ram); save_now <= 1; repeat (4) @(posedge clk_ram); save_now <= 0;
+        repeat (4) @(posedge clk_ram);
+        if (req_count != k + 1) begin errors = errors + 1; $display("T4e FAIL: Save NVRAM gave %0d requests", req_count - k); end
+        // f) a write during an upload leaves the EEPROM dirty again
+        ioctl_index <= 16'd4; ioctl_upload <= 1; ioctl_addr <= 0;
         repeat (3) @(posedge clk_ram);
-        if (upload_req !== 1'b0) begin errors = errors + 1; $display("T4 FAIL: upload did not clear upload_req"); end
-        cpu_write(9'd300, 8'h3C);                  // write during the upload
-        k = 0;
-        for (i = 0; i < 512; i = i + 1) begin
-            repeat (3) @(posedge clk_ram);
-            if (i == 77 && ioctl_din !== 8'hC3) k = k + 1;
-            ioctl_addr <= ioctl_addr + 1;
-        end
+        cpu_write(9'd300, 8'h3C);
+        repeat (20) @(posedge clk_ram);
         ioctl_upload <= 0;
         repeat (10) @(posedge clk_ram);
-        if (k != 0) begin errors = errors + 1; $display("T4 FAIL: byte 77 not 0xC3 in the save"); end
-        if (upload_req !== 1'b1) begin errors = errors + 1; $display("T4 FAIL: write during upload did not re-raise upload_req"); end
-        $display("T4 dirty flag: write -> raise, upload -> clear, write during upload -> raise again; new byte saved");
+        if (dut.dirty !== 1'b1) begin errors = errors + 1; $display("T4f FAIL: write during upload did not leave dirty set"); end
+        $display("T4 save request: Off -> none; On -> one per OSD opening while dirty; none while the OSD stays open; none when clean; Save NVRAM -> one; write during upload -> dirty");
 
         if (errors == 0) $display("HPS BRIDGE PASS");
         else             $display("HPS BRIDGE FAIL: %0d checks failed", errors);
