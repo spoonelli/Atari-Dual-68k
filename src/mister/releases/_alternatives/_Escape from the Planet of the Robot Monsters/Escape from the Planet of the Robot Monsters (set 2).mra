@@ -26,7 +26,7 @@
 	  REPACK).  MRA has no primitive for either operation, and the planar to
 	  chunky repack is not expressible as an interleave, so the .mra's job is
 	  to deliver the four planes byte-adjacent and let the RTL finish it.
-	  See docs/MISTER.md "ROM mapping".
+	  See docs/ROMMAP.md (the eprom/eprom2 ROM map) and docs/MISTER.md.
 
 	    0x000000  0x080000  maincpu   video 68000 program (even/odd)
 	    0x080000  0x020000  extra     second 68000 own program

@@ -10,11 +10,14 @@
 	<rbf>Escape</rbf>
 	<mameinfo parent="klax" cpp="eprom" input="klaxp"/>
 	<display type="raster" rotate="0"/>
-	<!-- GAMESEL-167: index-1 byte 01 = Klax prototype (single 68000, JSA-II).
+	<!-- GAMESEL-167: index-1 byte 01 (game_sel 2'b01) = Klax prototype
+	     (single 68000, JSA-II).
 	     Controls: 8-way stick + four buttons per player straight onto D8..D11
-	     (MAME klaxp names them Button 1..4; no Escape-style combo). Start and
-	     coin are not on this board's switch port - the prototype starts from
-	     a button; Pause on the left shoulder as on the Escape MRA. -->
+	     (MAME klaxp names them Button 1..4; no Escape-style combo). Start is
+	     the self-test step/continue switch, as on every game - the board has
+	     no Start switch, the prototype starts from a button. Coin goes
+	     through the sound board, as on Escape. Pause on the left shoulder as
+	     on the Escape MRA. -->
 	<buttons names="Button 1,Button 2,Button 3,Button 4,Start,Coin,Pause" default="A,B,X,Y,Start,Select,L"/>
 
 	<!--

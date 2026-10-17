@@ -10,10 +10,14 @@
 	<rbf>Escape</rbf>
 	<mameinfo parent="guts" cpp="eprom" input="guts"/>
 	<display type="raster" rotate="0"/>
-	<!-- GAMESEL-167: index-1 byte 10 = Guts n' Glory (single 68000, JSA-II,
-	     FFxxxx video map, own tile ROM region). Controls: analogue stick +
-	     three buttons per player; the core places them on D9 / D8 / D11 as
-	     MAME's guts ports read them, so the names here are in MAME's order. -->
+	<!-- GAMESEL-167: index-1 byte 02 (game_sel 2'b10) = Guts n' Glory
+	     (single 68000, JSA-II, FFxxxx video map, own tile ROM region).
+	     Controls: analogue stick + three buttons per player; the core places
+	     them on D9 / D8 / D11 as MAME's guts ports read them, so the names
+	     here are in MAME's order. Start is the self-test step/continue
+	     switch, as on every game - the board has no Start switch, the game
+	     starts from a button. Coin goes through the sound board, as on
+	     Escape. Pause on the left shoulder as on the Escape MRA. -->
 	<buttons names="Button 1,Button 2,Button 3,Start,Coin,Pause" default="B,A,X,Start,Select,L"/>
 
 	<!--

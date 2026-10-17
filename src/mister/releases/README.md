@@ -1,6 +1,6 @@
 # Arcade: Escape from the Planet of the Robot Monsters (MiSTer)
 
-Self-contained MiSTer distribution repository to confirm to standard core
+Self-contained MiSTer distribution repository to conform to standard core
 layout specs (`sys/`, `rtl/`, `releases/`). **Upstream development** — the
 shared machine RTL, simulation benches, measurement tooling, and the
 Analogue Pocket build — lives at
@@ -9,7 +9,11 @@ fixes land there first and are vendored here per release.
 
 A MiSTer (DE10-Nano) port of the
 [Atari Dual 68k](https://github.com/spoonelli/Atari-Dual-68k) core,
-implementing Atari Games' 1989 arcade release (MAME set `eprom`).  This LLM-assisted build has been refined extensively through testing and benchmarking against an original dedicated cabinet and PCB, with architecture decisions defaulting to preserving original gameplay accuracy.  
+implementing Atari Games' 1989 arcade release (MAME set `eprom`) and its
+`eprom2` clone, plus two unreleased Atari games that ran on the same board:
+the Klax prototypes (`klaxp1` / `klaxp2`) and Guts n' Glory (`guts`). One
+rbf serves all five; the prototypes are test items (see [Install](#install)).
+This LLM-assisted build has been refined extensively through testing and benchmarking against an original dedicated cabinet and PCB, with architecture decisions defaulting to preserving original gameplay accuracy.  
 
 **Features:** 
 - The dual-CPU program boots and runs on two genuinely concurrent 68010s with shared RAM and the mailbox
@@ -17,11 +21,16 @@ handshake, as the board does (68000 selectable — the dedicated cabinet that se
 
 - All three video layers come through the schematic's paired line-buffer sprite engine.
 
+- The prototypes run the board's single-68000 configuration with the
+JSA-II sound board (6502 + YM2151 + OKI6295) and their own button sets;
+Guts n' Glory also has its own video map. Each MRA carries a one-byte game
+select, so older Escape MRAs keep working unchanged.
+
 - The hall-effect stick model includes the game's own in-game calibration
 screens; high scores and operator settings are saved to the SD card
 (see [High scores and settings](#high-scores-and-settings)).
 
-- The machine RTL is identical to the Analogue Pocket release - plan to continue dual path development wherever feasible.  
+- The machine RTL comes from the same upstream source as the Analogue Pocket core - plan to continue dual path development wherever feasible. The current Pocket release (v0.1.1) is Escape set 1 only; set 2, the prototypes and the factory-map halftone are planned for the Pocket after this MiSTer release.
 
 
 | Subsystem | State |
@@ -29,11 +38,13 @@ screens; high scores and operator settings are saved to the SD card
 | Build (CI, Quartus in Docker) | ✅ per-push compile, timing summary, rbf artifact |
 | Native simulation (GHDL + iverilog, upstream) | ✅ boot, march, JSA, sprite-scene replay benches, plus MiSTer-specific gates: playfield fetch service, crowd-load arbiter bench with hardware-calibrated thresholds |
 | ROM loading (MRA + ioctl → SDRAM, sprite repack in RTL, BRAM shadows) | ✅ CRC-checked by the MRA; no ROM data distributed |
-| Dual 68010s + shared RAM + mailbox handshake | ✅ genuinely concurrent on hardware |
+| Games (one rbf, game byte in each MRA) | Escape set 1 ✅; set 2, both Klax prototypes and Guts n' Glory boot and play on the first device run (MiSTer 168), full test pending; the prototypes are test items |
+| Dual 68010s + shared RAM + mailbox handshake (Escape; the prototypes use one 68000) | ✅ genuinely concurrent on hardware |
 | SDRAM subsystem (open-row controller, bank-partitioned MO tile mirror, MO/CPU interleaved arbiter) | ✅ bench-gated; crowd performance measured at Pocket parity |
-| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay |
-| Sound (JSA-I: 6502 + YM2151 + TMS5220 speech; JSA-II: 6502 + YM2151 + OKI6295 for the prototypes) | ✅ full pipeline; liveness watchdog self-heals a wedged sound CPU; JSA-II bench-proven on the real Klax/Guts firmware, device verification pending |
-| Inputs (buttons, hall-stick model, keyboard) | ✅ incl. in-game calibration screens |
+| Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay; the factory map's halftone follows the real board (matches the PCB capture on MiSTer 168), where MAME differs |
+| Sound, JSA-I (Escape: 6502 + YM2151 + TMS5220 speech) | ✅ full pipeline; liveness watchdog self-heals a wedged sound CPU |
+| Sound, JSA-II (prototypes: 6502 + YM2151 + OKI6295) | bench-proven on the real Klax/Guts firmware; first device run on MiSTer 168; full test pending |
+| Inputs (buttons, hall-stick model, keyboard) | ✅ incl. in-game calibration screens; per-game button sets for the prototypes (new in 0.2) |
 | OSD (Video / Audio / Pause options / Debug pages; pause, rotate, CRT adjust) | ✅ build identity in the about line `ESCAPE v<date> by spoonelli` |
 | High scores / operator settings | ✅ saved per game to `config/nvram/` with Save NVRAM, Save settings, or Autosave NVRAM — see below (new in 0.2; earlier MiSTer builds did not save) |
 
@@ -77,7 +88,9 @@ engine whose architecture-level properties come from the schematic).
   sub-half-speed dips where MAME dips in 19-28% of samples.
 - **Pixels**: motion-object output replays MAME scene dumps at **100.0000%
   agreement and coverage** on crowd, door, spawn-flash and factory-map
-  fixtures.
+  fixtures. The factory map's halftone shading is the one place the core
+  now departs from MAME on purpose: it follows the real board, checked
+  against a capture from an original PCB.
 
 Escape's game logic is IRQ- and frame-driven rather than cycle-counted, so
 at equal frame pacing the gameplay is indistinguishable from the arcade.
@@ -118,8 +131,9 @@ The rbf, the MRAs and the `_alternatives/` folder are in
      `klax`). The official distribution's `_Klax` folder also holds the
      production Klax sets, served by a different core; each MRA names its
      own core, so they coexist.
-   The prototypes are **test items** until they have been verified on a
-   MiSTer; the MRA tells the core which game it is loading (a one-byte
+   The prototypes are **test items** until the full test plan passes (the
+   first device run, MiSTer 168, booted and played all five games); the
+   MRA tells the core which game it is loading (a one-byte
    index-1 block), so old Escape MRAs keep working unchanged.
 3. Put your own MAME romsets in `games/mame/`: `eprom.zip` (set 2 also
    wants `eprom2.zip` beside it), `klax.zip` for the Klax prototypes (a
@@ -131,17 +145,25 @@ The rbf, the MRAs and the `_alternatives/` folder are in
 
 ## Self-Test and First boot
 
-Note that this core follows the authentic behavior of the original PCB with a "Waiting for Second Processor" screen that will hold for several seconds.  After that, the machine boots clean. To confirm which build is running, open the OSD — the
+On Escape, the core follows the authentic behavior of the original PCB with a "Waiting for Second Processor" screen that will hold for several seconds.  After that, the machine boots clean. To confirm which build is running, open the OSD — the
 **version footer** at the bottom reads `ESCAPE v<date> by spoonelli`,
 with the date matching the `.rbf` filename you installed. Check they
 agree; it is the only guard against a cached or stale `.rbf`, and it
 has caught that more than once.
 
+**Start** in the MiSTer button list is the board's self-test step /
+continue switch on every game: in self-test (**Service Mode** on the root
+menu) it steps through and continues the test screens.
+
 ## Controls
 
-Run **Define eprom buttons** in the OSD the first time (new buttons do not
-appear in previously saved maps): Jump, Fire, Duck, Bomb, Start, Coin,
-and Pause. Fresh installs default to Jump on the left face button, Fire
+Run **Define eprom buttons** in the OSD the first time (new buttons do
+not appear in previously saved maps). MiSTer names that entry, and saves
+the map, after each MRA's set name, so set 2, the Klax prototypes and
+Guts show *Define eprom2 / klaxp1 / klaxp2 / guts buttons* and each keeps
+its own map. Escape's buttons are Jump, Fire, Duck, Bomb,
+Start, Coin, and Pause. In play, Jump doubles as Start, as on the board;
+the Start button is the self-test step / continue switch. Fresh installs default to Jump on the left face button, Fire
 on the bottom, Duck on the right, Bomb on top (SNES Y/B/A/X), and Pause
 on the left shoulder. The define
 flow prompts for all seven buttons - answer every prompt before Finish,
@@ -153,7 +175,8 @@ core button to it silently clears the slot instead.
 mapped straight to the board's button bits (MAME names them Button 1..4;
 no combo); Guts n' Glory uses the analogue stick and three buttons in
 MAME's order. Neither prototype has a Start switch on the board - they
-start from a button. Coins go through the sound board as on Escape.
+start from a game button - so MiSTer's Start is only the self-test step /
+continue switch there. Coins go through the sound board as on Escape.
 
 ## High scores and settings
 
@@ -220,13 +243,14 @@ paths:
 
 (or delete its stanza from `/media/fat/downloader.ini`), then run
 `update_all` again and delete any leftover `_Arcade/cores/Arcade-Escape_*.rbf`.
-After an MRA update that changes the button set, run **Define ESCAPE
-buttons** once — saved maps do not carry over.
+After an MRA update that changes the button set, run **Define eprom
+buttons** (or the other set's entry) once — saved maps do not carry over.
 
 ## Reporting problems
 
-Include the build number from the credits page (a photo is ideal) and a
-short video if the issue is visual. The full port record — what is verified
+Include the OSD footer line (`ESCAPE v<date> by spoonelli`), the rbf
+filename and which MRA you launched, plus a short video if the issue is
+visual. The full port record — what is verified
 on hardware, known behaviors, and how the SDRAM arrangement differs from
 the Pocket's — lives in
 [docs/MISTER.md](https://github.com/spoonelli/Atari-Dual-68k/blob/mister/docs/MISTER.md).
@@ -235,7 +259,7 @@ the Pocket's — lives in
 
 GPL-3.0 — sources at https://github.com/spoonelli/Atari-Dual-68k (branch
 `mister`; the Pocket release is
-[v0.1.0](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/v0.1.0)).
+[v0.1.1](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/v0.1.1)).
 Third-party components and attributions: NOTICE.md in the repo. This
 project distributes no ROM data and no copyrighted artwork; use only with
 software you are legally entitled to.
