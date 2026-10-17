@@ -186,6 +186,10 @@ jobs:
           cp src/mister/output_files/Arcade-Escape.rbf \
              "mister-release/Escape_$(date -u +%Y%m%d).rbf"
           cp src/mister/releases/*.mra mister-release/
+          # ALT-172: clones live in the MiSTer family layout, one folder per
+          # parent game under _alternatives/ (as Arcade-Cave / Irem M72), so
+          # they sit in a folder in the arcade menu instead of the main list.
+          cp -R src/mister/releases/_alternatives mister-release/
           # user-facing install README; docs/MISTER.md stays the engineering record
           cp src/mister/releases/README.md mister-release/README.md
           # licence texts must accompany the binary (GPL-3.0; NOTICE.md is
@@ -208,7 +212,12 @@ jobs:
           EOF
           # 2. the .mra is a text manifest: ASCII only, and no <part> may carry
           #    inline payload. A part with data between its tags is a ROM byte.
-          for m in mister-release/*.mra; do
+          # ALT-172: every MRA in the tree, _alternatives/ included - a
+          # top-level glob would silently skip the clone folders.
+          scanned=0
+          while IFS= read -r m; do
+            [ -n "$m" ] || continue
+            scanned=$((scanned + 1))
             sz=$(wc -c < "$m")
             echo "mra: $m ($sz bytes)"
             # Count bytes outside tab/LF/CR + printable ASCII. Done with tr,
@@ -226,10 +235,15 @@ jobs:
             if [ "$sz" -gt 65536 ]; then
               echo "MRA IS $sz BYTES - far too big to be CRC references" >&2; fail=1
             fi
-          done
+          done <<EOF
+          $(find mister-release -name '*.mra')
+          EOF
+          want=$(find src/mister/releases -name '*.mra' | wc -l | tr -d ' ')
+          echo "MRAs scanned: $scanned of $want in src/mister/releases"
+          [ "$scanned" -eq "$want" ] && [ "$want" -ge 1 ] || { echo "SCANNED $scanned MRAs, EXPECTED $want" >&2; fail=1; }
           # 3. prove this check is looking at something rather than matching
-          #    nothing: the manifest must actually carry CRC references.
-          n=$(grep -o 'crc="' mister-release/*.mra | wc -l | tr -d ' ')
+          #    nothing: the manifests must actually carry CRC references.
+          n=$(find mister-release -name '*.mra' -exec grep -o 'crc="' {} + | wc -l | tr -d ' ')
           echo "crc= references: $n"
           [ "$n" -ge 20 ] || { echo "ONLY $n crc= REFS - is this really the manifest?" >&2; fail=1; }
           exit $fail

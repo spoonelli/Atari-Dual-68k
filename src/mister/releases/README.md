@@ -89,7 +89,8 @@ and the
 
 ## Install
 
-Both files are in [`releases/`](releases/) in this repository.
+The rbf, the MRAs and the `_alternatives/` folder are in
+[`releases/`](releases/) in this repository.
 
 1. Copy `Arcade-Escape_YYYYMMDD.rbf` to `_Arcade/cores/` on your MiSTer
    SD card (the official distribution installs the same file as
@@ -97,27 +98,34 @@ Both files are in [`releases/`](releases/) in this repository.
    the framework matches against either spelling. **Delete any older
    `escape*.rbf`, `Escape_*.rbf` or `Arcade-Escape*.rbf`**; the framework
    matches by prefix and picks the newest-looking name.
-2. Copy the MRAs you want to `_Arcade/`, replacing any earlier copy
-   (older MRAs reference the old rbf name). One rbf serves every game on
-   this board:
-   - `Escape from the Planet of the Robot Monsters (set 1).mra` — the game
-     this core was built for.
-   - `Escape ... (set 2).mra` — MAME's `eprom2` clone (all-rev-1 program).
-     Belongs under `_Arcade/_alternatives/_Escape from the Planet of the
-     Robot Monsters/` in the official layout.
-   - `Klax (prototype set 1).mra`, `Klax (prototype set 2).mra` — the two
-     Klax prototypes, which ran on this board with a JSA-II sound board
-     (MAME `klaxp1`/`klaxp2`, clones of `klax`; official layout
-     `_alternatives/_Klax/`).
-   - `Guts n' Glory (prototype).mra` — Atari's unreleased Guts n' Glory
-     (MAME `guts`), same board, JSA-II, its own video map.
+2. Copy the MRAs to `_Arcade/`, keeping the folder layout, and replace
+   any earlier copies (older MRAs reference the old rbf name or lack the
+   save declaration). One rbf serves every game on this board. The layout
+   is MiSTer's family convention: one MRA per distinct game in the main
+   list, clones in a folder per parent game under `_alternatives/`, so
+   they don't crowd the main list:
+   - `Escape from the Planet of the Robot Monsters (set 1).mra` — top
+     level. The game this core was built for.
+   - `Guts n' Glory (prototype).mra` — top level. Atari's unreleased
+     Guts n' Glory (MAME `guts`): same board, JSA-II sound, its own video
+     map.
+   - `_alternatives/_Escape from the Planet of the Robot Monsters/Escape
+     from the Planet of the Robot Monsters (set 2).mra` — MAME's `eprom2`
+     clone (all-rev-1 program).
+   - `_alternatives/_Klax/Klax (prototype set 1).mra` and `(prototype set
+     2).mra` — the two Klax prototypes, which ran on this board with a
+     JSA-II sound board (MAME `klaxp1`/`klaxp2`, clones of production
+     `klax`). The official distribution's `_Klax` folder also holds the
+     production Klax sets, served by a different core; each MRA names its
+     own core, so they coexist.
    The prototypes are **test items** until they have been verified on a
    MiSTer; the MRA tells the core which game it is loading (a one-byte
    index-1 block), so old Escape MRAs keep working unchanged.
 3. Put your own MAME romsets in `games/mame/`: `eprom.zip` (set 2 also
-   wants `eprom2.zip` beside it), `klaxp1.zip` / `klaxp2.zip` with
-   `klax.zip` beside them (the parent supplies the shared chips), or
-   `guts.zip`. **No ROM data is included** — each MRA assembles its game
+   wants `eprom2.zip` beside it), `klax.zip` for the Klax prototypes (a
+   merged set holds both; split `klaxp1.zip` / `klaxp2.zip` beside it work
+   too), and `guts.zip`. MiSTer finds every chip by CRC, so split and
+   merged MAME sets both work. **No ROM data is included** — each MRA assembles its game
    from your verified dumps.
 4. Launch the game from the Arcade menu.
 
