@@ -53,7 +53,7 @@ through `run_tb.sh`. **G** = in `run_all_gates.sh`; **i** = iverilog, **g** = GH
 | `run_sdram_refresh_tb.sh` | i | worst-case refresh interval of every shipped/proposed policy vs 7.8125 µs; two negative controls must FAIL | **G** (openrow and simple). See `docs/DEVIATIONS.md` F1 |
 | `run_sdram_traffic_tb.sh` | i | row-hit rate, miss split, per-client latency and MO demand for the arbiter's real access sequence, with control cells | Measurement, not a gate |
 | `run_psram_tb.sh` | i | CRAM/PSRAM timing: shipping config must pass, the BUILD 106 mis-declared clock must fail | **G** |
-| `run_prio_tb.sh` | i | `escape_prio.v` exhaustively against `mo_priority_model.py` (MOSHADE-162 form, 507,904 rows); also a Guts-mode sweep against MAME's `screen_update_guts` rule (GUTS-168) | **G**. The exit code covers the Escape sweep only; read the `GUTS PRIO CHECK PASS/FAIL` line |
+| `run_prio_tb.sh` | i | `escape_prio.v` exhaustively against `mo_priority_model.py` (MOSHADE-162 form, 507,904 rows); also a Guts-mode sweep against MAME's `screen_update_guts` rule (GUTS-168) | **G**. Fails unless both the Escape sweep and the `GUTS PRIO CHECK` pass |
 | `run_mob_tb.sh` | i | MO engine + comparator on a MAME scene dump, scored against MAME's frame | **G**. Scroll via env vars (`XSCROLL=… YSCROLL=…`); `MOB_PARAMS='-Ptb_mob.GUTS=1 …'` for a Guts scene. Fixtures: `make_scene_hex.py`, `make_guts_scene_hex.py`; `make_shadow_twin_scene.py` (MOSHADE-162 pen-1 special) and `make_guts_pen1_special.py` (GUTS-169 control) rewrite an existing fixture |
 | `run_mob_order_check.sh` | i | the park queue did not change per-line sprite load order (prefix check against a base ref) | **G**. Needs `BASE_REF` |
 | `run_mob_perf.sh` | i | MO throughput against `mob_golden.py` at a given fetch latency | |
@@ -77,7 +77,7 @@ through `run_tb.sh`. **G** = in `run_all_gates.sh`; **i** = iverilog, **g** = GH
 | `run_tb.sh tb_escape_jshad 30ms` | g | 6502 boot through the jshad serve FSM; with `G_GAME`/`G_JSART`, OKI requests present for JSA-II and absent for JSA-I | 0.2 generics; see the note at the end |
 | `run_hps_bridge_tb.sh` | i | `escape_hps_bridge.v`: game-byte latch and EEPROM load/save across clk_ram→clk_sys (NVRAM-170); expects `HPS BRIDGE PASS` | **MiSTer only** — exists only on `milestone-0.2-mister`, where it is a CI gate |
 | `run_mister_pf_tb.sh` | i | playfield fetches served by the MiSTer arbiter through download, reset release and one frame | **MiSTer only** — exists only on `milestone-0.2-mister` |
-| `run_mister_moarb_tb.sh` | i | MO vs fastpath arbitration on MiSTer, gated against hardware verdicts (MOARB-146/147) | **MiSTer only** — exists only on `milestone-0.2-mister`. Its header is copied from `run_mister_pf_tb.sh` |
+| `run_mister_moarb_tb.sh` | i | MO vs fastpath arbitration on MiSTer, gated against hardware verdicts (MOARB-146/147) | **MiSTer only** — exists only on `milestone-0.2-mister` |
 
 Coverage gaps worth knowing: no bench exercises EPROM2-163's `v_img` remap (set 2's
 self-test on hardware is the check), and MOSHADE-162 is covered only through the
