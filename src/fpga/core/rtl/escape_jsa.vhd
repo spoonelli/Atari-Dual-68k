@@ -1,4 +1,5 @@
--- Atari JSA-I sound board (Escape variant: YM2151 + TMS5220 stub, no POKEY).
+-- Atari JSA sound board: JSA-I (Escape: YM2151 + TMS5220, no POKEY) and, with
+-- BOARD=2 / BOARD_RT=1, JSA-II (Klax prototypes / Guts: YM2151 + OKI6295 via jt6295).
 -- Re-implemented from the behavior documented in reference/atarijsa.cpp (MAME,
 -- BSD-3-Clause) — no code copied. Full spec: docs/JSA.md.
 --

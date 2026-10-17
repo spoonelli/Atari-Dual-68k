@@ -1,10 +1,14 @@
-# Pre-flight checklist — first public RC
+# Release checklist
 
-Status of every item is one of **TODO**, **DONE**, or **BLOCKED (needs a call)**.
+Status of every item is one of **TODO**, **OPEN**, **DONE**, or **BLOCKED (needs a call)**.
 Nothing here is a nice-to-have: the blockers are things that are painful or
 impossible to change after strangers have installed the core.
 
-Two sequencing facts drive the order:
+Sections A–F began as the pre-flight checklist for the first public RC
+(v0.1.0) and are kept as that record. **What blocks the next release is in
+section G** ("0.2 release gates"); section H carries the post-v0.1.1 work items.
+
+Two sequencing facts drove the v0.1.0 order (record — both done):
 
 1. **There is exactly one history rewrite to do, not two.** The marquee purge
    and the "development artifact cleanup" are the same operation — the repo
@@ -55,13 +59,14 @@ Two sequencing facts drive the order:
 
 ## D. Documentation and the historical record
 
-The record is substantial — 26 docs, ~9,400 lines, with `docs/README.md`
-separating reference from investigation. Three real gaps:
+The record is substantial — 26 docs, ~9,400 lines at v0.1.0 (36 docs,
+~13,500 lines by 2026-10-17), with `docs/README.md` separating reference from
+investigation. Three real gaps at the time:
 
 | # | Item | State | Note |
 |---|---|---|---|
-| D1 | **`HISTORY.md` stops at build 102** | **DONE (2026-08-31)** — extended through build 153 and the v0.1.x releases (eras 9–15) | Titled "v1–v78"; covers v1–v78 plus builds 101–102. **Builds 103–113 are absent** — the SDRAM arc, VSHAD3, the stain fix, TAS atomicity, EEPROM, the MiSTer port, bus hardening. `RETROSPECTIVE.md` covers that ground but **thematically, not chronologically**: it answers "what did we learn about sprites", not "what happened in build 107". |
-| D2 | **`HISTORY.md` has two headings numbered "Era 6"** | **DONE** — resolved in an earlier extension; verified single-numbered eras 1–15 | Lines 89 and 116. Appended without reconciling — exactly the drift `docs/README.md` warns about, in the doc that is supposed to be the spine. |
+| D1 | **`HISTORY.md` stops at build 102** | **DONE (2026-08-31)** — extended through build 153 and the v0.1.x releases (eras 9–15); since extended through build 161 and the milestone 0.2 test builds (eras 9–17) | *(Original gap, as written:)* Titled "v1–v78"; covers v1–v78 plus builds 101–102. **Builds 103–113 are absent** — the SDRAM arc, VSHAD3, the stain fix, TAS atomicity, EEPROM, the MiSTer port, bus hardening. `RETROSPECTIVE.md` covers that ground but **thematically, not chronologically**: it answers "what did we learn about sprites", not "what happened in build 107". |
+| D2 | **`HISTORY.md` has two headings numbered "Era 6"** | **DONE** — resolved in an earlier extension; verified single-numbered eras 1–17 (re-checked 2026-10-17) | Lines 89 and 116. Appended without reconciling — exactly the drift `docs/README.md` warns about, in the doc that is supposed to be the spine. |
 | D3 | **Nothing separates community-reusable knowledge** | TODO | See below. |
 | D4 | `RELEASE_NOTES.md` known-issues honesty | **DONE (v0.1.0)** | Known-issues rewritten with resolution stories in the pre-release refresh; accuracy section carries the measured benchmarks. |
 
@@ -96,14 +101,14 @@ weight:
 | # | Item | State |
 |---|---|---|
 | E1 | Fresh-SD **clean install** (not an upgrade over an existing install) | TODO |
-| E2 | Save-path device test (A6) | TODO |
-| E3 | Clean-boot look (A7) | TODO |
+| E2 | Save-path device test (A6) | DONE (v0.1.0) — see A6 |
+| E3 | Clean-boot look (A7) | DONE (v0.1.0) — see A7 |
 | E4 | Two-player session, including the fixed P2 bomb | TODO |
 | E5 | Package guards green on the actual RC artifact (5/5, zero ROMs) | DONE for build 113 |
 
 ## F. A5 in detail — what to do with the diagnostic HUD
 
-Today: `L1` edge-toggles `diag_on` (starts hidden), `R1` cycles 7 pages. There is
+Before build 114 (record; A5 since gated it behind Developer HUD): `L1` edge-toggles `diag_on` (starts hidden), `R1` cycles 7 pages. There is
 no `interact.json` entry. So the HUD is reachable by any player who presses L1,
 and L1/R1 are unavailable for anything else.
 
@@ -144,56 +149,145 @@ Measure the saving first; then decide whether it changes the recommendation.
 
 ---
 
-## H. v0.1.2 planning (drafted 2026-08-31, post-submission)
+## G. 0.2 release gates (current — updated 2026-10-17)
+
+**Shipped:** Pocket **v0.1.1** (build 36, 2026-08-30); MiSTer **mister-v0.1.2**
+(build 161, 2026-09-02), adopted into MiSTer-devel 2026-09-03.
+**Order of work (owner):** MiSTer 0.2 first, then Pocket 0.2 (Escape set 2 +
+H8), then the Klax / Guts Pocket cores. Nothing ships until its rows below
+are DONE.
+
+Test builds (unreleased, handed to the owner for device testing):
+
+| Build | Carries |
+|---|---|
+| Pocket 37 | H8 factory-map halftone (MOSHADE-162) |
+| Pocket 38 | H8 + Escape set 2 (EPROM2-163) |
+| MiSTer 162 | H8 |
+| MiSTer 163 | + Escape set 2 |
+| MiSTer 164 | + Klax prototypes (KLAX-165, GAMESEL-167) |
+| MiSTer 165 | + Guts video mode (GUTS-168) |
+| MiSTer 166 | + per-game button mapping |
+| MiSTer 167 | + GUTS-169, MRAs say `<rbf>Escape</rbf>`, rbf named `Escape_YYYYMMDD.rbf` |
+| MiSTer 168 | + NVRAM-170 (EEPROM persistence, reliable game-byte latch), jt6295 licence notice |
+| MiSTer 169 | + NVRAM-171 (Arcade-Cave saving), ALT-172 (`_alternatives/` clone MRAs) — **the build under test** |
+
+Work-tag numbers are not build numbers (GUTS-169 is in MiSTer 167, NVRAM-170
+in 168, NVRAM-171 and ALT-172 in 169).
+
+**Device results so far.** Owner's first run of **MiSTer 168**: all five MRAs
+(Escape set 1, set 2, Klax prototype sets 1 and 2, Guts) boot and play. The
+level-3 factory map matches the PCB capture (frame 24402 / t406–410): the
+travelled routes and START box dim in the same hue, the level-1 map is all
+bright, the "you are here" node blinks every 10 frames (10 grey / 10 box,
+a 20-frame cycle — 3 Hz at 60 fps), identical to the PCB capture, and map
+timing matches — **H8 is device-confirmed on MiSTer.** Colour differences
+between that MiSTer capture and the PCB capture are not attributed to the core (different capture paths; see G-post-1).
+Pocket 37/38: not yet tested. MiSTer 169: not yet tested.
+
+**MiSTer 0.2**
+
+| # | Gate | State | Note |
+|---|---|---|---|
+| G1 | Device tests T1–T10 on MiSTer 169 | **OPEN** | T1 Escape set 1 regression vs 161 (POST, attract, play, speech/music, Bomb, OSD pause/dim/rotate, CRT position); T2 H8 map halftone — **PASS on 168**; T3 set 2 POST + play; T4 Klax sets 1/2 boot as Klax every time (five launches), attract, coin, start, OKI audio, buttons; T5 Guts menu tint, attract depth, analogue stick, three buttons, samples; T6 game switching without a power cycle; T7 the 161 set-1 MRA (no game byte) still boots Escape; T8 persistence (Autosave NVRAM Off by default and no "Saving..." on menu changes; Save NVRAM survives a power cycle as a 512-byte `.nvm` named after the MRA; Autosave On saves once per OSD visit; Klax and Escape keep separate files); T9 ten minutes of crowd play, nothing worse than 161; T10 menu layout (Arcade list shows Escape set 1 and Guts only; set 2 and both Klax sets launch from `_alternatives/`). The 168 first run covers boot-and-play for all five MRAs, not the full T-list. |
+| G2 | README / RELEASE_NOTES rows flipped | **OPEN — at release only** | Klax / Guts / set 2 move from "not supported" to supported, DEVIATIONS C6/C7 from "pending" to shipped, an "Unreleased — milestone 0.2" block becomes the 0.2 entry. Not before the release build exists. |
+| G3 | Release PR into the MiSTer-devel fork's `releases/` | **OPEN** | The rbf (`Escape_YYYYMMDD.rbf`) plus the five MRAs in the family layout (set 1 and Guts top-level; set 2 under `_alternatives/_Escape from the Planet of the Robot Monsters/`, the Klax prototypes under `_alternatives/_Klax/`), every MRA `<rbf>Escape</rbf>` (done in 167, so the PR does not revert the maintainer's fix). The PR text must note that `_Klax` is shared with RetroShrimp's Arcade-Klax_MiSTer core — each MRA names its own rbf, so the two coexist. |
+| G4 | 0.2 fixes in the build | **DONE in RTL / packaging (167–169)** | GUTS-169, MRA rbf name, NVRAM-170 (including the game-byte latch fix), jt6295 notice, NVRAM-171, ALT-172 with the recursive CI ROM-data gate. Device verification is G1. |
+| G5 | H1/H2 (flicker tail) in or deferred | **OPEN (decision)** | Either bench and ship H1 with 0.2 or record it as deferred; T9 is the guard either way. |
+| G6 | Version metadata | **OPEN** | `core.json` on the MiSTer branch still carries `0.1.0` / `2026-08-29` (missed the v0.1.1 bump); bump both checkouts together at 0.2. |
+
+**Pocket 0.2 (after MiSTer 0.2)**
+
+| # | Gate | State | Note |
+|---|---|---|---|
+| G7 | Pocket 38 device tests T2 / T3 / T8 | **OPEN** | H8 map halftone vs the PCB capture, set 2 POST + play (needs a set-2 image from the 38 zip's `build_rom.py`), high score survives a power cycle. |
+| G8 | Release build from the final commit | **OPEN** | Not a test build re-labelled; package guards green on the actual artifact, zero ROMs. |
+| G9 | Metadata bump to 0.2.0 | **OPEN** | `core.json` version + `date_release` (the *release* date, Era 13's lesson), tag `v0.2.0`, RELEASE_NOTES records the build number; `info.txt` refreshed (H5: "v0.2.x", "eprom or eprom2", build stamp behind Developer HUD). |
+| G10 | Klax / Guts Pocket cores | **LATER — after MiSTer 0.2** | One core per game: `spoonelli.klaxp`, `spoonelli.guts`; `spoonelli.eprom` is untouched. |
+
+**Milestone items that are not release gates**
+
+| # | Item | State | Note |
+|---|---|---|---|
+| G-post-1 | Palette accuracy from a same-path capture | **OPEN (post-0.2)** | Capture the PCB and the core through the same converter and settings, then judge the palette; MAME's palette formula is self-described as crude, so it is not the reference. |
+| G-post-2 | PCB gameplay comparisons | **OPEN (milestone 0.2 list)** | Walk cycle, slowdowns and screen behaviour against the direct PCB reference capture of 2026-09-01 (board over MAME). Map timing already matches on MiSTer 168. |
+| G-post-3 | Save states | **FUTURE (evaluation)** | See the slow-burn list. |
+
+**Recorded decisions**
+
+| Decision | Detail |
+|---|---|
+| Packaging split | MiSTer: one rbf (`Escape_YYYYMMDD.rbf`), the game picked by the MRA's index-1 byte, clones in the `_alternatives/` family layout. Pocket: one core per game — `spoonelli.eprom` untouched, `spoonelli.klaxp`, `spoonelli.guts` — after MiSTer 0.2. |
+| Shared `_Klax` folder | `_alternatives/_Klax/` is shared with RetroShrimp's Arcade-Klax_MiSTer core; each MRA names its own rbf; mention it in the release PR (G3). |
+| Branch merge declined | `milestone-0.2` and `milestone-0.2-mister` stay separate. Every doc fix must go to both branches. |
+| MiSTer saving | Follows Arcade-Cave: root-menu "Autosave NVRAM" default Off, plus "Save NVRAM" (NVRAM-171). |
+| ThunderJaws | **Future work** (owner, 2026-10-17: "keep thunderjaws as future work"). See H11. |
+| Release order | MiSTer 0.2 → Pocket 0.2 (set 2 + H8) → Klax / Guts Pocket cores. |
+
+---
+
+## H. Post-v0.1.1 work (drafted 2026-08-31 as "v0.1.2 planning")
 
 Sequenced after the MiSTer-devel submission (sent 2026-08-31); nothing here
-blocks the shipped v0.1.1 releases.
+blocks the shipped v0.1.1 releases. The milestone 0.2 rows (H8 onward) feed
+section G.
 
-**MiSTer v0.1.2 — close the flicker tail (fetch-cost axis, bench-first):**
+**MiSTer v0.1.2 — close the flicker tail (fetch-cost axis, bench-first; H1/H2 did not make v0.1.2 — in or out of 0.2 is gate G5):**
 
 | # | Item | Note |
 |---|---|---|
-| H1 | `sdram_openrow` timing constants at 35.795 MHz | tRCD/tRP 2→1, tRFC 9→3 — datasheet-legal with margin (27.94 ns/clk). One variable; scored on `tb_mister_moarb` before hardware; watch the hold floor. |
-| H2 | PF line-start burst spreading | Only if H1 leaves the tail: the playfield's clustered line-start fetches are the residual MO latency-spike source. |
+| H1 | `sdram_openrow` timing constants at 35.795 MHz | **OPEN** (checked 2026-10-09: `sdram_openrow` still T_RCD 2 / T_RFC 9). tRCD/tRP 2→1, tRFC 9→3 — datasheet-legal with margin (27.94 ns/clk). One variable; scored on `tb_mister_moarb` before hardware; watch the hold floor. |
+| H2 | PF line-start burst spreading | **OPEN** (behind H1). Only if H1 leaves the tail: the playfield's clustered line-start fetches are the residual MO latency-spike source. |
 | H3 | MiSTer-devel review follow-ups | **DONE — shipped as `mister-v0.1.2` (2026-09-02, build 161).** Builds 154–161: menu pages per Cave/Psikyo/DK, credits pages retired for the about-line credit, DK-style pause + dim, Rotate/Flip, CRT H/V adjust, MRA `<buttons>` corrected (Pause + owner defaults), composite-centred sync (MegaDrive-calibrated). H1/H2 (flicker tail) carry to the next MiSTer release alongside H8. |
 | H4 | db retirement on adoption | **DONE (2026-09-03)** — MiSTer-devel fork live, official distribution carries `Escape_YYYYMMDD.rbf`; empty db published under the unchanged `db_id`, README tells users to uninstall the stanza. Trigger was fork issue #1 (two dbs sharing the MRA path + a stale six-button map). |
 
-**Pocket v0.1.2 — small truths:**
+**Pocket v0.1.2 — small truths (there was no Pocket v0.1.2; these now ride Pocket 0.2 or later):**
 
 | # | Item | Note |
 |---|---|---|
-| H5 | Ship the refreshed `info.txt` | Committed 2026-08-30, rides the next Pocket release. |
-| H6 | D4: 33-pixel deviation at scroll 50/157 | Suspect already named (un-wrapped `spr_right` in off-screen rejection); one bench-driven attempt. **New data point (2026-09-09):** a freshly dumped crowd scene (`scenedump2.lua` idx 108, scroll 222/422) scores VS-MAME coverage 99.81% — 25 pixels MAME draws that the engine drops, "dropped tiles, not draw order". A/B-proven pre-existing (identical with the pre-MOSHADE-162 RTL). Same family as D4; fixture regenerable from MAME in a minute. |
-| H7 | Speech-tail adjudication | The last unmeasured claim in the docs — measure vs MAME audio, then fix or retract with numbers. |
+| H5 | Ship the refreshed `info.txt` | **OPEN** — rides Pocket 0.2 (G9). Committed 2026-08-30, rides the next Pocket release; at 0.2 it also needs "v0.2.x", "eprom or eprom2", and the build stamp described as appearing once Developer HUD is ticked. |
+| H6 | D4: 33-pixel deviation at scroll 50/157 | **OPEN.** Suspect already named (un-wrapped `spr_right` in off-screen rejection); one bench-driven attempt. **New data point (2026-09-09):** a freshly dumped crowd scene (`scenedump2.lua` idx 108, scroll 222/422) scores VS-MAME coverage 99.81% — 25 pixels MAME draws that the engine drops, "dropped tiles, not draw order". A/B-proven pre-existing (identical with the pre-MOSHADE-162 RTL). Same family as D4; fixture regenerable from MAME in a minute. |
+| H7 | Speech-tail adjudication | **OPEN.** The last unmeasured claim in the docs — measure vs MAME audio, then fix or retract with numbers. |
 
-**Both platforms — accuracy, next release after v0.1.2 (shared machine RTL):**
+**Milestone 0.2 — MiSTer first, Pocket after (shared machine RTL):**
 
 | # | Item | Note |
 |---|---|---|
-| H8 | Factory-map "halftone": travelled nodes must dim, not vanish | **FIXED IN RTL (MOSHADE-162, 2026-09-09) — device verification pending.** Root cause, from the romset GAL fuse maps + the PCB capture: GAL 136069.100V writes special (MPR2) pixels of pen 1 into the line buffer, so they shade the playfield (SHADE → colour-RAM +0x100, the I=4 bank the game populates); MAME `continue`s before SHADE and never dims (its level maps stay bright), and MAME's extra `pf |= 0x080` on M7 pointed shadows at the never-written 0x38X bank — the "erased to black". Both transcribed into our line buffer/comparator; both corrected, benches (tb_prio exhaustive, tb_mob shadow-twin, tb_stain) pass. Verify on device at a level ≥ 2 map against the PCB capture t406–t410: travelled nodes and START box dim same-hue (0x30X). Record: `investigations/MAP_HALFTONE.md`. |
-| H9 | `eprom2` (Escape set 2) | **IMPLEMENTED (EPROM2-163, 2026-09-09) — device verification pending.** The tenth main pair lands at image `0x0A0000`; `escape_core` remaps the video CPU's A19 window on all four ROM paths; `build_rom.py` auto-detects the set (and borrows shared chips from a sibling `eprom` folder); MiSTer gets its own `(set 2).mra`. MAME read taps (6000 frames): window read only in POST (f626–641), extra CPU never touches its hole. `tb_escape_core` boots set 2 (reset PC `$6A4`) and still boots set 1. Verify on both devices: POST passes (the checksum covers the new window), attract + a level of play, then the H8 map check on set 2 too. |
-| H10 | Klax prototypes / Guts n' Glory (JSA-II variants) | **IN PROGRESS (2026-09-09) — no romsets on hand, bench-only.** Deltas measured from MAME in `investigations/KLAX_GUTS.md`. Done: `jt6295` vendored (GPL-3.0, NOTICE row), `escape_jsa` `BOARD=2` (OKI in the TMS slot, WRIO/MIX/RDIO remaps, second ROM client at image 0x240000), `tb_escape_jsa2` + `run_oki_tb.sh` pass, JSA-I bench unchanged. Romsets arrived 2026-09-09 (MAME-verified); `EXTRA_EN=0` + Klax inputs (KLAX-165), `build_rom.py` klaxp1/klaxp2/guts, Guts decoder map (GUTS-166), and the one-selector design (GAMESEL-167: `game_sel` runtime on MiSTer via the MRA index-1 byte, constant on the Pocket; OKI ADPCM through the SDRAM arbiter) are in; real Klax/Guts firmware and main programs boot in GHDL through both selector modes. MiSTer MRAs for both Klax sets and Guts exist. MiSTer 164 (Klax playable) shipped to the owner 2026-09-10; Guts video reading proven pixel-exact offline (KLAX_GUTS 4c) and transcribed (GUTS-168: MO format, forward order, comparator, tile slot; exhaustive + fixture benches pass, Escape paths bit-identical). **Next:** MiSTer 165 device test of Guts and Klax, then Pocket packages `spoonelli.klaxp` / `spoonelli.guts`. |
-| H11 | ThunderJaws feasibility | **RESEARCHED (2026-09-09)** — `investigations/THUNDERJAWS.md`: same CPU pair / shared-RAM interlock / JSA-II skeleton, but the Atari VAD video (two playfields, new priority PAL, IRGB1555 palette, banked 64 KB alpha ROM, programmable scanline IRQ) makes it a **separate core built from this repo's blocks**, not a variant. If pursued: MAME trace + offline pixel model first, no RTL. Owner decision pending. |
+| H8 | Factory-map "halftone": travelled nodes must dim, not vanish | **DEVICE-CONFIRMED ON MiSTer (build 168, owner's first run) — Pocket 37/38 not yet tested.** Carried by Pocket 37/38 and MiSTer 162–169. On 168 the level-3 map matches the PCB capture frame 24402 / t406–410 — travelled routes and START box dim in the same hue, level-1 map all bright, the "you are here" node blinks every 10 frames, identical to the PCB capture, map timing matches. Remaining: T2 on Pocket 38 (G7). *Status as first written:* **FIXED IN RTL (MOSHADE-162, 2026-09-09) — device verification pending.** Root cause, from the romset GAL fuse maps + the PCB capture: GAL 136069.100V writes special (MPR2) pixels of pen 1 into the line buffer, so they shade the playfield (SHADE → colour-RAM +0x100, the I=4 bank the game populates); MAME `continue`s before SHADE and never dims (its level maps stay bright), and MAME's extra `pf |= 0x080` on M7 pointed shadows at the never-written 0x38X bank — the "erased to black". Both transcribed into our line buffer/comparator; both corrected, benches (tb_prio exhaustive, tb_mob shadow-twin, tb_stain) pass. Verify on device at a level ≥ 2 map against the PCB capture t406–t410: travelled nodes and START box dim same-hue (0x30X). Record: `investigations/MAP_HALFTONE.md`. |
+| H9 | `eprom2` (Escape set 2) | **IMPLEMENTED (EPROM2-163, 2026-09-09) — boots and plays on MiSTer 168; formal T3 on MiSTer 169 and Pocket 38 pending.** Carried by Pocket 38 and MiSTer 163–169; on MiSTer 169 the set-2 MRA lives under `_alternatives/_Escape from the Planet of the Robot Monsters/` (ALT-172). The tenth main pair lands at image `0x0A0000`; `escape_core` remaps the video CPU's A19 window on all four ROM paths; `build_rom.py` auto-detects the set (and borrows shared chips from a sibling `eprom` folder); MiSTer gets its own `(set 2).mra`. MAME read taps (6000 frames): window read only in POST (f626–641), extra CPU never touches its hole. `tb_escape_core` boots set 2 (reset PC `$6A4`) and still boots set 1. Verify on both devices: POST passes (the checksum covers the new window), attract + a level of play, then the H8 map check on set 2 too. |
+| H10 | Klax prototypes / Guts n' Glory (JSA-II variants) | **IN PROGRESS — romsets MAME-verified 2026-09-09; real programs boot in GHDL; MiSTer test builds 164–169, all unreleased; both Klax prototypes and Guts boot and play on MiSTer 168 (owner's first run); MiSTer 169 not yet device-tested.** Builds 164–167 latched the MRA game byte unreliably (clk_sys sampling a 28 ns clk_ram strobe; a bench control of the old latch missed 8 of 10), so they usually booted Klax/Guts as Escape — fixed in 168 (NVRAM-170). **Next:** MiSTer 169 device tests (G1: T4–T6, T8, T10) → MiSTer 0.2 release → Pocket 0.2 (Escape) → Pocket cores `spoonelli.klaxp` / `spoonelli.guts`. *Status as first written: "IN PROGRESS (2026-09-09) — no romsets on hand, bench-only"; the body below records the progress after that line was set.* Deltas measured from MAME in `investigations/KLAX_GUTS.md`. Done: `jt6295` vendored (GPL-3.0, NOTICE row), `escape_jsa` `BOARD=2` (OKI in the TMS slot, WRIO/MIX/RDIO remaps, second ROM client at image 0x240000), `tb_escape_jsa2` + `run_oki_tb.sh` pass, JSA-I bench unchanged. Romsets arrived 2026-09-09 (MAME-verified); `EXTRA_EN=0` + Klax inputs (KLAX-165), `build_rom.py` klaxp1/klaxp2/guts, Guts decoder map (GUTS-166), and the one-selector design (GAMESEL-167: `game_sel` runtime on MiSTer via the MRA index-1 byte, constant on the Pocket; OKI ADPCM through the SDRAM arbiter) are in; real Klax/Guts firmware and main programs boot in GHDL through both selector modes. MiSTer MRAs for both Klax sets and Guts exist. MiSTer 164 (Klax playable) handed to the owner for testing (unreleased) 2026-09-10; Guts video reading proven pixel-exact offline (KLAX_GUTS 4c) and transcribed (GUTS-168: MO format, forward order, comparator, tile slot; exhaustive + fixture benches pass, Escape paths bit-identical). MiSTer 166 added per-game button mapping, 167 GUTS-169 (H12). *(Superseded "next" as first written: MiSTer 165 device test of Guts and Klax, then Pocket packages `spoonelli.klaxp` / `spoonelli.guts` — the order is now MiSTer 0.2 first, see above.)* |
+| H11 | ThunderJaws feasibility | **FUTURE WORK (owner decision).** 2026-09-10: "out of our dev reach for now - we don't want to poison the integrity of our project"; confirmed 2026-10-17: "keep thunderjaws as future work". The Atari VAD video chip has no public FPGA implementation, so there is no second reference beside MAME. Not shelved: the research stays in `investigations/THUNDERJAWS.md`, the `thunderj` romset is MAME-verified (2026-09-09) but unused, and the recommended first step (MAME trace + offline pixel model, no RTL) still stands. *As first written:* **RESEARCHED (2026-09-09)** — `investigations/THUNDERJAWS.md`: same CPU pair / shared-RAM interlock / JSA-II skeleton, but the Atari VAD video (two playfields, new priority PAL, IRGB1555 palette, banked 64 KB alpha ROM, programmable scanline IRQ) makes it a **separate core built from this repo's blocks**, not a variant. If pursued: MAME trace + offline pixel model first, no RTL. Owner decision pending. |
+| H12 | GUTS-169 + MRA rbf name (MiSTer 167) | **DONE in RTL (2026-10-09) — device verification under G1 (T5).** Guts mode now holds back every special (MPR2) sprite pixel, pen 1 included, as MAME's Guts rule does; GUTS-168 had left Escape's GAL 100V pen-1 exception live in Guts mode. Latent: none of the twelve sampled Guts frames has a pen-1 special; a control fixture (`sim/tools/make_guts_pen1_special.py`) drew 64 stray pixels before the gate, 0 after. Same build: every MRA says `<rbf>Escape</rbf>` (the maintainer's spelling) and CI names the rbf `Escape_YYYYMMDD.rbf`. |
+| H13 | NVRAM-170 + jt6295 notice (MiSTer 168) | **DONE — boot/play device-confirmed on 168; persistence is T8.** MiSTer EEPROM persistence (`src/mister/rtl/escape_hps_bridge.v`; one `.nvm` per MRA). While building it: the MRA game byte was latched on clk_sys from a 28 ns clk_ram strobe, so 164–167 usually booted Klax/Guts as Escape (bench control: the old latch missed 8 of 10; the new one catches all). NOTICE / README now list jt6295 as compiled into the MiSTer rbf. |
+| H14 | NVRAM-171 + ALT-172 (MiSTer 169) | **DONE in packaging — device tests T8 / T10 pending.** NVRAM-171 adopts the Arcade-Cave saving convention: root-menu "Autosave NVRAM" default Off, plus "Save NVRAM". Before it, "Saving..." appeared on nearly every menu change, because Escape rewrites a 4-byte counter every 10–20 s and Main polls the save request on every menu redraw. ALT-172 moves the clone MRAs to `_alternatives/_Escape from the Planet of the Robot Monsters/` and `_alternatives/_Klax/`; the CI ROM-data gate now scans every MRA recursively. |
+| H15 | Report the two MAME inaccuracies upstream | **OPEN.** `eprom.cpp`'s early `continue` on MPR2 (no dim) and its `pf \|= 0x080` on M7, with the GAL 100V/100T equations (`investigations/MAP_HALFTONE.md` §6). Now that H8 is device-confirmed, the report can cite a device result. |
 
-**Slow-burn (no version attached):** MiSTer vertical-sync edges aligned to
-the horizontal-sync leading edge (`VSYNC_HSTART = HSYNC_START`, the
-MegaDrive VDP idiom) instead of `x=0` — cosmetic on the wire, since
-composite sync merges the pulses and the TV locks to the HS edge anyway;
-logged 2026-09-02 after the MISTER-161 sync calibration; **authentic
-composite-sync record** — the board's real H/V sync positions, widths,
-vertical-sync line count and serration are unrecorded (MAME models none of
-it; ours were chosen, then TV-calibrated). Path 1, no hardware: decode the
-six GAL16V8 fuse dumps in the romset (`136069.50f/50p/55p/70j/100t/100v`)
-with MAME `jedutil` — if one is the sync/blank generator the positions fall
-out in counter terms. Path 2: USB scope on the csync line (period, pulse
-width, porches to first active pixel via the service-mode grid, VS lines,
-serration). Adopt widths / VS structure / edge alignment on both platforms
-if they differ; keep the display-centred default position (arcade monitors
-were pot-centred, so absolute position was never user-visible); section-F `DIAG_EN` decision; HISTORY.md builds-103+
-chronology; C5 clean-machine ROM-prep walkthrough; optional GitHub Support
-ticket for the pre-rewrite `refs/pull/*` snapshots; **save-states
-evaluation** (MiSTer `SS<base>:<size>` DDR window + framework hooks; the
-open question is CPU state capture — the imported T65/TG68K/jt51 expose no
-internal state, so the fork is in-house CPU rewrites vs a sequencer-walk
-snapshot; the MISTER-155 pause already provides the coherent-freeze half,
-and any answer must serve both platforms or be MiSTer-only by design).
+**Slow-burn (no version attached):**
+
+- **MiSTer vertical-sync edge alignment** — VS edges aligned to the
+  horizontal-sync leading edge (`VSYNC_HSTART = HSYNC_START`, the MegaDrive
+  VDP idiom) instead of `x=0`. Cosmetic on the wire, since composite sync
+  merges the pulses and the TV locks to the HS edge anyway; logged 2026-09-02
+  after the MISTER-161 sync calibration.
+- **Authentic composite-sync record** — the board's real H/V sync positions,
+  widths, vertical-sync line count and serration are unrecorded (MAME models
+  none of it; ours were chosen, then TV-calibrated). Path 1, no hardware:
+  decode the six GAL16V8 fuse dumps in the romset
+  (`136069.50f/50p/55p/70j/100t/100v`) with MAME `jedutil` — if one is the
+  sync/blank generator the positions fall out in counter terms. Path 2: USB
+  scope on the csync line (period, pulse width, porches to first active pixel
+  via the service-mode grid, VS lines, serration). Adopt widths / VS
+  structure / edge alignment on both platforms if they differ; keep the
+  display-centred default position (arcade monitors were pot-centred, so
+  absolute position was never user-visible).
+- Section-F `DIAG_EN` decision.
+- C5 clean-machine ROM-prep walkthrough.
+- Optional GitHub Support ticket for the pre-rewrite `refs/pull/*` snapshots.
+- **Save-states evaluation** (future evaluation item; MiSTer `SS<base>:<size>`
+  DDR window + framework hooks; the open question is CPU state capture — the
+  imported T65/TG68K/jt51 expose no internal state, so the fork is in-house
+  CPU rewrites vs a sequencer-walk snapshot; the MISTER-155 pause already
+  provides the coherent-freeze half, and any answer must serve both platforms
+  or be MiSTer-only by design).
+
+*(The HISTORY.md builds-103+ chronology item that stood here is done — D1.)*

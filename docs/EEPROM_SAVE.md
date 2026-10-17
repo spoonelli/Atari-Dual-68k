@@ -17,7 +17,7 @@ MAME's `eprom.cpp` maps the part twice (`reference/eprom.cpp:623`):
 
 `umask16(0x00ff)` is the load-bearing detail: the EEPROM sits on the **low data
 byte only**. 0x400 bytes of address space, 512 storage locations, one per odd
-68000 byte address. `escape_decode.vhd:64` decodes the same window (a little
+68000 byte address. `escape_decode.vhd:74` decodes the same window (a little
 wider, 0E0000-0E2FFF, harmlessly aliasing) and `escape_core.vhd` addresses the
 RAM with `v_addr(9 downto 1)`, so location *i* is the LDS byte of word *i*.
 
@@ -109,6 +109,11 @@ to get wrong:
 each other and the implementation follows Analogue's own reference module, but
 the buffered-read contract is only exercised for real when a Pocket writes the
 file. Section 6 says how to tell in thirty seconds whether it is right.
+
+> **Status (2026-10-17):** shipped. The save engine is in the Pocket releases
+> v0.1.0 and v0.1.1, whose release notes list high scores as persisting
+> across a power cycle (`docs/RELEASE_NOTES.md`). The text in this document was
+> written before that and is kept as the design record.
 
 ## 3. What was built
 
@@ -253,8 +258,9 @@ will load.
 
 **The five-minute check:**
 
-1. Launch the core with no save file present. The 7th diagnostic segment (turn
-   the overlay on with **L**) should be **red** - virgin EEPROM.
+1. Launch the core with no save file present. The 7th diagnostic segment (tick
+   **Developer HUD** in the core menu, then turn the overlay on with **L1**)
+   should be **red** - virgin EEPROM.
 2. Enter the operator menu (Interact -> Service Mode, then Soft Reset Core) and
    change something you will recognise: coins-per-credit, or lives per game.
    Exit the menu back to attract mode.
@@ -299,7 +305,9 @@ Interact (**+**) menu. Saving on a clean core exit still happens.
   the ROM's name. `data.json` `parameters` bit 2 ("Nonvolatile filename":
   filename cloned from slot 0 with this slot's extension) would make it follow
   the ROM, which is what a multi-variant build wants once Klax and Guts are
-  selectable. Left clear for now because the derived-name behaviour is one more
+  selectable on the Pocket (today they are selectable only in the MiSTer
+  milestone 0.2 test builds, where each MRA gets its own `.nvm` - section 8).
+  Left clear for now because the derived-name behaviour is one more
   thing that cannot be checked without a Pocket, and today there is exactly one
   ROM filename.
 * **The EEPROM's write-lock is still not emulated.** The real 2804 is
@@ -335,4 +343,5 @@ framework's own NVRAM route instead (from milestone 0.2):
 - The file is the same 512-byte layout as the Pocket `.sav` (byte *i* =
   EEPROM location *i*). One file per MRA, so the games never share scores.
 - Proof: `sim/tb/tb_hps_bridge.v` (`./sim/run_hps_bridge_tb.sh`, a MiSTer CI
-  gate). Device verification pending.
+  gate; both files exist only on the `milestone-0.2-mister` branch). Device
+  verification pending.

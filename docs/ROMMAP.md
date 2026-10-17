@@ -15,7 +15,10 @@ Chips are 27512-class 64 KB (0x10000) unless noted. `.50x` = even byte (D15–D8
 | `0x00000`| 3025.50a    | 3024.40a    |
 | `0x20000`| 4027.50b    | 4026.40b    |
 | `0x40000`| 4029.50d    | 4028.40d    |
-| `0x60000`| 2033.40k    | 2032.50k    | (shared program, `060000–07FFFF`)
+| `0x60000`| 2033.40k    | 2032.50k    |
+
+The `0x60000` pair is the shared program (`060000–07FFFF`), also copied into
+the extra CPU's region below.
 
 ## extra — second 68000 (region 0x80000)
 
@@ -87,5 +90,5 @@ Implemented, not planned. `support/build_rom.py` concatenates the regions into
 one data-slot payload at the offsets in [`ROMS.md`](ROMS.md), applying the
 sprite INVERT **and** a planar→chunky 4bpp repack. The MiSTer front end reaches
 the same SDRAM contents from an `.mra` manifest plus an RTL-side repack, since
-MRA can express neither transform (see `docs/MISTER.md` on the `mister-port`
-branch).
+MRA can express neither transform (see [`MISTER.md`](MISTER.md); the MiSTer
+RTL and MRAs live on the `mister` branch).

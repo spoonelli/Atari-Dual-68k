@@ -17,6 +17,17 @@ says so. Where it needs the physical board, it says that too.
 > mode is worth 0.0000%, MAME models no bus arbitration, the two-boards answer)
 > are measurements about the *CPUs* and stand unchanged.
 
+> **2026-10 correction — both parts appear in both cabinets.** Later photographs
+> show 68000 and 68010 each in a dedicated cabinet *and* in a JAMMA one, all four
+> combinations, and the assembly drawing calls out Atari house number
+> `137414-002` at both CPU positions — one BOM line that either chip satisfies.
+> **CPU type is not a cabinet distinction**; the distribution across production
+> is unknown. The current position, with sources, is in the top-level
+> `README.md` acknowledgements. The 2026-08-24 banner below and §1.6 are kept as
+> the record of what the evidence then on hand suggested; where they say
+> "dedicated = 68010, JAMMA = 68000", read "68010 and 68000, either cabinet".
+> Every measurement in this document is unaffected.
+
 > **2026-08-24 — Question 1 is answered: the board is a 68010.** The owner
 > photographed the part on his dedicated-cabinet board: **`MC68010P8`**,
 > Motorola, date code **`A71R8813`**. The schematic agreed all along. §1.1 was
@@ -69,7 +80,7 @@ the socket is marked:
 | Part number | **`MC68010P8`** |
 | Manufacturer | Motorola |
 | Date code | **`A71R8813`** |
-| Cabinet | **dedicated** (the JAMMA variant is a 68000 — §1.6) |
+| Cabinet | **dedicated** (both parts occur in both cabinets — §1.6) |
 
 An `MC68010P8` is a 68010 in a 64-pin plastic DIP, 8 MHz rated — comfortable for
 the board's 7.159 MHz. This is the record that §1.5 asked for and it closes the
@@ -411,8 +422,8 @@ timing-related keys on it:
 hardcoded to 1 in `TG68K.vhd` rather than switched. So the toggle would change
 **two functional behaviours and zero timing behaviours** — structurally none,
 not merely a small effect. Worth stating because it is a genuine ACCURACY
-LIMIT, not just a null result: if the real dedicated cabinet were faster than
-the JAMMA one, this core could not express that at either setting.
+LIMIT, not just a null result: if a real 68010 board were faster than a 68000
+one, this core could not express that at either setting.
 
 *And it would not be safe to flip during play.* Both switchable behaviours are
 mode 2 — read combinationally, not latched at reset. `VBR_Stackframe` changes
@@ -440,10 +451,19 @@ checking was closing a documentation question honestly. It also closed it in
 the *opposite* direction to what the docs had claimed, which is the more useful
 outcome.
 
-### 1.6 The JAMMA board — resolved: it is a 68000
+### 1.6 The JAMMA board — both parts, in both cabinets
 
-Escape shipped in two cabinet variants and **they use different CPUs.**
-Confirmed by the owner from photographs:
+> **2026-10 correction.** The table and the "two boards" reading below are the
+> 2026-08-24 record, made from the first two photographs. Further boards have
+> since shown **68000 and 68010 each in both cabinet types**; the BOM line
+> (`137414-002` at 45J and 20P) accepts either part. It is not a cabinet
+> distinction. What survives unchanged: the schematic, the owner's board and
+> MAME are each right about a real board; every build up to BUILD 109 was a
+> faithful 68000 machine; and the ROM cannot tell the parts apart, so supporting
+> both is free.
+
+*As recorded 2026-08-24:* Escape shipped in two cabinet variants and **they use
+different CPUs.** Confirmed by the owner from photographs:
 
 | Variant | CPU | Corroboration |
 |---|---|---|
@@ -490,7 +510,10 @@ to be the whole point:
 
 That SP-332 documents the dedicated cabinet and *only* the dedicated cabinet is
 now the load-bearing fact: it is why the schematic says 68010 and MAME says
-68000 without either being wrong.
+68000 without either being wrong. *(2026-10: superseded as the explanation — the
+TM-336 JAMMA manual draws `U68010` too, and the BOM line `137414-002` accepts
+either part, so the drawing never fixed the part in either cabinet. The survey
+facts below stand.)*
 
 Assembly numbers, recorded in case the JAMMA package is ever wanted for other
 reasons (the CPU question no longer needs it):
@@ -507,9 +530,10 @@ never names one.
 
 One caution for anyone mapping ROM sets to cabinets: **MAME's sets do not
 distinguish them.** `reference/eprom.cpp` defines `eprom`, `eprom2`, `klaxp1`,
-`klaxp2` and `guts`; `docs/ROMMAP.md:47` records `eprom2` as purely a
-program-ROM revision ("same layout, all-rev-1 program ROMs"). No set corresponds
-to a cabinet style, and all five are instantiated as `M68000`. So the CPU
+`klaxp2` and `guts`; `docs/ROMMAP.md` §eprom2 records `eprom2` as the same
+machine with all-rev-1 program ROMs plus a *tenth* main-CPU pair at CPU
+`0x80000–0x9FFFF` (placed in our combined image at `0x0A0000`, EPROM2-163). No set corresponds
+to a cabinet style (or to a CPU part), and all five are instantiated as `M68000`. So the CPU
 variant is **not** inferable from the ROM set the player loads — which is
 precisely why `CPU_TYPE` is a configuration choice rather than something the
 core could auto-detect.
@@ -544,7 +568,7 @@ extra bus cycles, ~4-8 clocks depending on arbitration. +5 on a 388-sample
 average is what that predicts.
 
 So `CPU_TYPE=1` is, very slightly, **slower on interrupt entry** — and that is
-the authentic behaviour for a dedicated-cabinet board, whose MC68010P8 pays the
+the authentic behaviour for a 68010-stuffed board, whose MC68010P8 pays the
 same cost. For scale: 5 clocks against a 119,318-clock frame is **0.004%**, with
 roughly one vblank interrupt per CPU per frame. Measurable in a bench,
 imperceptible on screen, and in the opposite direction to the loop-mode
@@ -560,7 +584,7 @@ of 193.
 
 ### 1.7 Could `CPU_TYPE` be a runtime switch in the interact menu? — assessed, and the recommendation is NOT YET
 
-Since both cabinet variants are authentic and a single ROM image serves both, an
+Since both CPU parts are authentic and a single ROM image serves both, an
 obvious idea is to expose the variant as a menu option that takes effect on
 reset, like a cabinet DIP, so a user can match whichever board they own without
 a reflash. Assessed here; **not implemented, and not recommended for now.**
@@ -609,8 +633,8 @@ loop mode anyway. So a user toggling this switch would see, and could see,
 de-optimised CPU-core logic and a placement re-roll.
 
 **Recommendation: do not build it now.** Stated plainly, because there is a real
-argument on the other side — it is genuinely more authentic to let a JAMMA owner
-run a JAMMA CPU, and the "takes effect on reset" semantic is exactly the right
+argument on the other side — it is genuinely more authentic to let an owner run
+the part their own board carries, and the "takes effect on reset" semantic is exactly the right
 model. If it is wanted later, the order should be: (1) latch `cpu` at reset in
 the kernel, (2) measure the ALM/M10K/slack delta in CI *before* committing to
 the menu plumbing, (3) only then wire the interact entry, with the reset
@@ -618,7 +642,7 @@ sequencer holding **both** CPUs — the extra CPU's release is driven by the mai
 CPU, so a partial reset is not sufficient.
 
 For BUILD 110 the right shape is the current one: a compile-time selector with
-one place to change it, defaulting to the dedicated cabinet.
+one place to change it, defaulting to the 68010.
 
 ---
 
@@ -870,13 +894,16 @@ common-bus access rates.
 (recursive descent under-approximates — but the dynamic result makes it moot,
 since executing any of them would have taken vector 4 and killed the CPU); the
 M10K block counts (no Quartus fitter report is committed to this repo — the
-283/308 figure exists only as prose in `docs/investigations/VSHAD3.md`); the collision counts in
+283/308 figure exists only as prose in `docs/investigations/VSHAD3.md` — a
+2026-08 figure; the Pocket Escape build now fits at 301/308 M10K and MiSTer at
+370/553); the collision counts in
 §2.3, which are arithmetic on measured rates, not observed collisions.
 
-**Settled by the physical boards:** there are **two** variants, and both are
-authentic — the dedicated cabinet is a **68010** (`MC68010P8`, date code
-`A71R8813`, photographed; SP-332 draws `U68010` at 45J/20P) and the **JAMMA**
-version is a **68000** (photographed). §1.5, §1.6. It changes nothing measurable
+**Settled by the physical boards:** both parts are authentic and both occur in
+both cabinet types — the owner's dedicated board is a **68010** (`MC68010P8`,
+date code `A71R8813`, photographed; SP-332 draws `U68010` at 45J/20P, BOM line
+`137414-002` either part), and 68000s have been photographed in dedicated and
+JAMMA cabinets alike. §1.5, §1.6 (with its 2026-10 correction). It changes nothing measurable
 in the RTL either way, which is what makes supporting both free.
 
 **Nothing on the CPU question is open any more.** The one caveat worth keeping

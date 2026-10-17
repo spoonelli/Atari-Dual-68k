@@ -1,6 +1,12 @@
 # Tile-shaped holes in motion objects — the alpha blocker
 
-**Status: open. This is the one consistent blocker to alpha.**
+**Status: CLOSED (builds 131–132).** MOPAIR-131 (paired even/odd line
+buffers, 2 px/clock — the schematic's MOL/MOR) and MOPF2-132 (tile-1
+prefetch lane) took the crowd fixture's missing pixels from 527 to 0, and
+the fix was device-verified across full playthroughs (checklist A8). The
+record below is kept as written.
+
+*Status as first written:* open. This is the one consistent blocker to alpha.
 
 Sprites render, in the right place, with the right palette — but with a
 **rectangular chunk missing**, edges straight and following no sprite outline.
@@ -267,6 +273,15 @@ LAT24 671->304, LAT31 1335->938, JIT48 2003->1597; all scene fixtures stay
 order-gate cell.
 
 ## Map grey-out: CORRECTED SEMANTICS (owner)
+
+*(Superseded — see [`MAP_HALFTONE.md`](MAP_HALFTONE.md). The direct PCB
+capture of 2026-09-01 showed that the board **dims** the travelled routes
+and the START box in the same hue rather than removing paths; the
+mechanism is pen-1 special sprites shading the playfield (MOSHADE-162),
+device-confirmed on MiSTer 168. The path-selection reading and the
+acceptance test below are the August understanding, kept as record. Do not
+cite `reference/map_level3_mame.png`: its provenance is unknown and it
+shows black nodes where MAME draws them bright.)*
 
 The between-levels map is a PATH SELECTION display, not a traversal record:
 **one path is lit in full colour and the other two are greyed out/removed.**

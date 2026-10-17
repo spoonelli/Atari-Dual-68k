@@ -10,8 +10,15 @@ or contradicted by another number in the tree, this document says so rather than
 picking the flattering one. Where a claim in the existing docs turned out to be false,
 it is named. **Nothing here is reconstructed from memory.**
 
+> **Point-in-time document.** Written around build 113, before the first public
+> release; later edits closed individual items in place (e.g. PFSIM-113) but did
+> not bring the whole up to date. For what happened after — the MO tile holes
+> closed in builds 131–132, the releases, the MiSTer arbiter work, milestone 0.2
+> — read [`HISTORY.md`](HISTORY.md) eras 12–17 and
+> [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md).
+
 Companion documents: [`PIPELINES.md`](../PIPELINES.md) (how it is meant to work),
-[`HISTORY.md`](HISTORY.md) (the v1–v78 field log), [`LESSONS.md`](LESSONS.md) (the
+[`HISTORY.md`](HISTORY.md) (the chronological field log), [`LESSONS.md`](LESSONS.md) (the
 reusable methods), [`DEVIATIONS.md`](../DEVIATIONS.md) (where we are not the board).
 
 ---
@@ -1158,6 +1165,11 @@ These are now enforced mechanically in the checks themselves, not by remembering
 ---
 
 ## 11. What is still open, and what "alpha" means
+
+> **Point-in-time (around build 113).** This list was open when written; several
+> items have since closed or moved — check [`DEVIATIONS.md`](../DEVIATIONS.md)
+> §D and [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) before citing any of
+> them as current.
 
 ### Open, measured, not closed — `DEVIATIONS.md` §D
 

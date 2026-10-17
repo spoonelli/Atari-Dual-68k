@@ -99,20 +99,20 @@ entity escape_core is
         --       the bench that a DTACK-only interlock does NOT work, because
         --       we_shr_a/we_shr_b assert on every clock of a stalled cycle.
         TASLOCK_EN : integer := 1;
-        -- CPU-110 CABINET VARIANT SELECT for both TG68K instances.
-        --   0 = 68000, the JAMMA board       (TG68K CPU=>"00")
-        --   1 = 68010, the dedicated cabinet (TG68K CPU=>"01")
+        -- CPU-110 CPU PART SELECT for both TG68K instances.
+        --   0 = 68000 (TG68K CPU=>"00")
+        --   1 = 68010 (TG68K CPU=>"01")
         --
-        -- THIS IS NOT A HEDGE AND NEITHER VALUE IS A FALLBACK. Escape shipped
-        -- in two cabinet variants with different CPUs and both are confirmed
-        -- from photographs: the dedicated board carries MC68010P8 (Motorola,
-        -- date code A71R8813, matching SP-332's "U68010" at 45J/20P - SP-332
-        -- IS the dedicated-cabinet package), and the JAMMA board carries a
-        -- 68000, which is what MAME's eprom driver models. Set this to
-        -- whichever machine you are emulating; both are authentic.
+        -- THIS IS NOT A HEDGE AND NEITHER VALUE IS A FALLBACK. Both schematic
+        -- packages (SP-332 rev D and TM-336 rev E of the same drawing) draw
+        -- "U68010" at 45J/20P, and the assembly drawing calls out house number
+        -- 137414-002 - one BOM line, either chip. Both parts have since been
+        -- photographed in both cabinet types, so it is NOT a cabinet
+        -- distinction (README.md, "CPU type"; docs/CPU_AND_ARBITER.md 1.6).
+        -- MAME's eprom driver models a 68000. Both values are authentic.
         --
-        -- DEFAULT IS 1 (dedicated / 68010). BUILD 109 and everything before it
-        -- ran 0, and was a faithful JAMMA machine - that was never a bug.
+        -- DEFAULT IS 1 (68010). BUILD 109 and everything before it ran 0, a
+        -- faithful 68000-stuffed board - that was never a bug.
         -- Declared integer, like every other generic here, so core_top.v can
         -- override it across the Verilog/VHDL boundary exactly the way it
         -- overrides FASTPATH_EN / VSHAD3_EN / TASLOCK_EN. The override in
@@ -518,9 +518,10 @@ architecture rtl of escape_core is
         return p;
     end function;
 
-    -- v63: OWN_J retired - the JSA fetches from its own BRAM shadow now,
-    -- shrinking this to a two-client arbiter and freeing SDRAM slots for
-    -- the video fetch path (playfield corruption relief)
+    -- v63 retired the original OWN_J: the JSA 6502 fetches from its own BRAM
+    -- shadow (jshad), freeing SDRAM slots for the video fetch path.
+    -- GAMESEL-167 reintroduced OWN_J for a different client: the JSA-II
+    -- OKI6295's ADPCM reads (image 0x24xxxx), lowest priority.
     type rom_owner_t is (OWN_IDLE, OWN_V, OWN_E, OWN_VP, OWN_EP, OWN_J);
     signal rom_owner : rom_owner_t;
     signal last_was_v : std_logic;   -- fair round-robin: alternate priority
@@ -739,7 +740,7 @@ architecture rtl of escape_core is
     signal rom_par_ok : std_logic;
     signal alpha_wr_stretch : unsigned(19 downto 0);
     -- CPU-110: integer CPU_TYPE -> TG68K's 2-bit CPU generic. 0 => "00"
-    -- (68000 / JAMMA), 1 => "01" (68010 / dedicated). Only those two values
+    -- (68000), 1 => "01" (68010). Only those two values
     -- are supported; TG68K also defines "11" for 68020, which neither board
     -- ever was.
     constant CPU_SEL : std_logic_vector(1 downto 0)
@@ -751,16 +752,16 @@ architecture rtl of escape_core is
     signal adc_rd, adc_rd_d, adc_eoc : std_logic;
 begin
     ---------------------------------------------------------------- CPUs
-    -- ESCAPE SHIPPED IN TWO CABINET VARIANTS WITH DIFFERENT CPUs, and both
-    -- are authentic:
-    --   dedicated cabinet = 68010. Photographed on the owner's board:
-    --       Motorola "MC68010P8", date code A71R8813. SP-332 - which IS the
-    --       dedicated-cabinet package - draws both CPUs "U68010" (sheet 4
-    --       designator 45J "VCPU"; sheet 5 designator 20P "ECPU").
-    --   JAMMA version     = 68000. Also photographed. This is what MAME's
-    --       eprom driver models with M68000.
-    -- So the schematic and MAME never actually contradicted each other; they
-    -- describe different machines. (The old comment here claimed "real boards
+    -- ESCAPE SHIPPED WITH EITHER CPU PART, and both are authentic. Both
+    -- schematic packages draw "U68010" (sheet 4 designator 45J "VCPU";
+    -- sheet 5 designator 20P "ECPU"); the assembly drawing's house number
+    -- 137414-002 covers either chip. A Motorola MC68010P8 (date code
+    -- A71R8813) is photographed on the owner's board, and 68000s and 68010s
+    -- have each been photographed in both dedicated and JAMMA cabinets - it
+    -- is not a cabinet distinction. MAME's eprom driver models M68000.
+    -- So the schematic and MAME never actually contradicted each other.
+    -- (2026-10 correction: an earlier version of this comment tied the part
+    -- to the cabinet type; README.md "CPU type" retracts that.) (The old comment here claimed "real boards
     -- carry 68000s" as against the schematic. That came from one
     -- unphotographed inspection in 24d900e which generalised a single board to
     -- all production, and it is retracted - see docs/CPU_AND_ARBITER.md 1.6.)

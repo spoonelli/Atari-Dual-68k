@@ -5,8 +5,9 @@ Dual 68010 + JSA-I audio (YM2151 + TMS5220 speech), hall-effect stick.
 High scores and settings persist to the SD card.
 ROM required: MAME 'eprom' set, user-supplied (not included).
 
-Boots clean. Small cyan build number bottom-right - check it matches
-the build you installed.
+Boots clean. Tick Developer HUD in the core menu and a small cyan
+build number appears bottom-right - check it matches the build you
+installed.
 
 Developer HUD must be enabled in the core menu first (off by default);
 then L1 shows/hides it and R1 cycles its 7 pages (0-6); L2 toggles the

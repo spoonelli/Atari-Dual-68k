@@ -69,6 +69,24 @@ Read off `core_top.v` `.p1_buttons` and cross-checked against `input.json`:
 > `input.json`. P2 now reads bit 6, matching P1. This was the same
 > bit-8-is-L1 confusion that produced the original P1 report.
 
+### Other games (milestone 0.2, test builds)
+
+Unreleased. The Klax prototypes and Guts n' Glory run only on the MiSTer
+test builds (166+ for per-game buttons); the Pocket core is Escape-only until
+their own Pocket cores ship. The MiSTer wrapper builds CD11..CD8 per game from
+the MRA's game byte (MAME `klaxp`/`guts` input ports); neither prototype has a
+Start switch on the board, so each game starts from a button, and MiSTer's
+**Start** is the self-test step/continue switch on every game. Coin goes
+through the sound board, as on Escape.
+
+| Game | Stick | Buttons | MiSTer MRA defaults |
+|---|---|---|---|
+| Klax (prototype sets 1 and 2) | 8-way digital stick, U/D/L/R on D15..D12; no ADC0809 fitted (reads `FF`) | four, Button 1..4 straight onto D8..D11 (MAME maps four; the prototype uses two in play) | Button 1..4 = A, B, X, Y |
+| Guts n' Glory (prototype) | analogue, through the same hall-stick/ADC0809 path as Escape (ADC0–3: P1 Y/X, P2 Y/X, X reversed) | three, Button 1/2/3 on D9/D8/D11 | Button 1..3 = B, A, X |
+
+Escape's map (above) is unchanged in all of these builds. The full deltas are
+in [`investigations/KLAX_GUTS.md`](investigations/KLAX_GUTS.md) §3, §4 and §4b.
+
 ### Debug controls
 
 Not game controls — development tooling, and none of it is on by default.
@@ -93,7 +111,8 @@ Not game controls — development tooling, and none of it is on by default.
 
 The three hold-to-act probes are gated on the HUD being visible, so a player
 cannot blank the sprites or the picture by accident. The cyan build number in
-the bottom-right corner is drawn in both states and is not part of the HUD.
+the bottom-right corner is drawn whether the HUD is hidden or up, but from
+build 115 only while **Developer HUD** is ticked.
 
 Per-page contents are in [`POCKET_TEST.md`](POCKET_TEST.md).
 

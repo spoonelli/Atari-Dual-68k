@@ -1,6 +1,17 @@
 # ThunderJaws (Atari, 1990) — could this core run it?
 
-**Status: research only. No RTL, no ROM builder, no romset on this machine.**
+**Status: FUTURE WORK (owner decision).** On 2026-09-10 the owner judged
+it "out of our dev reach for now - we don't want to poison the integrity of
+our project"; on 2026-10-17: "keep thunderjaws as future work". The reason
+is the video: the Atari VAD has no public FPGA implementation, so MAME would
+be the only reference for the part that is new (§5.1 item 2). Recorded as
+future work, not shelved — the research below stands, and the `thunderj`
+romset (with its seven GAL dumps) was MAME-verified on 2026-09-09 and sits
+unused. No RTL, no ROM builder.
+
+*Status line as first written (2026-09-09):* research only. No RTL, no ROM
+builder, no romset on this machine.
+
 Everything below is read from MAME source (`thunderj.cpp`, `atarivad.cpp`,
 `atarijsa.cpp`, `atarimo.cpp`, master branch, fetched 2026-09-09), from the
 owner's *ThunderJaws Universal Kit Installation Instructions* (TM-349, 56 pp,
@@ -274,11 +285,11 @@ Blocks named as in `src/fpga/core/rtl/` and `core_top.v`.
 | SDRAM fabric: `sdram_simple`/`sdram_openrow`, speculative fastpath, ROM CDC parity, download writer | **REUSE AS-IS** | ROM regions only move; the per-CPU fastpath caches are address-agnostic. |
 | ROM shadows (`vshad*`, `eshad*`) | **ADAPT (re-profile)** | Their ranges came from Escape page profiles (`PIPELINES.md` §3.3). ThunderJaws needs its own profile or none (see the VSHAD3 lesson: a fastpath hit is cheaper than a shadow). |
 | `jshad` (64 KB 6502 ROM in BRAM) | **REUSE AS-IS** | Same 64 KB region, same banking. |
-| `escape_jsa.vhd` | **ADAPT → JSA-II** | Keep T65, jt51, command/response latches, timed IRQ, bank logic, watchdog (JSAWDG-133). Replace the TMS5220 path with an OKI6295 at `2800`/`2A00`, re-map `/RDIO`/`/WRIO`/`/MIX` bits (§1.8), mono mix at 0.60/0.75. Needs a 6295 core — `jotego/jt6295` is being vendored as `third_party/jt6295` in the working tree right now (uncommitted, with `sim/tb/tb_jt6295.v`), for the Klax/Guts JSA-II work in `KLAX_GUTS.md`; the JSA-II adaptation is therefore shared with that effort, not new to ThunderJaws. |
+| `escape_jsa.vhd` | **ADAPT → JSA-II** | Keep T65, jt51, command/response latches, timed IRQ, bank logic, watchdog (JSAWDG-133). Replace the TMS5220 path with an OKI6295 at `2800`/`2A00`, re-map `/RDIO`/`/WRIO`/`/MIX` bits (§1.8), mono mix at 0.60/0.75. Needs a 6295 core — `jotego/jt6295` is vendored as `third_party/jt6295` (commit `7d76b0b`, with `sim/tb/tb_jt6295.v`; "being vendored, uncommitted" when this was written), for the Klax/Guts JSA-II work in `KLAX_GUTS.md`; the JSA-II adaptation is therefore shared with that effort, not new to ThunderJaws. |
 | `TMS5220.vhd` | **DROP** | Not on JSA-II. |
 | `hall_stick.v`, ADC path | **DROP** | Digital joysticks only. |
 | `ee_save.vhd`, `ee_ram` | **ADAPT** | 2 KB instead of 512 B; same unlock/lock semantics. |
-| `escape_mob.v` (+ `escape_mo_cache.v`) | **ADAPT (small)** | Entry format identical except hflip (w1[15] vs w3[3]) — one mask change. Gfx base becomes the `sprites` region instead of Escape's shared `spr_tiles`. Line-buffer entry `{fpar, tag, special, prio[1:0], colour[3:0], pix[3:0]}` already carries exactly what the ThunderJaws GAL needs (MPR1:0 and the MPR2 special flag). SLIP at a new address, same 8-line granularity. |
+| `escape_mob.v` (+ `escape_mo_cache.v`) | **ADAPT (small)** | Entry format identical except hflip (w1[15] vs w3[3]) — first estimated as one mask change; Guts (same hflip bit) showed it is more: GUTS-168 had to bring a queue bit back to carry w1[15], since the scout had dropped word 1 from the queue. Gfx base becomes the `sprites` region instead of Escape's shared `spr_tiles`. Line-buffer entry `{fpar, tag, special, prio[1:0], colour[3:0], pix[3:0]}` already carries exactly what the ThunderJaws GAL needs (MPR1:0 and the MPR2 special flag). SLIP at a new address, same 8-line granularity. |
 | `escape_stain.v` | **REUSE AS-IS** | `apply_stain` is the same atarimo function with the same START/END markers; `thunderj.cpp`'s second pass is the same loop as `eprom.cpp`'s. |
 | `escape_prio.v` | **NEW (same shape)** | Different equations: PF wins ⇔ `PFX3 ∧ MPR < category`, plus the "MO pen == 0x01" rule; no SHADE/FORCEMC0/M7-to-CRA; CRA9 = PF2-select. Needs a second playfield pen input, a 2-bit category from the ext byte rather than from the colour, and a PF2-showing flag. Keep the `tb_prio` exhaustive-check method. |
 | `escape_pf.v` + fetch ring | **ADAPT ×2** | Two instances: PF1 (base `3F2000`, ext low byte) and PF2 (base `3F0000`, ext high byte), separate 9-bit x/y scrolls (PF1 x adds PF2's low 3 bits), both from the `tiles` region. PF2 pixels non-zero override PF1 before the MO compare. Rowscroll (per-scanline parameters from alpha RAM) is new if the game turns it on. |
@@ -356,7 +367,9 @@ array must be declared MLAB or justified as M10K up front (`LESSONS.md`,
 ### 5.1 Blockers and unknowns
 
 1. **ROM availability** — the owner's matter; nothing on this machine, none
-   sought. Everything in this document was done without a romset and the next
+   sought. *(Since resolved: the owner obtained the `thunderj` romset, with
+   its seven GAL dumps, and it passed `mame -verifyroms` on 2026-09-09 —
+   see `KLAX_GUTS.md` §4a. Unused while ThunderJaws is future work.)* Everything in this document was done without a romset and the next
    step that *needs* one is the MAME trace work below.
 2. **The VAD is undocumented in the manual.** The kit schematics stop at the
    CPU/IO/RGB sheets; there is no VAD pinout, no video-RAM sheet, no MO DMA
@@ -375,8 +388,8 @@ array must be declared MLAB or justified as M10K up front (`LESSONS.md`,
 5. **PF/MO priority table**: inferred in §1.7; must be checked exhaustively
    against a literal transcription of `screen_update`, as `tb_prio.v` does.
 6. **OKI6295 core**: `jt6295` is GPL-3.0 like the repo, Pocket-proven in
-   jotego cores, and is in the middle of being vendored for the Klax/Guts
-   JSA-II work (`KLAX_GUTS.md`, uncommitted at the time of writing); it still
+   jotego cores, and is vendored for the Klax/Guts JSA-II work
+   (`KLAX_GUTS.md`, commit `7d76b0b`; uncommitted at the time of writing); it still
    needs the donor-IP validation `LESSONS.md` demands ("proven only for the
    data it has seen") on ThunderJaws' own 256 KB ADPCM set, which is twice
    Klax's.
@@ -409,7 +422,7 @@ platform id, save-slot size, `.mra`) is per-game anyway. What is shared —
 `TG68K`, `shared_ram`/TASLOCK, the SDRAM controllers and fastpath, `escape_jsa`
 minus TMS plus OKI, `escape_mob`, `escape_stain`, `ee_save`, the HUD — is
 already in separately compiled files and can be lifted as a common directory
-with the Escape-specific pieces (`escape_prio`, `escape_pf` ×2 wrapper, the new
+with the game-specific pieces (`escape_prio`, `escape_pf` ×2 wrapper, the new
 VAD register block, palette decode) beside them. Batman, Relief Pitcher, Shuuz
 and Off the Wall are also VAD boards (`atarivad.cpp` comments), so a VAD
 scanout written once has a longer life than a ThunderJaws-only patch.

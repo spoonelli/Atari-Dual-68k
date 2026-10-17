@@ -1,4 +1,4 @@
-# Atari Dual 68k — Development History (v1–v78, builds 101–153, releases v0.1.x)
+# Atari Dual 68k — Development History (v1–v78, builds 101–161, releases v0.1.x, milestone 0.2 test builds)
 
 A field log of bringing Atari's dual-68000 "Escape" hardware (E.P.R.O.M.) to
 the Analogue Pocket: what broke, what we measured, and what each era taught.
@@ -390,6 +390,15 @@ in two days, all in the wrapper; the machine RTL is unchanged from 153.
 - The owner's first clean capture from the **original PCB** arrived and at
   once produced an accuracy finding (factory-map halftone, checklist H8) and
   two preservation items (authentic composite sync; VS-edge alignment).
+  Until then the original hardware had been observed and filmed running on
+  its own arcade CRT — good for "does it look like this", not for pixel or
+  frame questions (the dither in a CRT photo turned out to be shadow-mask
+  texture). On 2026-09-01 the owner captured several minutes of gameplay
+  **directly from the PCB** into a computer (converter + line-in, 1920×1080
+  at 60 fps), and declared it the baseline for performance, walk-cycle
+  timing, slowdowns and screen behaviour: **board over MAME**. Where the
+  capture and MAME disagree, the capture wins. (The captures are the owner's
+  and are not distributed.)
 
 Shipped as `mister-v0.1.2` on 2026-09-02: build 161,
 `Arcade-Escape_20260902.rbf`.
@@ -402,14 +411,14 @@ prototypes (JSA-II), a ThunderJaws feasibility read, and gameplay comparison
 against the PCB capture. Test builds carry on; nothing ships until the list
 is closed.
 
-- **MOSHADE-162 / Pocket 37** (H8): the romset's own GAL fuse maps, decoded
+- **MOSHADE-162 / Pocket 37 / MiSTer 162** (H8): the romset's own GAL fuse maps, decoded
   in-house, showed the line-buffer write PAL (`100V`) admitting pen-1
   special pixels and the comparator (`100T`) matching MAME's transcription
   exactly. The dim the PCB shows on travelled map nodes is those pen-1 twins
   shading the playfield into colour-RAM bank +0x100. Two MAME shortcuts had
   come along for the ride (the early `continue` on MPR2, the `pf |= 0x080`
   on M7); both corrected, `investigations/MAP_HALFTONE.md` holds the chain.
-- **EPROM2-163 / Pocket 38** (H9): set 2's tenth main pair at CPU
+- **EPROM2-163 / Pocket 38 / MiSTer 163** (H9): set 2's tenth main pair at CPU
   `0x80000–0x9FFFF` would have landed on the extra CPU's image region, so it
   lives at `0x0A0000` and the video CPU's A19 window is remapped on all four
   ROM paths. MAME read taps settled the two questions that mattered before
@@ -423,7 +432,9 @@ is closed.
   iverilog; the JSA-I bench is byte-for-byte unchanged. Same day, the
   ThunderJaws feasibility read (`investigations/THUNDERJAWS.md`): same CPU
   pair and JSA-II, different video chip — a separate core from shared
-  blocks, if ever.
+  blocks, if ever. *(The design was overtaken within a day: GAMESEL-167
+  moved the OKI's ADPCM reads off the board's ROM port onto the core's SDRAM
+  arbiter as `OWN_J`, and the romsets arrived that evening.)*
 - **KLAX-165 / GUTS-166 / GAMESEL-167** (2026-09-09 → 10): the romsets
   arrived and MAME verified them; single-CPU option and Klax sticks, the
   Guts FFxxxx decoder map, and then the one selector that makes MiSTer a
@@ -440,6 +451,79 @@ is closed.
   shown byte-identical and the Guts comparator swept exhaustively. The
   Combat Assignment menu's highlighted panel turned out to be the same
   stain mechanism as Escape's map.
+- **ThunderJaws: future work** (owner decisions 2026-09-10 and 2026-10-17).
+  On 2026-09-10 the owner put it "out of our dev reach for now - we don't
+  want to poison the integrity of our project": the Atari VAD video chip has
+  no public FPGA implementation, so MAME would be the only reference for the
+  part that is new. On 2026-10-17: "keep thunderjaws as future work". Not
+  shelved — the research and the MAME-verified `thunderj` romset wait for it.
+- **GUTS-169 → MiSTer 167** (2026-10-09): a review found GUTS-168 had left
+  Escape's GAL 100V exception live in Guts mode, so special sprite pixels of
+  pen 1 would draw where MAME's Guts rule draws none. Latent — none of the
+  twelve sampled Guts frames has a pen-1 special — so the proof needed a
+  control fixture built to show it: 64 stray pixels before the gate, 0 after.
+  The same build made every MRA say `<rbf>Escape</rbf>` (the MiSTer-devel
+  maintainer's spelling, which a release PR would otherwise have reverted)
+  and named the rbf `Escape_YYYYMMDD.rbf`.
+- **NVRAM-170 → MiSTer 168**: high scores and operator settings now persist
+  on MiSTer (`src/mister/rtl/escape_hps_bridge.v`, one `.nvm` per MRA) — the
+  shipped MiSTer README had claimed they already did. Building the save path
+  exposed a clock-crossing bug: the MRA game byte was latched on clk_sys from
+  a 28 ns clk_ram strobe, so builds 164–167 usually booted Klax and Guts as
+  Escape. A bench control reproducing the old latch missed 8 of 10 strobes;
+  the new latch catches all of them. The jt6295 licence notice landed with it.
+- **NVRAM-171 + ALT-172 → MiSTer 169**: saving moved to the Arcade-Cave
+  convention (root-menu "Autosave NVRAM", default Off, plus "Save NVRAM").
+  168 had shown "Saving..." on nearly every menu change, because Escape
+  rewrites a 4-byte counter every 10–20 s and Main polls the save request on
+  every menu redraw. ALT-172 moved the clone MRAs into the family layout
+  (`_alternatives/_Escape from the Planet of the Robot Monsters/`,
+  `_alternatives/_Klax/`) and the CI ROM-data gate now scans every MRA
+  recursively.
+
+**The test-build map.** Work-tag numbers are not build numbers: a tag
+names a piece of work, a build number names a bitstream, and the two
+sequences do not line up (KLAX-165 is in MiSTer 164, GUTS-166 in 165,
+GUTS-169 in 167, NVRAM-170 in 168, NVRAM-171 and ALT-172 in 169). None of
+these builds is released:
+
+| Build | Carries |
+|---|---|
+| Pocket 37 | H8 |
+| Pocket 38 | H8 + Escape set 2 |
+| MiSTer 162 / 163 | H8 / + set 2 |
+| MiSTer 164 / 165 / 166 | + Klax prototypes / + Guts video / + per-game buttons |
+| MiSTer 167 | + GUTS-169, `<rbf>Escape</rbf>`, `Escape_YYYYMMDD.rbf` |
+| MiSTer 168 | + NVRAM-170 (persistence, game-byte latch), jt6295 notice |
+| MiSTer 169 | + NVRAM-171, ALT-172 |
+
+**First device results (MiSTer 168, owner's first run).** All five MRAs —
+Escape set 1 and set 2, both Klax prototypes, Guts — boot and play. The
+level-3 factory map matches the direct PCB capture (frame 24402 /
+t406–410): the travelled routes and the START box dim in the same hue, the
+level-1 map is all bright, the "you are here" node blinks every 10 frames
+(10 grey / 10 box), identical to the PCB capture, and the map's timing
+matches. H8, a finding that came out of the PCB capture and the romset's own
+GAL fuse maps rather than out of MAME, is therefore device-confirmed on
+MiSTer; Pocket 37/38 are not yet tested. The colours of the two captures
+differ, but they came through different capture paths, so nothing is
+attributed to the core: a same-path capture to judge palette accuracy is a
+post-0.2 item (MAME's own palette formula is self-described as crude, so it
+cannot settle the question).
+
+**Decisions recorded along the way.**
+- Packaging: MiSTer ships one rbf, the game picked by the MRA's index-1
+  byte, clones in the `_alternatives/` family layout; the Pocket gets one
+  core per game — `spoonelli.eprom` untouched, `spoonelli.klaxp` and
+  `spoonelli.guts` after MiSTer 0.2.
+- The `_alternatives/_Klax/` folder is shared with RetroShrimp's
+  Arcade-Klax_MiSTer core. Each MRA names its own rbf, so the two coexist;
+  the release PR says so.
+- The two milestone branches stay separate — merging them was declined,
+  so every doc fix goes to both.
+- MiSTer saving follows Arcade-Cave (Autosave default Off).
+- Order: MiSTer 0.2 first, then Pocket 0.2 (Escape set 2 + H8), then the
+  Klax / Guts Pocket cores. Save states stay a future evaluation item.
 
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)

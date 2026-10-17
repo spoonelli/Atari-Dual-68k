@@ -1,5 +1,19 @@
 # Timing: what is actually thin, and how to tell whose fault it is
 
+> **Read this first (2026-10-17).** This file is the record of **BUILDs 107–110**,
+> when the Pocket's SDRAM clock (gpll[2]) was 35.8 MHz, exactly **5×** the pixel
+> clock. It is kept as written. What has changed since:
+>
+> * **Pocket clocks.** Since LOWLAT-124 the Pocket runs `sdram_openrow` at
+>   **42.954546 MHz, 6:1**. The phase-alignment analysis below (every fifth SDRAM
+>   edge coinciding with a pixel edge) therefore no longer describes the Pocket.
+> * **MiSTer** stays at **35.795455 MHz, 5:1**, so the 5× analysis now applies to
+>   the MiSTer build (`DEVIATIONS.md` F2).
+> * **M10K.** The 283/308 figure quoted throughout is the 2026-08 count; the
+>   Pocket Escape build now fits at **301/308** (MiSTer 370/553).
+> * **§10's scoped CDC hold multicycle is still not applied** —
+>   `src/fpga/core/core_constraints.sdc` carries no `set_multicycle_path`.
+
 BUILD 108 came in at **+0.005 ns worst-case hold** on `gpll[0]`, the 7.159 MHz
 CPU/pixel clock. This file records what that path is, what moved it, and the
 method — because the interesting result is not the number, it is that the

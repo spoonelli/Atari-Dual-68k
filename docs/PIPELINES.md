@@ -15,13 +15,25 @@ MAME's `eprom.cpp` family, in that order of precedence; `DEVIATIONS.md` §C reco
 one case where MAME wins.
 
 Target is the Analogue Pocket (Cyclone V `5CEBA4F23C8` behind the openFPGA APF
-framework). A DE10-Nano/MiSTer port lives on branch `mister-port` and compiles the
-same machine RTL; differences are called out under **MiSTer** headings.
+framework). A DE10-Nano/MiSTer port compiles the same machine RTL (shipped as
+mister-v0.1.2; milestone 0.2 work on branch `milestone-0.2-mister` — see
+[`MISTER.md`](MISTER.md)); differences are called out under **MiSTer** headings.
+
+> **Which build this document reflects (2026-10-17).** The body was written at
+> BUILD 109 and its `file:line` anchors are from that era — treat them as pointers
+> to search near, not exact lines. Corrected in place since: the Pocket clock table
+> (§1), the eprom2 MRA, the ROM shadow table, the M10K figure, the JSA arbiter
+> client, and the priority/special-sprite text (§5.5). Not covered here at all is
+> milestone 0.2's multi-game work (Klax prototypes, Guts n' Glory, Escape set 2) —
+> it is unreleased; see `ARCHITECTURE.md` "Build variants" and
+> `investigations/KLAX_GUTS.md`. The shipped releases are Pocket v0.1.1 (build 36)
+> and MiSTer mister-v0.1.2 (build 161).
 
 **Branch context.** This document was written against `origin/tas-atomic` at BUILD 109
-(`BUILD_ID = 16'h3109`). BUILD 109 is an **A/B evaluation build**, not the shipping
-configuration: `core_top.v:2710-2712` passes `.VSHAD3_EN(0)` where the entity default
-is 1. Read the instantiation, never the generic default (§3.3).
+(`BUILD_ID = 16'h3109`). BUILD 109 was an **A/B evaluation build**, not the shipping
+configuration: it passed `.VSHAD3_EN(0)` where the entity default is 1. Current
+builds pass `.VSHAD3_EN(1)` with the half-size shadow (VSHAD3-112, §3.3). Read the
+instantiation, never the generic default.
 
 ---
 
@@ -30,6 +42,7 @@ is 1. Read the instantiation, never the generic default (§3.3).
 ```
    APF data slot (Pocket)              .mra + ioctl (MiSTer)
    atari_escape.rom, 0x220000 B        same 0x220000 stream, repacked in RTL
+   (Escape, either set)
                 │                                  │
                 ▼                                  ▼
      ┌──────────────────┐  ┌──────────────┐   ┌──────────────────────┐
@@ -74,19 +87,22 @@ clocking story:
 |---|---|---|---|---|
 | `outclk_0` | **7.159091 MHz** | 0 ps | `clk_sys_7159` | 68000s, pixel clock, JSA parent, `video_rgb_clock` |
 | `outclk_1` | 7.159091 MHz | 34,920 ps (+90°) | `clk_sys_7159_90deg` | `video_rgb_clock_90` |
-| `outclk_2` | **35.795455 MHz** | 0 ps | `clk_sdram` | memory service domain |
-| `outclk_3` | 35.795455 MHz | 6,984 ps (+90°) | `clk_sdram_chip` | `dram_clk` pin |
+| `outclk_2` | **42.954546 MHz** (was 35.795455 at BUILD 109) | 0 ps | `clk_sdram` | memory service domain |
+| `outclk_3` | 42.954546 MHz (was 35.795455) | 6,984 ps | `clk_sdram_chip` | `dram_clk` pin |
 | `outclk_4` | 28.636364 MHz | 0 ps | — | **not connected** |
 
 7.159091 MHz is the board's real 68000 and pixel clock: 14.31818 MHz ÷ 2, the NTSC
-colourburst family the arcade board is built on. The memory domain is therefore
-**exactly 5:1**:
+colourburst family the arcade board is built on. **Since LOWLAT-124 the Pocket memory
+domain is exactly 6:1** (with the open-row controller `sdram_openrow`); at BUILD 109,
+when this section was written, it was 5:1, and **MiSTer still is**:
 
 ```
-35.795455 / 7.159091 = 5.000000     periods 27.9366 ns vs 139.68 ns
+Pocket now:  42.954546 / 7.159091 = 6.000000     periods 23.2804 ns vs 139.68 ns
+BUILD 109 / MiSTer:  35.795455 / 7.159091 = 5.000000     periods 27.9366 ns
 ```
 
-Both 90° shifts check out as exact quarter-periods. The `clk_sdram_chip` shift is the
+The `clk_sdram_chip` shift (6,984 ps) was an exact quarter-period at 35.8 MHz; at
+42.95 MHz the same 6,984 ps is about 108°. The `clk_sdram_chip` shift is the
 v45 capture fix — at 180° the controller served words from the wrong row.
 
 There is **no separate video clock**; video runs on `clk_sys_7159`.
@@ -108,14 +124,7 @@ There is **no separate video clock**; video runs on `clk_sys_7159`.
 > | `sim/tb/tb_pf_cram.v:6,25,101` | `psram #(.CLOCK_SPEED(85.909))`, "the real 12:1 clock ratio" | **FIXED (PFCLK-111)** — parameter, simulated clock and ratio all corrected together (fixing only the parameter would have produced `run_psram_tb.sh`'s *negative control*). But see the warning header now in that file: **the bench has never passed for unrelated reasons**, so it was never validating the 7-cycle machine either. |
 > | `sim/tb/tb_mob_perf.v:30` | "10 clocks at 85.909MHz = 116ns" | **FIXED (PERFDIV-111)** — 279 ns, and the conclusion it supported inverts: the comment used it to argue MO port occupancy is "well under ONE pixel clock", when 279 ns is **two** pixel clocks |
 > | `src/mister/rtl/pll.v:7-8` | "57.272727 MHz SDRAM" | **stale** — residue of a reverted 8:1 draft. Not on this branch. |
-> | `core_constraints.sdc:4-5` | "85.909MHz = exactly 12 x 7.159MHz" | **stale** — the constraint itself is fine (`derive_pll_clocks`), only the justification is wrong |
-> | `sdram_simple.v:3` | "28.636 MHz SDRAM domain (4x CPU)" | **stale**, and contradicts line 14 of the same header |
-> | `sdram_simple.v:151-156` | argues from "250-clk interval = 2.9us" | **stale** — the threshold is 160, and 250 was never 2.9 µs |
-> | `core_top.v:1280` | "one clk_sdram cycle (11.6ns)" | **stale** — 27.94 ns |
-> | `escape_core.vhd:100,105,655,657`; `escape_mob.v:69,275` | "85.9MHz domain" | **stale comments only** |
 > | `sim/tb/tb_pf_cram.v:6,25,101` | `psram #(.CLOCK_SPEED(85.909))`, "the real 12:1 clock ratio" | **FIXED (PFSIM-113).** Was a live wrong parameter, not a stale comment: the bench exercised 7-cycle PSRAM read waits where the shipped core uses 3. Now `CLOCK_SPEED(35.795455)` on a 5:1 `clk_sd`/`clk_px` pair. Correcting it is what exposed the two further rig faults that had kept this gate red since `3d03b63` — see §PF-CRAM RIG below. |
-> | `sim/tb/tb_mob_perf.v:30` | "10 clocks at 85.909MHz = 116ns" | **stale** — 279 ns |
-> | `src/mister/rtl/pll.v:7-8` | "57.272727 MHz SDRAM" | **stale** — residue of a reverted 8:1 draft |
 >
 > Authoritative sites: the PLL file above, `core_top.v:1080-1087` (CLKFIX-106) and
 > `sdram_simple.v:110-118`. `sim/tb/tb_psram_timing.v` exists specifically to catch
@@ -136,7 +145,8 @@ The game's logic-frame budget is **119,318 68000 clocks = 16,688.15 µs**;
 `PERF_CADENCE.md` measures the original against exactly that number.
 
 **MiSTer** uses its own PLL (`src/mister/rtl/pll/pll_0002.v`, reference 50.0 MHz)
-producing 7.159091 / 35.795455 / 35.795455+90° — the same three clocks. `hps_io` is
+producing 7.159091 / 35.795455 / 35.795455+90° — the BUILD 109 Pocket's three clocks
+(5:1); the Pocket has since moved to 6:1. `hps_io` is
 deliberately clocked from `clk_ram` so the whole download path is single-domain
 (`Arcade-Escape.sv:240`).
 
@@ -146,7 +156,10 @@ deliberately clocked from `clk_ram` so the whole download path is single-domain
 
 ### 2.1 What the user supplies
 
-A verified MAME `eprom` set — 28 chips, all CRC32-checked. **No ROM data is in this
+A verified MAME `eprom` set — 28 chips, all CRC32-checked. (Since EPROM2-163
+`build_rom.py` also accepts `eprom2`, same 0x220000 size with the tenth main pair at
+`0x0A0000`, and builds `klaxp1`/`klaxp2` (0x280000) and `guts` (0x380000) images for
+future Pocket cores; MiSTer loads those games from MRAs. Unreleased milestone 0.2.) **No ROM data is in this
 repository and none is downloaded.** On the Pocket the user runs, once:
 
 ```bash
@@ -164,7 +177,7 @@ refuses to build on any mismatch. Output is one flat image of **2,228,224 bytes
 | `0x080000` | 512 KB | `extra` — world-CPU program, + shared program copy at `+0x60000` | ditto |
 | `0x100000` | 64 KB | JSA 6502 program **and** TMS5220 LPC speech data | flat bytes |
 | `0x110000` | 16 KB | `chars` — alphanumerics tiles | as dumped |
-| `0x120000` | 1024 KB | `spr_tiles` — motion-object graphics | **inverted and repacked** (§2.2) |
+| `0x120000` | 1024 KB | `spr_tiles` — playfield **and** motion-object graphics (MAME's one region, both layers decode it) | **inverted and repacked** (§2.2) |
 
 Interleave (`build_rom.py:60-64`): even byte = the `.50x` chip (D15–D8), odd byte =
 the `.40x` chip (D7–D0). The `0x060000` pair is the documented exception — there
@@ -282,8 +295,11 @@ correspondingly exact — `rom_ready = sdram_init_done_s & chk_done_s & dl_idle_
 (`:160-170`) — with no equivalent of the Pocket's 56 ms quiet timer, because the
 MiSTer download is single-domain.
 
-There is deliberately **no `eprom2` MRA**: set 2 loads an extra `maincpu` pair at
-region `0x80000` for which the packed image has no room.
+*Superseded by EPROM2-163 (milestone 0.2, unreleased):* this used to say there was
+deliberately no `eprom2` MRA because set 2's extra `maincpu` pair at `0x80000` had no
+room in the packed image. EPROM2-163 places that pair at image `0x0A0000` (unused in
+the extra CPU's region) and `v_img` in `escape_core.vhd` remaps the video CPU's
+`0x80000–0x9FFFF` there; the set-2 MRA and `build_rom.py` both use that slot.
 
 ---
 
@@ -318,7 +334,7 @@ design.** Roughly three-quarters of the project's builds went into it
 | CRAM0 (cellular PSRAM) | 8 MB, own bus | `clk_sdram` | **playfield graphics**, download mirror, forensics |
 | CRAM1 | — | — | **entirely tied off** (`core_top.v:266-276`) |
 | SRAM (1 Mbit) | — | — | **unused**, tied off (`core_top.v:280-285`) |
-| M10K block RAM | **308 blocks, all of them** | `clk_sys_7159` | line buffers, ROM shadows, char ROM, and every game RAM |
+| M10K block RAM | **308 blocks** — 301 used by the current Pocket Escape build (308/308 at BUILD 109) | `clk_sys_7159` | line buffers, ROM shadows, char ROM, and every game RAM |
 
 The two external buses are genuinely separate, which is the point: it is the closest
 available approximation to the PCB's own topology. This was the `cram-gfx` contender
@@ -339,8 +355,8 @@ On-FPGA memories in `escape_core.vhd` (all ×16 bits):
 | `ee_ram` | `:1343` | 512 B | the 2804 EEPROM (`initbyte => x"FF"` — virgin EEPROMs read FF) |
 | `alpha_ram` | `:1466` | 4 KB | alphanumerics RAM |
 
-> **The M10K ceiling is a hard design constraint, not a budget.** The design uses
-> 308/308. Any newly inferred block RAM — however small — fails the fit with Quartus
+> **The M10K ceiling is a hard design constraint, not a budget.** At BUILD 109 the
+> design used 308/308; the current Pocket Escape build uses 301/308 (MiSTer 370/553). Any newly inferred block RAM — however small — fails the fit with Quartus
 > Error 170048; builds 72/72b/72c and 103 all died this way. The fix is normally to
 > move the array to a different resource class (`attribute ramstyle ... is "MLAB"`,
 > ALM-based LUTRAM), not to shrink it — as the flight-recorder ring does
@@ -364,14 +380,14 @@ during download so instruction fetch does not touch SDRAM:
 |---|---|---|
 | `vshad` | 16 KB | `0x000000-0x003FFF` |
 | `vshad2` | 32 KB | `0x048000-0x04FFFF` |
-| `vshad3` (generate-guarded) | 32 KB | `0x050000-0x057FFF` |
+| `vshad3` (generate-guarded) | 16 KB (32 KB until VSHAD3-112) | `0x054000-0x057FFF` (was `0x050000-0x057FFF`) |
 | `eshad` | 16 KB | `0x080000-0x083FFF` |
 | `eshad2` | 4 KB | `0x08F000-0x08FFFF` |
 | `jshad` | 64 KB | `0x100000-0x10FFFF` — the whole JSA 6502 ROM |
 
 Coverage was chosen from MAME page profiles, not guessed: `vshad3` was sized off
-"profiled pages 0x53000 14% + 0x56000 17%" (commit `aca5510`). Today the video CPU has
-~80 KB shadowed and the world CPU ~20 KB.
+"profiled pages 0x53000 14% + 0x56000 17%" (commit `aca5510`). The video CPU now has
+~64 KB shadowed (~80 KB before VSHAD3-112 halved `vshad3`) and the world CPU ~20 KB.
 
 The **intended** property is "a shadowed fetch never waits". The **measured** property
 is that a shadow fetch costs **5.015 core clocks per bus cycle** and a fastpath hit
@@ -454,7 +470,10 @@ download-mirror drain → **playfield** (channel A before B) → *(MO — retire
 CRAM self-test. "Every CRAM start goes through ONE strict-priority chain … so no two
 clients can ever collide by construction."
 
-The JSA 6502 appears in neither list: it is served from `jshad` (§3.3).
+The JSA 6502 appears in neither list: it is served from `jshad` (§3.3). On a JSA-II
+board (milestone 0.2, Klax/Guts) the OKI6295's ADPCM reads are the exception: they are
+not shadowed, so `escape_core`'s ROM-request FSM grants them as owner `OWN_J` (lowest
+of its owners, GAMESEL-167) and they reach SDRAM as client 3 above.
 
 **MiSTer** collapses these into one chain: fastpath fills → legacy CPU fetch →
 `{PF, MO}` round-robin on a `vid_last_pf` token (`escape_mister.v:565-592`).
@@ -780,6 +799,9 @@ pf_vaddr <= {pf_x2[8:3], pf_y[8:3]};        // map col*64 + row     // :2233
 gfx addr  = 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0} // :2249
 ```
 
+(Milestone 0.2, MiSTer: the tile base is `pf_tile_base`, `0x280000` when `game_sel`
+selects Guts n' Glory — its separate 1 MB tile region — and `0x120000` otherwise.)
+
 The map is **column-major** (MAME `SCAN_COLS`). The previous row-major read transposed
 every lookup for 90-plus builds; symmetric tiles — borders, pillars — hid it (LANE3j,
 `core_top.v:2227-2232`).
@@ -876,7 +898,8 @@ layer**, and any download slow enough to be plausible still clears it. Second, t
 still correct, and all that is gone is the A/B ping-pong, i.e. the design silently
 reverts to the one-in-flight arrangement that `PF_SINGLE_CH` exists to reject.
 
-**Synthesis cost, measured** (Quartus CI on `pfreset-111`, run `32807078145`): **M10K
+**Synthesis cost, measured** (Quartus CI on `pfreset-111`, run `32807078145`; a 2026-08
+figure — the current Pocket Escape build is 301/308): **M10K
 283 / 308 — delta 0**, as expected for a change that adds a reset arm to nine existing
 registers and no storage. Worst-case setup **+5.488 ns** (was +5.698), worst-case hold
 **+0.087 ns** (was +0.103); all 64 analysed clock/corner rows non-negative. The hold row
@@ -1003,6 +1026,9 @@ w3 = y[15:7] | width[6:4] | height[2:0] | hflip[3]
 
 Tiles walk row-major, `code + ty*width + tx`; palette base `0x100`.
 
+*Guts n' Glory (milestone 0.2, `guts` input, GUTS-168):* height is 4 bits, `w3[3:0]`,
+and hflip comes from `w1[15]` instead of `w3[3]` (MAME `s_guts_mob_config`).
+
 The Y field is **negated and offset by the sprite height** — `atarimo` ground truth,
 found at v80 after a raw-field compare matched almost nothing (v79 probe: 97 fetches,
 12 pixels per frame):
@@ -1117,7 +1143,8 @@ the *head* entry wins every pixel it touches. We must walk head-first, so the eq
 is to refuse to overwrite a pixel already written for this line — earliest entry wins,
 same result. The refusal is the write enable itself, gated on `bld_occupied`. This used
 to be last-wins, which handed **16% of MO pixels in the reference frame** to the wrong
-object.
+object. *In Guts mode (GUTS-168) the list renders forward, so the line buffer is
+last-writer-wins there — the gate is `!occ || guts`.*
 
 **Staleness must be structural, not tagged.** The buffers carried a `{fpar, ly[7:0]}`
 tag whose frame parity is **one bit**, which separates this frame from last frame and
@@ -1133,7 +1160,7 @@ construction rather than by an argument about tag width.** The tags remain becau
 still cover the reset state and cost nothing.
 
 Widening the tag was never available: a 21st bit doubles both line buffers, and the
-design is at 308/308 M10K.
+design was at 308/308 M10K (BUILD 109; 301/308 today, still no room for a doubling).
 
 #### What happens when the budget is missed
 
@@ -1169,7 +1196,7 @@ requirement, not an emergent one.
 
 ### 5.5 The MO/PF priority comparator — `escape_prio.v`
 
-Purely combinational, 115 lines, transcribed from GAL equations verified off the real
+Purely combinational, ~135 lines, transcribed from GAL equations verified off the real
 PCB and quoted in `reference/eprom.cpp`. The equations are in the module header
 verbatim; the mapping into this core's pixel pipeline is at `escape_prio.v:21-31`.
 
@@ -1197,15 +1224,25 @@ Output is the 11-bit colour-RAM index directly:
 
 ```verilog
 wire [10:0] mo_pen11 = {3'b001, mo_color, mo_pix};
-wire [10:0] pf_pen11 = {2'b01, shade, pf_color[3] | m7, pf_color[2:0], pf_pix};
+wire [10:0] pf_pen11 = {2'b01, shade, pf_color[3], pf_color[2:0], pf_pix};
 assign pen = mo_win ? mo_pen11 : pf_pen11;
 ```
+
+That is the milestone 0.2 form (MOSHADE-162): M7 no longer ORs `0x080` into the
+playfield pen, because the game's colour RAM never populates the bank that term would
+select (`DEVIATIONS.md` C7). **The shipped releases (Pocket v0.1.1, MiSTer
+mister-v0.1.2) still carry MAME's `pf_color[3] | m7`.**
 
 **Special-sprite masking.** `MPR2` never reaches this module. `escape_mob` *does* write
 special (`mopriority & 4`) pixels into the line buffer — they must be there to mask
 normal sprites beneath them, exactly as the reference's single MO bitmap does — but it
 clears `disp_valid` for them, so the comparator sees precisely what the reference's
-first pass sees after its `continue`.
+first pass sees after its `continue`. **Exception on milestone 0.2 (MOSHADE-162):** a
+special pixel of pen exactly 1 is let through — Escape's line-buffer GAL 100V writes
+it, and it reaches this module as M7/SHADE (`DEVIATIONS.md` C6). In Guts mode no
+special pixel gets through, pen 1 included (GUTS-169). Guts mode also replaces the
+comparator with MAME's plain rule — MO wins iff `!PFX3` or `mo_prio >= pf_color[2:1]`,
+no FORCEMC0/SHADE/M7 (GUTS-168).
 
 Score against the reference model: **507,904 / 507,904 = 100.0000%**
 (`sim/run_prio_tb.sh`).
@@ -1327,7 +1364,8 @@ it is in the scaler.
 
 Escape carries an Atari **JSA-I** audio board: a 6502 (T65), a YM2151 (jt51), and a
 TMS5220 speech chip. No POKEY — the socket is present and unpopulated, and reads return
-`0xFF`. No OKI6295.
+`0xFF`. No OKI6295. (Milestone 0.2 adds a JSA-II mode — YM2151 + OKI6295 for Klax and
+Guts — documented in [`JSA.md`](JSA.md).)
 
 `escape_jsa` is single-clock on the 7.159091 MHz core clock, with everything paced by
 enables derived from a 2-bit counter:
@@ -1343,7 +1381,7 @@ enables derived from a 2-bit counter:
 
 The 6502's clock enable is gated off while a ROM fetch is in flight — that is what
 `rom_stall` is — and its ROM is `jshad`, a BRAM copy of the whole 64 KB region (§3.3),
-not an arbiter client.
+not an arbiter client. (JSA-II's OKI ADPCM reads are: owner `OWN_J`, §3.5.)
 
 ### The SCOM link, and why it is not a latch
 
@@ -1409,12 +1447,10 @@ deliberately **not applied** — "polarity unverified; ungated proves the speech
 revisit after device test" (`escape_jsa.vhd:571-573`). `JSA.md` describes the gain law
 with the gate, so the doc and the RTL differ here on purpose.
 
-> **`JSA.md` is stale in three places** and should be read with this section beside it.
-> It describes the TMS5220 as a stub with silence output, the SCOM as modelled with
-> latch semantics, and `escape_core`'s JSA status bits as a stub driving both flags
-> idle. All three were superseded. `escape_jsa.vhd`'s own header still says
-> "TMS5220 stub" and "SCOM stubbed"; `escape_core.vhd:7-9` still describes a 2268-line
-> file as a "'Hello world' skeleton".
+> *`JSA.md` was brought up to date on 2026-10-17* (real TMS5220, SCOM transit
+> delay, CT1 gate not applied, JSA-II). `escape_jsa.vhd`'s own header line still
+> says "TMS5220 stub", and `escape_core.vhd`'s header still says "SCOM (sound)
+> stubbed".
 
 ---
 
@@ -1425,12 +1461,12 @@ with the gate, so the doc and the RTL differ here on purpose.
 | raster timing, playfield, alpha, the compositor, SDRAM/CRAM services, arbitration, HUD | `src/fpga/core/core_top.v` — the video pipeline lives here, not in the VHDL |
 | CPUs, decode, shared RAM, TAS interlock, interrupts, shadows, fastpath, JSA glue | `src/fpga/core/rtl/escape_core.vhd` |
 | the sprite engine | `src/fpga/core/rtl/escape_mob.v` — read the header comments first; they are the design record |
-| MO/PF priority | `src/fpga/core/rtl/escape_prio.v` (115 lines, all of it) |
+| MO/PF priority | `src/fpga/core/rtl/escape_prio.v` (~135 lines, all of it) |
 | the stain automaton | `src/fpga/core/rtl/escape_stain.v` (63 lines, all of it) |
 | the sound board | `src/fpga/core/rtl/escape_jsa.vhd` + `docs/JSA.md` |
-| the memory controller | `src/fpga/core/rtl/sdram_simple.v` |
+| the memory controller | `src/fpga/core/rtl/sdram_openrow.v` (both platforms; `sdram_simple.v` is kept as the A/B alternative) |
 | what the ROM image looks like | `support/build_rom.py` + `docs/ROMMAP.md` |
-| the MiSTer port | `git show origin/mister-port:docs/MISTER.md` |
+| the MiSTer port | [`MISTER.md`](MISTER.md); MiSTer RTL lives under `src/mister/` on the `mister` (release) and `milestone-0.2-mister` branches |
 | how any of this was arrived at | [`RETROSPECTIVE.md`](investigations/RETROSPECTIVE.md), [`HISTORY.md`](investigations/HISTORY.md), [`LESSONS.md`](investigations/LESSONS.md) |
 
 The codebase carries no `TODO`/`FIXME` markers in first-party RTL. It uses tagged
