@@ -44,9 +44,9 @@ screens; high scores and operator settings are saved to the SD card
 | Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay; the factory map's halftone follows the real board (matches the PCB capture on MiSTer 168), where MAME differs |
 | Sound, JSA-I (Escape: 6502 + YM2151 + TMS5220 speech) | ✅ full pipeline; liveness watchdog self-heals a wedged sound CPU |
 | Sound, JSA-II (prototypes: 6502 + YM2151 + OKI6295) | ✅ bench-proven on the real Klax/Guts firmware; device-tested on MiSTer 169 |
-| Inputs (buttons, hall-stick model, keyboard) | ✅ incl. in-game calibration screens; per-game button sets for the prototypes (new in the 20261019 release) |
+| Inputs (buttons, hall-stick model, keyboard) | ✅ incl. in-game calibration screens; per-game button sets for the prototypes (new in 0.2) |
 | OSD (Video / Audio / Pause options / Debug pages; pause, rotate, CRT adjust) | ✅ build identity in the about line `ESCAPE v<date> by spoonelli` |
-| High scores / operator settings | ✅ saved per game to `config/nvram/` with Save NVRAM, Save settings, or Autosave NVRAM — see below (new in the 20261019 release; earlier MiSTer builds did not save) |
+| High scores / operator settings | ✅ saved per game to `config/nvram/` with Save NVRAM, Save settings, or Autosave NVRAM — see below (new in 0.2; earlier MiSTer builds did not save) |
 
 ## Accuracy
 
