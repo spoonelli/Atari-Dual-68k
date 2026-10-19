@@ -10,8 +10,9 @@ including the arbiter saga and its wrong turns — is preserved separately in
 where that record disagrees with this page, this page wins.
 
 > **v0.2.0 (2026-10-19; test builds 162–171, release candidate build 172,
-> branch `milestone-0.2-mister`).** One `Escape_YYYYMMDD.rbf` (MRA tag `<rbf>Escape</rbf>`) serves all
-> five sets: a one-byte `<rom index="1">` block in each MRA selects the game
+> branch `milestone-0.2-mister`).** One rbf (`Arcade-Escape_YYYYMMDD.rbf` in
+> `releases/`, installed by the distribution as `Escape_YYYYMMDD.rbf`; MRA tag
+> `<rbf>Escape</rbf>`) serves all five sets: a one-byte `<rom index="1">` block in each MRA selects the game
 > (GAMESEL-167: 00 Escape, 01 Klax prototype, 02 Guts n' Glory; absent in
 > older Escape MRAs, which keep working). Builds add, in order: the
 > factory-map halftone (162, H8), Escape set 2 (163), the Klax prototypes
@@ -25,11 +26,14 @@ where that record disagrees with this page, this page wins.
 > family layout under `_alternatives/` (169; see
 > [`DISTRIBUTION.md`](DISTRIBUTION.md)), then Klax's single Flip/Start
 > button, a Pause that freezes the whole sound board, and the NVRAM rows above
-> Service Mode (170). `jt6295` is compiled into the single
+> Service Mode (170); Klax's second Flip button, the Guts MRA button-list fix,
+> Start hidden on every game, and CI gates for MRA button lists and both
+> players' inputs, at fitter SEED 9 (172). `jt6295` is compiled into the single
 > rbf since GAMESEL-167. Device status: the owner's first run of MiSTer 168
 > booted and played all five MRAs, a 2026-10-17 capture of the level-3 map
-> matches the PCB reference capture, and the full test plan (T1–T10) passed on
-> 169 (2026-10-18), with set 1 and set 2 played through the canal stage on 170.
+> matches the PCB reference capture, the full test plan (T1–T10) passed on
+> 169 (2026-10-18), and the final plan (M1–M7, including two players on every
+> game) passed on 172 (2026-10-19).
 > Controls per game: [`CONTROLS.md`](CONTROLS.md).
 
 ## Status
@@ -49,7 +53,8 @@ verbatim with the Pocket build.
 ## Where to get it
 
 - **Official MiSTer distribution (since 2026-09-03):** a stock `update_all`
-  installs `_Arcade/cores/Escape_YYYYMMDD.rbf` + the MRA from
+  installs `_Arcade/cores/Escape_YYYYMMDD.rbf` + the MRAs (five since 0.2,
+  the alternates under `_Arcade/_alternatives/`) from
   [`MiSTer-devel/Arcade-Escape_MiSTer`](https://github.com/MiSTer-devel/Arcade-Escape_MiSTer),
   the org's fork of our distribution repo
   [`spoonelli/Arcade-Escape_MiSTer`](https://github.com/spoonelli/Arcade-Escape_MiSTer)
@@ -112,6 +117,7 @@ measured and bench-gated. The full cross-platform rules live in
 
 | Tag | Build | Notes |
 |---|---|---|
+| [`mister-v0.2.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.2.0) | 172 | Milestone 0.2, `Arcade-Escape_20261019.rbf` (installed as `Escape_20261019.rbf`). Five MRAs on one rbf: Escape set 1 and Guts n' Glory at the top level, Escape set 2 and the Klax prototypes 1/2 under `_alternatives/`. High scores and operator settings saved per game (Arcade-Cave convention), factory-map halftone matched to the PCB, Klax Flip + Flip (2nd), Start hidden on every game (the machine has none), Pause freezes the whole sound board, `jt6295` added. Device test plan M1–M7 passed on 172. |
 | [`mister-v0.1.2`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.2) | 161 | The review release: mister-devel menu conventions, credits pages retired for the about-line credit, DK-style pause with dim, Rotate/Flip, CRT adjust, MRA `<buttons>` fixed (Pause + owner defaults), composite-centred sync. Machine RTL unchanged from 153. |
 | [`mister-v0.1.1`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.1) | 153 | The parity release: open-row controller, interleave arbiter, tile mirror + download-race fix, owner button defaults, credits accuracy pass. First update_all delivery. |
 | [`mister-v0.1.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.0) | 142 | First tagged release: boot splash retired, dated rbf naming. |
