@@ -270,7 +270,7 @@ def main() -> int:
     # POCKETSET-175: the default name follows the set, matching the Pocket
     # instance JSONs (set 1 keeps the original name, so existing SD cards work)
     DEFNAME = {"eprom": "atari_escape.rom", "eprom2": "atari_escape2.rom"}.get(setname, setname + ".rom")
-    out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, DEFNAME)
+    out = args[1] if len(args) > 1 else os.path.join(here, DEFNAME)   # BUILDROM-181: args, not sys.argv (--set was taken as the out name)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     img = bytearray(T["SIZE"])
     DESC = {"eprom": "Escape set 1, rev 3/4 program", "eprom2": "Escape set 2, rev 1 program + 0x80000 window",
