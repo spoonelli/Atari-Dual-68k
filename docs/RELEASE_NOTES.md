@@ -41,7 +41,7 @@ factory-map fix. The owner's device tests passed on RC 3 (2026-10-19).
 | 37 | **Factory-map halftone** (H8, MOSHADE-162): travelled routes and the START box dim on the between-level map, as on the owner's PCB capture, where MAME leaves them bright ([`DEVIATIONS.md`](DEVIATIONS.md) C6/C7, [`MAP_HALFTONE.md`](investigations/MAP_HALFTONE.md)). |
 | 38 | **Escape set 2** (`eprom2`, EPROM2-163): `build_rom.py` builds a set-2 image; the core serves set 2's tenth program pair. |
 | 39 | Rebuilt from the current shared RTL (the Klax/Guts/JSA-II work of MiSTer 164–169, all tied off on the Pocket); no intended Pocket-visible change. |
-| 41 | **Release build of Pocket v0.2.0**: RC 3 (build 40 bitstream) rebuilt from the release commit; `build_rom.py` with merged/split-set support (BUILDROM-176/181) |
+| 41 | **Release build of Pocket v0.2.0**: RC 3 (build 40 bitstream) rebuilt from the release commit; `build_rom.py` with merged/split-set support (BUILDROM-176/181). The Developer HUD still shows **38**: `BUILD_ID` was last set at 38 and left alone so the tested bitstream ships unchanged (a `BUILD_ID` edit alone has moved hold timing by 0.088 ns; the Pocket's hold margin is 0.006 ns) |
 | 40 (RC 1–3) | **Set picker** (POCKETSET-175): the core lists its romsets at launch through APF instance JSONs in `Assets/eprom/spoonelli.eprom/` (set 2 under `_alternatives/`, jotego's layout); set 2 loads `atari_escape2.rom` and saves to `atari_escape2.sav`; set 1 keeps its 0.1.x file names. `build_rom.py` names its output for the set it detects. `core.json` 0.2.0. |
 
 The Klax and Guts n' Glory Pocket cores (`spoonelli.klaxp`, `spoonelli.guts`)
