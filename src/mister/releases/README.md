@@ -112,12 +112,12 @@ and the
 The rbf, the MRAs and the `_alternatives/` folder are in
 [`releases/`](releases/) in this repository.
 
-1. Copy `Arcade-Escape_YYYYMMDD.rbf` to `_Arcade/cores/` on your MiSTer
-   SD card (the official distribution installs the same file as
-   `Escape_YYYYMMDD.rbf`). The MRA references the core as `Escape`, which
-   the framework matches against either spelling. **Delete any older
-   `escape*.rbf`, `Escape_*.rbf` or `Arcade-Escape*.rbf`**; the framework
-   matches by prefix and picks the newest-looking name.
+1. Copy `Escape_YYYYMMDD.rbf` to `_Arcade/cores/` on your MiSTer SD card
+   (the same name the official distribution installs). The MRA references
+   the core as `Escape`, which the framework matches against `Escape_*` and
+   `Arcade-Escape_*` alike. **Delete any older `escape*.rbf`, `Escape_*.rbf`
+   or `Arcade-Escape*.rbf`**: when several match, the framework loads the
+   alphabetically last name, which is not always the newest build.
 2. Copy the MRAs to `_Arcade/`, keeping the folder layout, and replace
    any earlier copies (older MRAs reference the old rbf name or lack the
    save declaration). One rbf serves every game on this board. The layout
@@ -254,7 +254,7 @@ buttons** (or the other set's entry) once — saved maps do not carry over.
 
 ## History
 
-* Arcade-Escape_20261019.rbf
+* Escape_20261019.rbf
   * **Shared-Hardware Support:** 'Escape' set 2, Atari's unreleased **Klax prototypes** (sets 1 and 2) and **Guts n' Glory**. Each MRA carries a one-byte game select; older Escape MRAs keep working.  
   * **High scores and operator settings are saved**, per game, to `config/nvram/`: *Save NVRAM*, Main's *Save settings*, or *Autosave NVRAM* (default Off), the Arcade-Cave convention.
   * **The factory map now matches the original board:** travelled routes dim instead of staying bright as in MAME, matched against a capture of the original PCB.
