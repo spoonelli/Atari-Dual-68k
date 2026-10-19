@@ -525,6 +525,24 @@ cannot settle the question).
 - Order: MiSTer 0.2 first, then Pocket 0.2 (Escape set 2 + H8), then the
   Klax / Guts Pocket cores. Save states stay a future evaluation item.
 
+**170 and Pocket RC 1 (2026-10-18/19).** The owner's full T1–T10 pass on 169
+left three notes. Klax showed four buttons because MAME's `klaxp` input list
+declares four; traced in MAME, both prototype programs read only Button 1, so
+170 gives Klax one Flip/Start button. The canal stage's "STAND BY" player-2
+panel, absent from the PCB capture, turned out to be a ROM-revision
+difference: set 1's HUD code prints it in game state 0x18, while set 2 and
+the owner's board (an undumped revision closest to set 2) have no such
+branch; set 2 on MiSTer matched the board. Lesson: compare the PCB capture
+against set 2. One session's total audio loss followed by "YOU MADE IT!" on a
+canal timeout did not recur in three later timeouts and was dropped from the
+issues list. The owner then pointed at sprite-row dropouts and tearing on the
+PCB capture itself (frames 21322, 29230, 33012): MiSTer's rare heavy-line
+flicker is no longer assumed to be a core artifact, and matching the board's
+rate became a post-0.2 investigation instead of a release gate. 170 also
+fixed Pause (it froze only the YM2151; the sound CPU, speech and OKI now
+freeze too) and moved the NVRAM rows above Service Mode; Pocket RC 1 added a
+set picker through APF instance JSONs (set 2 under `_alternatives/`).
+
 ## The five root causes, in one list
 1. FSM state-encoding collision corrupting downloads (v44)
 2. SDRAM chip-clock capture phase (v45)

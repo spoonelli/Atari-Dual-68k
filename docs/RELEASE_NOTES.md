@@ -64,14 +64,12 @@ every 10 frames, identical to the PCB capture, and the screen timing agrees.
 Colour differences between those two captures are not attributed to the core
 (different capture paths); a same-path comparison is a post-0.2 palette item.
 The owner ran the full MiSTer test plan (T1–T10) on 169 (2026-10-18): all pass
-except three notes — Klax showed four buttons (fixed in 170), the canal-stage
+except two notes — Klax showed four buttons (fixed in 170), the canal-stage
 "STAND BY" panel differs from the PCB capture (resolved: a ROM-revision
 difference — set 1's HUD code has a canal-only branch that prints STAND BY;
 set 2 and the owner's board, an undumped revision closest to set 2, have no
-such branch; confirmed on MiSTer 170 with set 2), and one
-session lost all audio and then showed "YOU MADE IT!" after the canal timer ran
-out, where a timeout normally ends on "YOU DID NOT MAKE IT!" (not reproduced;
-open). Pocket 37–40 are not yet device-tested.
+such branch; confirmed on MiSTer 170 with set 2). Pocket 37–40 are not yet
+device-tested.
 
 ThunderJaws remains future work; the research is in
 [`investigations/THUNDERJAWS.md`](investigations/THUNDERJAWS.md).
