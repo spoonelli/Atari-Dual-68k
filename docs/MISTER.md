@@ -1,6 +1,6 @@
 # MiSTer (DE10-Nano) port — reference
 
-Current release **`mister-v0.2.0`** (2026-10-19, build 171,
+Current release **`mister-v0.2.0`** (2026-10-19, release candidate build 172,
 `Arcade-Escape_20261019.rbf`; the official distribution names it
 `Escape_20261019.rbf`). The sections after the box below were written for
 `mister-v0.1.2` (2026-09-02, build 161) and still hold; the box lists what 0.2
@@ -9,7 +9,7 @@ including the arbiter saga and its wrong turns — is preserved separately in
 [`investigations/MISTER_PORT_RECORD.md`](investigations/MISTER_PORT_RECORD.md);
 where that record disagrees with this page, this page wins.
 
-> **v0.2.0 (released 2026-10-19; test builds 162–170, release build 171,
+> **v0.2.0 (2026-10-19; test builds 162–171, release candidate build 172,
 > branch `milestone-0.2-mister`).** One `Escape_YYYYMMDD.rbf` (MRA tag `<rbf>Escape</rbf>`) serves all
 > five sets: a one-byte `<rom index="1">` block in each MRA selects the game
 > (GAMESEL-167: 00 Escape, 01 Klax prototype, 02 Guts n' Glory; absent in
