@@ -175,7 +175,8 @@ Test builds (unreleased, handed to the owner for device testing):
 | MiSTer 171 | release build of the 170 RTL (byte-identical to 170) — superseded |
 | MiSTer 172 | **release candidate**: + KLAXFLIP2-178, MRABTN-177, STARTHIDE-179, INPUTS-180 gates; fitter SEED 9 (SEED 3 gave -0.128 ns on the ascal HDMI path; sweep 1/5/9 all positive, 9 best at +0.106 / +0.251) |
 | Pocket 39 | current-RTL rebuild of 38 |
-| Pocket 40 | **RC 1** — + POCKETSET-175 set picker, `core.json` 0.2.0 |
+| Pocket 40 | **RC 1–3** — + POCKETSET-175 set picker, `core.json` 0.2.0 (RC 2/3: repackaged with the fixed `build_rom.py`) |
+| Pocket 41 | **release build of Pocket v0.2.0** (RC 3 bitstream, release commit) |
 
 Work-tag numbers are not build numbers (GUTS-169 is in MiSTer 167, NVRAM-170
 in 168, NVRAM-171 and ALT-172 in 169).
@@ -207,10 +208,10 @@ yet device-tested beyond a first RC 1 run into the canal stage.
 
 | # | Gate | State | Note |
 |---|---|---|---|
-| G7 | Pocket RC 1 (build 40) device tests | **OPEN** | Set 1 regression; H8 map halftone vs the PCB capture; set 2 launched from `_alternatives` (POST + play); separate saves per set (`atari_escape.sav` untouched by set 2) and a high score surviving a power cycle; an existing 0.1.x card (set 1 files only) still works. |
-| G8 | Release build from the final commit | **OPEN** | Not a test build re-labelled; package guards green on the actual artifact, zero ROMs. |
-| G9 | Metadata bump to 0.2.0 | **OPEN** | `core.json` version + `date_release` (the *release* date, Era 13's lesson), tag `v0.2.0`, RELEASE_NOTES records the build number; `info.txt` refreshed (H5: "v0.2.x", "eprom or eprom2", build stamp behind Developer HUD). |
-| G9a | Pocket publish mechanics (updaters) | **OPEN — at Pocket release** | The openFPGA cores inventory lists `spoonelli/atari-dual-68k` with asset filter `AtariDual68k-pocket-`; pupdate / Pocket Sync read the repo's **latest non-pre-release** GitHub Release. So: tag `v0.2.0` on `main` (bring `milestone-0.2` onto `main` first), release marked Latest, asset named exactly `AtariDual68k-pocket-v0.2.0.zip`; any MiSTer GitHub release stays pre-release so it never takes Latest. Verify in pupdate afterwards. |
+| G7 | Pocket device tests | **DONE (owner, 2026-10-19, on RC 3)** | Set 1 regression, set picker and set 2 from `_alternatives`, separate saves per set, existing 0.1.x card. |
+| G8 | Release build from the final commit | **DONE — Pocket build 41** | Built from the release commit; package guards green on the artifact, zero ROMs. |
+| G9 | Metadata bump to 0.2.0 | **DONE** | `core.json` 0.2.0, `date_release` 2026-10-19 (the release date); `info.txt` v0.2.x and both sets; tag `v0.2.0`. |
+| G9a | Pocket publish mechanics (updaters) | **DONE at tag `v0.2.0`** | `main` fast-forwarded to the release commit; GitHub release `v0.2.0` marked Latest with asset `AtariDual68k-pocket-v0.2.0.zip` (the inventory's `AtariDual68k-pocket-` filter). Verify in pupdate. |
 | G10 | Klax / Guts Pocket cores | **LATER — after MiSTer 0.2** | One core per game: `spoonelli.klaxp`, `spoonelli.guts`; `spoonelli.eprom` is untouched. |
 
 **Milestone items that are not release gates**

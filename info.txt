@@ -1,9 +1,11 @@
 Atari Dual 68k (Escape from the Planet of the Robot Monsters, 1989)
-openFPGA core for Analogue Pocket - v0.1.x
+openFPGA core for Analogue Pocket - v0.2.x
 
 Dual 68010 + JSA-I audio (YM2151 + TMS5220 speech), hall-effect stick.
 High scores and settings persist to the SD card.
-ROM required: MAME 'eprom' set, user-supplied (not included).
+ROM required: MAME 'eprom' (set 1) and/or 'eprom2' (set 2), user-
+supplied (not included). Pick the set at launch; set 2 is in the
+_alternatives folder. Each set keeps its own high scores.
 
 Boots clean. Tick Developer HUD in the core menu and a small cyan
 build number appears bottom-right - check it matches the build you

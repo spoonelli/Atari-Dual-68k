@@ -20,26 +20,29 @@ hidden in a footnote; if you are deciding whether to install it, read the
 
 ---
 
-## 0.2 — MiSTer v0.2.0 (2026-10-19); Pocket 0.2 at release candidate
+## 0.2 — MiSTer v0.2.0 and Pocket v0.2.0 (2026-10-19)
 
-**MiSTer v0.2.0** is release candidate build 172 (2026-10-19, `Arcade-Escape_20261019.rbf`,
+**MiSTer v0.2.0** is build 172 (2026-10-19, `Arcade-Escape_20261019.rbf`,
 published by the official distribution as `Escape_20261019.rbf`), built from
-the release branch (fitter SEED 9; the 170 RTL plus Klax's second Flip button). **Pocket 0.2 is not
-released yet:** RC 1 (build 40) is with the owner for device testing. The
+the release branch (fitter SEED 9; the 170 RTL plus Klax's second Flip button). It is in the distribution repo's
+`releases/` and reaches the official MiSTer distribution when MiSTer-devel
+merges the release pull request. **Pocket v0.2.0** is release build 41: RC 3's
+bitstream, rebuilt from the release commit, with the fixed `build_rom.py`. The
 sections after this one describe the v0.1.x core. Build numbers and work tags are different series (KLAX-165
 is in MiSTer 164, GUTS-166 in 165, GUTS-169 in 167, NVRAM-170 in 168,
 NVRAM-171 and ALT-172 in 169, MISTER-174 in 170, POCKETSET-175 in Pocket
 40).
 
-**Pocket** — Pocket 0.2 is Escape set 2 plus the factory-map fix. None of
-these test builds has been run on a device yet.
+**Pocket** — Pocket 0.2 is Escape set 2 (with a set picker) plus the
+factory-map fix. The owner's device tests passed on RC 3 (2026-10-19).
 
 | Build | Adds |
 |---|---|
 | 37 | **Factory-map halftone** (H8, MOSHADE-162): travelled routes and the START box dim on the between-level map, as on the owner's PCB capture, where MAME leaves them bright ([`DEVIATIONS.md`](DEVIATIONS.md) C6/C7, [`MAP_HALFTONE.md`](investigations/MAP_HALFTONE.md)). |
 | 38 | **Escape set 2** (`eprom2`, EPROM2-163): `build_rom.py` builds a set-2 image; the core serves set 2's tenth program pair. |
 | 39 | Rebuilt from the current shared RTL (the Klax/Guts/JSA-II work of MiSTer 164–169, all tied off on the Pocket); no intended Pocket-visible change. |
-| 40 (RC 1) | **Set picker** (POCKETSET-175): the core lists its romsets at launch through APF instance JSONs in `Assets/eprom/spoonelli.eprom/` (set 2 under `_alternatives/`, jotego's layout); set 2 loads `atari_escape2.rom` and saves to `atari_escape2.sav`; set 1 keeps its 0.1.x file names. `build_rom.py` names its output for the set it detects. `core.json` 0.2.0. |
+| 41 | **Release build of Pocket v0.2.0**: RC 3 (build 40 bitstream) rebuilt from the release commit; `build_rom.py` with merged/split-set support (BUILDROM-176/181) |
+| 40 (RC 1–3) | **Set picker** (POCKETSET-175): the core lists its romsets at launch through APF instance JSONs in `Assets/eprom/spoonelli.eprom/` (set 2 under `_alternatives/`, jotego's layout); set 2 loads `atari_escape2.rom` and saves to `atari_escape2.sav`; set 1 keeps its 0.1.x file names. `build_rom.py` names its output for the set it detects. `core.json` 0.2.0. |
 
 The Klax and Guts n' Glory Pocket cores (`spoonelli.klaxp`, `spoonelli.guts`)
 come later, as separate packages from the same tree.
@@ -72,8 +75,8 @@ except two notes — Klax showed four buttons (fixed in 170), the canal-stage
 "STAND BY" panel differs from the PCB capture (resolved: a ROM-revision
 difference — set 1's HUD code has a canal-only branch that prints STAND BY;
 set 2 and the owner's board, an undumped revision closest to set 2, have no
-such branch; confirmed on MiSTer 170 with set 2). Pocket 37–40 are not yet
-device-tested. The final MiSTer plan on release candidate 172
+such branch; confirmed on MiSTer 170 with set 2). Pocket RC 3 (build 40) passed the
+owner's device tests (2026-10-19). The final MiSTer plan on 172
 (2026-10-19) passed M1–M7: Escape set 1 regression, Pause mid-music resume,
 Start hidden (the machine has none; Escape's self-test steps on Jump), set 2,
 Klax with both Flip buttons, Guts coin / start / pause (broken before 172),
