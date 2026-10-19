@@ -81,7 +81,7 @@ through the sound board, as on Escape.
 
 | Game | Stick | Buttons | MiSTer MRA defaults |
 |---|---|---|---|
-| Klax (prototype sets 1 and 2) | 8-way digital stick, U/D/L/R on D15..D12; no ADC0809 fitted (reads `FF`) | four, Button 1..4 straight onto D8..D11 (MAME maps four; the prototype uses two in play) | Button 1..4 = A, B, X, Y |
+| Klax (prototype sets 1 and 2) | 8-way digital stick, U/D/L/R on D15..D12; no ADC0809 fitted (reads `FF`) | one, Flip/Start on D8 (MAME declares Button 1..4 on D8..D11, but the program acts on D8 only - start/join and tile drop; KLAXBTN-174, traced in MAME 0.289) | Flip/Start = A |
 | Guts n' Glory (prototype) | analogue, through the same hall-stick/ADC0809 path as Escape (ADC0–3: P1 Y/X, P2 Y/X, X reversed) | three, Button 1/2/3 on D9/D8/D11 | Button 1..3 = B, A, X |
 
 Escape's map (above) is unchanged in all of these builds. The full deltas are

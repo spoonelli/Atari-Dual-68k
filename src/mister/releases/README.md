@@ -171,9 +171,9 @@ or the unanswered ones stay unmapped. Note the framework treats your
 global User/Menu button as "Undefine" inside this flow: assigning a
 core button to it silently clears the slot instead.
 
-**Prototypes (test items):** Klax has an 8-way stick and four buttons
-mapped straight to the board's button bits (MAME names them Button 1..4;
-no combo); Guts n' Glory uses the analogue stick and three buttons in
+**Prototypes (test items):** Klax has an 8-way stick and one button,
+**Flip/Start**, which starts or joins a game and drops tiles (MAME lists
+four buttons, but the program only reads the first); Guts n' Glory uses the analogue stick and three buttons in
 MAME's order. Neither prototype has a Start switch on the board - they
 start from a game button - so MiSTer's Start is only the self-test step /
 continue switch there. Coins go through the sound board as on Escape.
@@ -214,9 +214,9 @@ board: the game initialises its own defaults.
   any time. Either way the whole machine freezes coherently — both
   68010s, sound board, speech — and resumes exactly where it stopped.
   Reset cancels a held pause.
-- **Service Mode** — the operator control, on the root menu.
 - **Autosave NVRAM / Save NVRAM** — high-score saving, on the root menu;
   see [High scores and settings](#high-scores-and-settings).
+- **Service Mode** — the operator control, on the root menu.
 - **Reset** — the machine's hard reset.
 
 If the pages ever appear "exploded" — every option listed flat under its

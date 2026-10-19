@@ -1361,12 +1361,14 @@ sync2 s_v3 (clk_sys, vshad3_on, vshad3_s);
 // GAMESEL-167: the four physical buttons (MRA order 1..4 = the Escape names
 // jump/fire/duck/bomb) land on CD11..CD8 per game, from MAME eprom.cpp:
 //   Escape  D8 jump, D9 fire, D11 duck; Bomb presses all three (the combo)
-//   Klax    D8..D11 = Button 1..4 straight, no combo (klaxp ports)
+//   Klax    D8 = Flip/Start (button 1) only. KLAXBTN-174: MAME's klaxp port
+//           lists Button 1..4 on D8..D11, but the program (traced in MAME)
+//           acts on D8 alone, so D9..D11 stay released
 //   Guts    D9 = Button 1, D8 = Button 2, D11 = Button 3, D10 unused (guts ports)
 wire [3:0] p1_btn_esc = {p1_duck | p1_bomb, 1'b0, p1_fire | p1_bomb, p1_jump | p1_bomb};
 wire [3:0] p2_btn_esc = {p2_duck | p2_bomb, 1'b0, p2_fire | p2_bomb, p2_jump | p2_bomb};
-wire [3:0] p1_btn_klx = {p1_bomb, p1_duck, p1_fire, p1_jump};
-wire [3:0] p2_btn_klx = {p2_bomb, p2_duck, p2_fire, p2_jump};
+wire [3:0] p1_btn_klx = {3'b000, p1_jump};
+wire [3:0] p2_btn_klx = {3'b000, p2_jump};
 wire [3:0] p1_btn_gut = {p1_duck, 1'b0, p1_jump, p1_fire};
 wire [3:0] p2_btn_gut = {p2_duck, 1'b0, p2_jump, p2_fire};
 wire [3:0] p1_btn = (game_sel == 2'b01) ? p1_btn_klx : (game_sel == 2'b10) ? p1_btn_gut : p1_btn_esc;
@@ -1400,9 +1402,10 @@ wire [3:0] p2_btn = (game_sel == 2'b01) ? p2_btn_klx : (game_sel == 2'b10) ? p2_
 //       pages 0x50000/0x51000/0x52000 are read zero times during gameplay
 //       (docs/investigations/VSHAD3.md section 8), and the CPUs run the same code here.
 //
-//   CPU_TYPE = 1   68010, the dedicated cabinet. Both schematic sets specify
-//       U68010 and the owner's board is a photographed MC68010P8; the JAMMA
-//       variant shipped a 68000 and is CPU_TYPE 0. Neither is a fallback.
+//   CPU_TYPE = 1   68010. Both schematic sets specify U68010 and the owner's
+//       board is a photographed MC68010P8; CPU_TYPE 0 is the 68000 that
+//       MAME models. Either part shipped in either cabinet (README.md, "CPU
+//       type") - it is not a cabinet distinction. Neither is a fallback.
 //       Behaviour is identical on this ROM; interrupt entry costs ~5 extra
 //       clocks for the extended exception frame. See docs/CPU_AND_ARBITER.md.
 

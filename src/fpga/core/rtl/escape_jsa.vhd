@@ -268,7 +268,11 @@ begin
     -- and TMS5220 coherently mid-cycle; resume is a plain re-enable.
     cen_ym   <= '1' when enacnt(0) = '1' and pause = '0' else '0';
     cen_ymp1 <= '1' when enacnt   = "11" and pause = '0' else '0';
-    cen_cpu  <= '1' when enacnt   = "01"  else '0';
+    -- PAUSE-174: 155 gated only the YM pair. The 6502 (and with it the
+    -- 249.69 Hz timed IRQ, which counts cen_cpu) kept running against a
+    -- frozen YM, so the music sequencer stalled on YM busy for the whole
+    -- pause; the TMS5220 and OKI clocks below are gated the same way now.
+    cen_cpu  <= '1' when enacnt   = "01" and pause = '0' else '0';
     cpu_ena  <= cen_cpu and not rom_stall;
 
     ---------------------------------------------------------------- 6502 + reset
@@ -583,14 +587,14 @@ begin
     tms_clk : process(clk)
     begin
         if rising_edge(clk) then
-            if tms_ctr = "1111" or reset_n = '0' then
+            if reset_n = '0' or (tms_ctr = "1111" and pause = '0') then
                 tms_ctr <= unsigned'("01") & tms_squeak & '1';
-            else
+            elsif pause = '0' then                  -- PAUSE-174: hold
                 tms_ctr <= tms_ctr + 1;
             end if;
         end if;
     end process;
-    tms_en <= '1' when tms_ctr = "1111" else '0';
+    tms_en <= '1' when tms_ctr = "1111" and pause = '0' else '0';
 
     -- LANE4b: 2A00 write latches the byte onto the chip's data bus (the
     -- 74LS374 on the real board); the firmware's WRIO writes strobe WS.
@@ -647,7 +651,8 @@ begin
         begin
             if rising_edge(clk) then
                 -- 1.193 MHz enable = clk/6
-                if oki_cctr = 5 then oki_cctr <= (others => '0'); oki_cen <= '1';
+                if pause = '1' then oki_cen <= '0';     -- PAUSE-174: hold
+                elsif oki_cctr = 5 then oki_cctr <= (others => '0'); oki_cen <= '1';
                 else oki_cctr <= oki_cctr + 1; oki_cen <= '0'; end if;
                 -- 8-clock /WRV pulse, data held for its duration
                 if cpu_ena = '1' and cpu_rw_n = '0' and sel_w2a = '1' and a16(2 downto 1) = "00" then

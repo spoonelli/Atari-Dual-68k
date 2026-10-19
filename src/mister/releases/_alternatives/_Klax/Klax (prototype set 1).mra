@@ -12,13 +12,16 @@
 	<display type="raster" rotate="0"/>
 	<!-- GAMESEL-167: index-1 byte 01 (game_sel 2'b01) = Klax prototype
 	     (single 68000, JSA-II).
-	     Controls: 8-way stick + four buttons per player straight onto D8..D11
-	     (MAME klaxp names them Button 1..4; no Escape-style combo). Start is
+	     Controls: 8-way stick + ONE button per player, Flip/Start on D8
+	     (KLAXBTN-174: MAME klaxp declares four, but traced in MAME 0.289 the
+	     program reads only D8 - start/join and tile drop; D9..D11 are never
+	     acted on). The "-" slots hide the unused positions from Define
+	     buttons; the order must still mirror the core's J1 line. Start is
 	     the self-test step/continue switch, as on every game - the board has
 	     no Start switch, the prototype starts from a button. Coin goes
 	     through the sound board, as on Escape. Pause on the left shoulder as
 	     on the Escape MRA. -->
-	<buttons names="Button 1,Button 2,Button 3,Button 4,Start,Coin,Pause" default="A,B,X,Y,Start,Select,L"/>
+	<buttons names="Flip/Start,-,-,-,Start,Coin,Pause" default="A,B,X,Y,Start,Select,L"/>
 
 	<!--
 	  ROM STREAM LAYOUT (Klax prototype on Escape hardware, KLAX_GUTS.md)

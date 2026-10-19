@@ -191,13 +191,14 @@ localparam CONF_STR = {
 	"P4O[8],ROM Shadow 0x54000,On,Off;",
 	"P4O[7],Skip Self-Test,Off,On;",
 	"-;",
-	"O[6],Service Mode,Off,On;",
-	"-;",
 	// NVRAM-171: the Arcade-Cave idiom and default. Autosave saves the EEPROM
 	// (high scores, operator settings) when the OSD opens, only if the game
 	// changed it; Save NVRAM saves now. Main's own "Save settings" also saves.
+	// MENU-174: placed above the game-settings row, Cave's order.
 	"O[32],Autosave NVRAM,Off,On;",
 	"T[33],Save NVRAM;",
+	"-;",
+	"O[6],Service Mode,Off,On;",
 	"-;",
 	"R[0],Reset;",
 	"-;",
