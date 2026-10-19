@@ -250,7 +250,8 @@ will ship one core per game. Both come from the same RTL through one selector:
   MRA recursively.
 - Buttons (MiSTer 166): the wrapper builds CD11..CD8 per game — Escape
   unchanged (jump/fire/duck + the Bomb combo), Klax D8..D11 = Button 1..4
-  straight, Guts D9/D8/D11 = Button 1/2/3 (MAME klaxp/guts ports). Neither
+  straight (MiSTer 170, KLAXBTN-174: one button, Flip/Start on D8 - the
+  program reads only D8, traced in MAME 0.289), Guts D9/D8/D11 = Button 1/2/3 (MAME klaxp/guts ports). Neither
   prototype has a Start switch on the board; both start from a button.
 
 ## 4c. Guts video reading proven offline, pixel-exact (2026-09-10)
