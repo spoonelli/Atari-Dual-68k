@@ -15,13 +15,17 @@
 	     Controls: 8-way stick + ONE button per player, Flip/Start on D8
 	     (KLAXBTN-174: MAME klaxp declares four, but traced in MAME 0.289 the
 	     program reads only D8 - start/join and tile drop; D9..D11 are never
-	     acted on). The "-" slots hide the unused positions from Define
-	     buttons; the order must still mirror the core's J1 line. Start is
+	     acted on). Button 2 is "Flip (2nd)", the
+	     same function (KLAXFLIP2-178: a Klax cabinet has a Flip button each
+	     side of the stick). The "-" slots hide the unused positions from
+	     Define buttons; the order must still mirror the core's J1 line. Start is hidden (STARTHIDE-179): it drives
+	     260000 bit 0, which neither Klax set ever reads (traced in MAME); the
+	     game starts from Flip (D8). Start is
 	     the self-test step/continue switch, as on every game - the board has
 	     no Start switch, the prototype starts from a button. Coin goes
 	     through the sound board, as on Escape. Pause on the left shoulder as
 	     on the Escape MRA. -->
-	<buttons names="Flip/Start,-,-,-,Start,Coin,Pause" default="A,B,X,Y,Start,Select,L"/>
+	<buttons names="Flip/Start,Flip (2nd),-,-,-,Coin,Pause" default="A,B,X,Y,Start,Select,L"/>
 
 	<!--
 	  ROM STREAM LAYOUT (Klax prototype on Escape hardware, KLAX_GUTS.md)

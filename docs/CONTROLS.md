@@ -81,8 +81,8 @@ through the sound board, as on Escape.
 
 | Game | Stick | Buttons | MiSTer MRA defaults |
 |---|---|---|---|
-| Klax (prototype sets 1 and 2) | 8-way digital stick, U/D/L/R on D15..D12; no ADC0809 fitted (reads `FF`) | one, Flip/Start on D8 (MAME declares Button 1..4 on D8..D11, but the program acts on D8 only - start/join and tile drop; KLAXBTN-174, traced in MAME 0.289) | Flip/Start = A |
-| Guts n' Glory (prototype) | analogue, through the same hall-stick/ADC0809 path as Escape (ADC0–3: P1 Y/X, P2 Y/X, X reversed) | three, Button 1/2/3 on D9/D8/D11 | Button 1..3 = B, A, X |
+| Klax (prototype sets 1 and 2) | 8-way digital stick, U/D/L/R on D15..D12; no ADC0809 fitted (reads `FF`) | one function, Flip/Start on D8, on two buttons (Flip/Start and Flip (2nd), KLAXFLIP2-178, as a cabinet's two Flip buttons). MAME declares Button 1..4 on D8..D11, but the program acts on D8 only - start/join and tile drop (KLAXBTN-174, traced in MAME 0.289). Start is hidden: Klax never reads 260000 bit 0 (STARTHIDE-179) | Flip/Start = A, Flip (2nd) = B |
+| Guts n' Glory (prototype) | analogue, through the same hall-stick/ADC0809 path as Escape (ADC0–3: P1 Y/X, P2 Y/X, X reversed) | three, Button 1/2/3 on D9/D8/D11 (Guts' own switch test calls D9 "Left FIRE" and D8 "Left START"); Start hidden, never read (STARTHIDE-179) | Button 1..3 = B, A, X |
 
 Escape's map (above) is unchanged in all of these builds. The full deltas are
 in [`investigations/KLAX_GUTS.md`](investigations/KLAX_GUTS.md) §3, §4 and §4b.

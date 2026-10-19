@@ -114,6 +114,12 @@ jobs:
       - name: Game select + EEPROM load/save bridge (tb_hps_bridge)
         run: ./sim/run_hps_bridge_tb.sh
 
+      # INPUTS-180: every pad control, both players, lands on its own player's
+      # port with MAME's bits for each game_sel (Escape / Klax / Guts).
+      # Proven able to fail: a copy with Guts' P2 buttons 1/2 swapped fails 2 of 36.
+      - name: Per-game input mapping, both players (tb_mister_inputs)
+        run: ./sim/run_mister_inputs_tb.sh
+
       - name: Compile Arcade-Escape
         run: |
           docker run --rm -v "$PWD":/work -w /work/src/mister \

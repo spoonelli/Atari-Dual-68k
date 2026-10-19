@@ -177,13 +177,15 @@ or the unanswered ones stay unmapped. Note the framework treats your
 global User/Menu button as "Undefine" inside this flow: assigning a
 core button to it silently clears the slot instead.
 
-**Prototypes:** Klax has an 8-way stick and one button, **Flip/Start**
-(production cabinets mirror it on both sides of the stick), which starts or
-joins a game and drops tiles (MAME lists
-four buttons, but the program only reads the first); Guts n' Glory uses the analogue stick and three buttons in
-MAME's order. Neither prototype has a Start switch on the board - they
-start from a game button - so MiSTer's Start is only the self-test step /
-continue switch there. Coins go through the sound board as on Escape.
+**Prototypes:** Klax has an 8-way stick and one function, **Flip/Start**,
+which starts or joins a game and drops tiles, on two buttons: **Flip/Start**
+and **Flip (2nd)** (production cabinets have a Flip button on each side of
+the stick; MAME lists four buttons, but the program only reads the first).
+Guts n' Glory uses the analogue stick and three buttons in MAME's order;
+Button 2 is the one its own switch test calls "Left START". Neither
+prototype reads the core's Start input, so Define buttons does not ask for
+it on those games; they start and join from their game buttons. Coins go
+through the sound board as on Escape.
 
 ## High scores and settings
 
@@ -258,7 +260,7 @@ buttons** (or the other set's entry) once — saved maps do not carry over.
   * **Shared-Hardware Support:** 'Escape' set 2, Atari's unreleased **Klax prototypes** (sets 1 and 2) and **Guts n' Glory**. Each MRA carries a one-byte game select; older Escape MRAs keep working.  
   * **High scores and operator settings are saved**, per game, to `config/nvram/`: *Save NVRAM*, Main's *Save settings*, or *Autosave NVRAM* (default Off), the Arcade-Cave convention.
   * **The factory map now matches the original board:** travelled routes dim instead of staying bright as in MAME, matched against a capture of the original PCB.
-  * Klax has one **Flip/Start** button (the prototypes read only button 1); Guts n' Glory uses the analogue stick and three buttons.
+  * Klax's one function, **Flip/Start**, on two buttons (Flip/Start and Flip (2nd)), as on a Klax cabinet; Guts n' Glory uses the analogue stick and three buttons. Neither asks for a Start button (neither program reads it).
   * Pause now freezes the whole sound board (sound CPU, speech and samples), not only the music chip.
   * Clone MRAs moved under `_alternatives/` (set 2 under `_Escape from the Planet of the Robot Monsters`, the Klax prototypes under `_Klax`, shared with the Klax core); all MRAs use `<rbf>Escape</rbf>`.
   * Autosave NVRAM / Save NVRAM sit in the root menu above Service Mode.

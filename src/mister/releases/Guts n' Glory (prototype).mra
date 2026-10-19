@@ -22,8 +22,13 @@
 	     Duck, Bomb, Start, Coin, Pause = joystick bits 4..10), so the
 	     unused Bomb slot is a "-" placeholder (hidden from Define buttons).
 	     MRABTN-177: without it, Start, Coin and Pause each landed one bit
-	     low - Coin pressed Start and Pause inserted a coin. -->
-	<buttons names="Button 1,Button 2,Button 3,-,Start,Coin,Pause" default="B,A,X,Y,Start,Select,L"/>
+	     low - Coin pressed Start and Pause inserted a coin.
+	     STARTHIDE-179: Start is hidden too. The core's Start drives
+	     260000 bit 0, which Guts never reads (traced in MAME 0.289 through
+	     boot, attract, a coined game and the whole self-test); the game
+	     starts from its D8 button, which its own switch test calls
+	     "Left START" (MAME's Button 2). -->
+	<buttons names="Button 1,Button 2,Button 3,-,-,Coin,Pause" default="B,A,X,Y,Start,Select,L"/>
 
 	<!--
 	  ROM STREAM LAYOUT (Guts n' Glory on Escape hardware, KLAX_GUTS.md)

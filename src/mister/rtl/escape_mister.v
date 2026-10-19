@@ -1363,12 +1363,15 @@ sync2 s_v3 (clk_sys, vshad3_on, vshad3_s);
 //   Escape  D8 jump, D9 fire, D11 duck; Bomb presses all three (the combo)
 //   Klax    D8 = Flip/Start (button 1) only. KLAXBTN-174: MAME's klaxp port
 //           lists Button 1..4 on D8..D11, but the program (traced in MAME)
-//           acts on D8 alone, so D9..D11 stay released
+//           acts on D8 alone, so D9..D11 stay released. KLAXFLIP2-178:
+//           button 2 is "Flip (2nd)" and ORs into D8 too - a Klax cabinet has
+//           a Flip button each side of the stick, one function (as the
+//           official Klax core's "Flip (2nd)")
 //   Guts    D9 = Button 1, D8 = Button 2, D11 = Button 3, D10 unused (guts ports)
 wire [3:0] p1_btn_esc = {p1_duck | p1_bomb, 1'b0, p1_fire | p1_bomb, p1_jump | p1_bomb};
 wire [3:0] p2_btn_esc = {p2_duck | p2_bomb, 1'b0, p2_fire | p2_bomb, p2_jump | p2_bomb};
-wire [3:0] p1_btn_klx = {3'b000, p1_jump};
-wire [3:0] p2_btn_klx = {3'b000, p2_jump};
+wire [3:0] p1_btn_klx = {3'b000, p1_jump | p1_fire};
+wire [3:0] p2_btn_klx = {3'b000, p2_jump | p2_fire};
 wire [3:0] p1_btn_gut = {p1_duck, 1'b0, p1_jump, p1_fire};
 wire [3:0] p2_btn_gut = {p2_duck, 1'b0, p2_jump, p2_fire};
 wire [3:0] p1_btn = (game_sel == 2'b01) ? p1_btn_klx : (game_sel == 2'b10) ? p1_btn_gut : p1_btn_esc;
