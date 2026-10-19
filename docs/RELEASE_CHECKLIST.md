@@ -176,7 +176,7 @@ Test builds (unreleased, handed to the owner for device testing):
 | MiSTer 172 | **release candidate**: + KLAXFLIP2-178, MRABTN-177, STARTHIDE-179, INPUTS-180 gates; fitter SEED 9 (SEED 3 gave -0.128 ns on the ascal HDMI path; sweep 1/5/9 all positive, 9 best at +0.106 / +0.251) |
 | Pocket 39 | current-RTL rebuild of 38 |
 | Pocket 40 | **RC 1–3** — + POCKETSET-175 set picker, `core.json` 0.2.0 (RC 2/3: repackaged with the fixed `build_rom.py`) |
-| Pocket 41 | **release build of Pocket v0.2.0** (RC 3 bitstream, release commit) |
+| Pocket 41 | **release build of Pocket v0.2.0** (RC 3 design, release commit, `BUILD_ID` 41 on screen) |
 
 Work-tag numbers are not build numbers (GUTS-169 is in MiSTer 167, NVRAM-170
 in 168, NVRAM-171 and ALT-172 in 169).
