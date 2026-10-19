@@ -3,10 +3,11 @@
 An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68010 board
 whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**).
 
-The shipped releases implement the **`eprom` configuration only** — two 68000-family
-CPUs (68010 by default, 68000 selectable) and JSA-I audio. Milestone 0.2
-(unreleased, test builds) adds Escape set 2 on both platforms and, on MiSTer
-first, the Klax prototypes and Guts n' Glory. See [Other games on this hardware](#other-games-on-this-hardware).
+The Pocket release implements the **`eprom` configuration** — two 68000-family
+CPUs (68010 by default, 68000 selectable) and JSA-I audio. **MiSTer v0.2.0**
+(2026-10-19) adds Escape set 2 and the two unreleased Atari games that ran on
+this board, the Klax prototypes and Guts n' Glory; Pocket 0.2 (Escape set 2
+with a set picker) is at release candidate. See [Other games on this hardware](#other-games-on-this-hardware).
 
 > Built for the [Analogue Pocket](https://www.analogue.co/pocket) via the openFPGA framework.
 > This project ships **no ROMs**. You must supply your own dumps.
@@ -69,19 +70,17 @@ Full hardware map, roadmap, and schematic findings: [`docs/ARCHITECTURE.md`](doc
 ## Other games on this hardware
 
 MAME's `eprom.cpp` driver covers five sets on this board family.
-**`eprom` is the shipped target. The other four are implemented for
-milestone 0.2 (unreleased)** — `eprom2` on both platforms, the Klax
-prototypes and Guts n' Glory on MiSTer first. None of the 0.2 sets is in a
-shipped release; the README's rows move to "supported" only when a release
-carries them.
+**`eprom` is the original target. All five are supported on MiSTer since
+v0.2.0** (2026-10-19); on the Pocket, `eprom2` is in the 0.2 release
+candidate and the Klax / Guts cores come later.
 
 | Set | Title | Status |
 |---|---|---|
 | **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
-| `eprom2` | Escape … (set 2) | **Implemented (EPROM2-163, 2026-09-09) — sim-booted, device verification pending.** Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra` (MiSTer test builds 163+). Boots in `tb_escape_core`; Pocket test build 38 carries it, not yet device-tested. |
-| `klaxp1` | Klax (prototype set 1) | **Implemented for milestone 0.2 (KLAX-165, GAMESEL-167) — MiSTer test builds 164+.** Real program boots in simulation; first device run on MiSTer 168 boots and plays; full device test pending. Pocket core (`spoonelli.klaxp`) later. |
+| `eprom2` | Escape … (set 2) | **Supported on MiSTer (v0.2.0); Pocket in RC 1.** Device-tested on MiSTer 169/170 (POST, play through level 1, the canal stage and its result screen). Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra` under `_alternatives/`. Pocket: launched from the set picker's `_alternatives` folder (`atari_escape2.rom`), RC 1 not yet device-tested. |
+| `klaxp1` | Klax (prototype set 1) | **Supported on MiSTer (v0.2.0; KLAX-165, GAMESEL-167).** Device-tested on MiSTer 169; one Flip/Start button (KLAXBTN-174 — the program reads only Button 1). Pocket core (`spoonelli.klaxp`) later. |
 | `klaxp2` | Klax (prototype set 2) | As `klaxp1` (the two sets differ only in the main pair). |
-| `guts` | Guts n' Glory (prototype) | **Implemented for milestone 0.2 (video-map mode GUTS-166, special-sprite fix GUTS-169) — MiSTer test builds 165+.** Real program boots in simulation; first device run on MiSTer 168 boots and plays; full device test pending. Pocket core (`spoonelli.guts`) later. |
+| `guts` | Guts n' Glory (prototype) | **Supported on MiSTer (v0.2.0; video-map mode GUTS-166, special-sprite fix GUTS-169).** Device-tested on MiSTer 169. Pocket core (`spoonelli.guts`) later. |
 
 Two structural differences set the Klax and Guts prototypes apart from
 Escape:
@@ -124,7 +123,7 @@ spoonelli`, identifies the build; the old credits pages were retired in
 mister-v0.1.2), and the OSD has music/speech sliders. It still trails the
 Pocket core in accumulated device hours and is released separately, not as
 part of this package, and since 2026-09-03 is in the official MiSTer
-distribution. Its milestone 0.2 work lives on the
+distribution; v0.2.0 (2026-10-19) is its current release, built from the
 `milestone-0.2-mister` branch. Details: [`docs/MISTER.md`](docs/MISTER.md).
 
 ## Hardware being implemented
@@ -190,8 +189,8 @@ checked rather than asserted:
 - **Pixels**: motion-object output replays MAME scene dumps at **100.0000%
   agreement and coverage** on crowd, door, spawn-flash and factory-map
   fixtures, with draw order proven prefix-compatible by a dedicated gate.
-  That is the shipped v0.1.x record; since MOSHADE-162 (milestone 0.2,
-  unreleased) the core departs from MAME on the factory map by design, where
+  That is the v0.1.x record; since MOSHADE-162 (MiSTer v0.2.0; Pocket 0.2
+  RC) the core departs from MAME on the factory map by design, where
   the board's GAL equations and the PCB capture disagree with MAME
   ([`DEVIATIONS.md`](docs/DEVIATIONS.md) C6/C7).
 
@@ -329,8 +328,8 @@ always points at the current Pocket release.
    `Assets/` into the existing folders.
 2. Put **your own** `atari_escape.rom` in `/Assets/eprom/common/`. This project
    distributes no ROM data; build the image from dumps you own per
-   [`docs/ROMS.md`](docs/ROMS.md). *(Milestone 0.2, unreleased: set 2 goes
-   beside it as `atari_escape2.rom`.)*
+   [`docs/ROMS.md`](docs/ROMS.md). *(Pocket 0.2 RC: set 2 goes beside it
+   as `atari_escape2.rom`.)*
 3. Launch the core. It asks for the ROM on startup *(0.2: it lists the sets
    instead — set 1 at the top, set 2 in `_alternatives`)*. High scores save
    themselves to `/Saves/eprom/common/` — you do not create that file.

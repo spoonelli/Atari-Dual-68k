@@ -1,14 +1,16 @@
 # MiSTer (DE10-Nano) port — reference
 
-Current as of **`mister-v0.1.2`** (2026-09-02, build 161,
-`Arcade-Escape_20260902.rbf`). The build-by-build engineering history —
+Current release **`mister-v0.2.0`** (2026-10-19, build 171,
+`Arcade-Escape_20261019.rbf`; the official distribution names it
+`Escape_20261019.rbf`). The sections after the box below were written for
+`mister-v0.1.2` (2026-09-02, build 161) and still hold; the box lists what 0.2
+added. The build-by-build engineering history —
 including the arbiter saga and its wrong turns — is preserved separately in
 [`investigations/MISTER_PORT_RECORD.md`](investigations/MISTER_PORT_RECORD.md);
 where that record disagrees with this page, this page wins.
 
-> **Milestone 0.2 (unreleased, test builds 162–169, branch
-> `milestone-0.2-mister`).** Nothing below this box describes 0.2 unless it
-> says so. One `Escape_YYYYMMDD.rbf` (MRA tag `<rbf>Escape</rbf>`) serves all
+> **v0.2.0 (released 2026-10-19; test builds 162–170, release build 171,
+> branch `milestone-0.2-mister`).** One `Escape_YYYYMMDD.rbf` (MRA tag `<rbf>Escape</rbf>`) serves all
 > five sets: a one-byte `<rom index="1">` block in each MRA selects the game
 > (GAMESEL-167: 00 Escape, 01 Klax prototype, 02 Guts n' Glory; absent in
 > older Escape MRAs, which keep working). Builds add, in order: the
@@ -21,10 +23,13 @@ where that record disagrees with this page, this page wins.
 > "Autosave NVRAM" (default Off) and "Save NVRAM", Main's *Save settings*
 > also saves, file `config/nvram/<MRA name>.nvm` — with the clone MRAs in the
 > family layout under `_alternatives/` (169; see
-> [`DISTRIBUTION.md`](DISTRIBUTION.md)). `jt6295` is compiled into the single
+> [`DISTRIBUTION.md`](DISTRIBUTION.md)), then Klax's single Flip/Start
+> button, a Pause that freezes the whole sound board, and the NVRAM rows above
+> Service Mode (170). `jt6295` is compiled into the single
 > rbf since GAMESEL-167. Device status: the owner's first run of MiSTer 168
-> booted and played all five MRAs, and a 2026-10-17 capture of the level-3
-> map matches the PCB reference capture; the full test plan is pending.
+> booted and played all five MRAs, a 2026-10-17 capture of the level-3 map
+> matches the PCB reference capture, and the full test plan (T1–T10) passed on
+> 169 (2026-10-18), with set 1 and set 2 played through the canal stage on 170.
 > Controls per game: [`CONTROLS.md`](CONTROLS.md).
 
 ## Status
