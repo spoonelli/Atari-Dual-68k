@@ -245,6 +245,33 @@ paths:
 After an MRA update that changes the button set, run **Define eprom
 buttons** (or the other set's entry) once — saved maps do not carry over.
 
+## History
+
+* Arcade-Escape_20261019.rbf
+  * **Four more sets on the same rbf:** Escape set 2, Atari's unreleased **Klax prototypes** (sets 1 and 2) and **Guts n' Glory**. Each MRA carries a one-byte game select; older Escape MRAs keep working.
+  * **High scores and operator settings are saved**, per game, to `config/nvram/`: *Save NVRAM*, Main's *Save settings*, or *Autosave NVRAM* (default Off), the Arcade-Cave convention.
+  * **The factory map follows the original board:** travelled routes dim instead of staying bright as in MAME, matched against a capture of the original PCB.
+  * Klax has one **Flip/Start** button (the prototypes read only button 1); Guts n' Glory uses the analogue stick and three buttons.
+  * Pause now freezes the whole sound board (sound CPU, speech and samples), not only the music chip.
+  * Clone MRAs moved under `_alternatives/` (set 2 under `_Escape from the Planet of the Robot Monsters`, the Klax prototypes under `_Klax`, shared with the Klax core); all MRAs use `<rbf>Escape</rbf>`.
+  * Autosave NVRAM / Save NVRAM sit in the root menu above Service Mode.
+  * Adds jotego's `jt6295` (OKI MSM6295) for the prototypes' samples; see `NOTICE.md`.
+
+* Arcade-Escape_20260902.rbf
+  * **OSD per the MiSTer-devel conventions:** Video / Audio / Pause options / Debug pages, core id `ESCAPE`, about line `ESCAPE v<date> by spoonelli` (replaces the credits pages).
+  * **Pause:** a mappable Pause button (default left shoulder), "Pause when OSD is open" (default Off), "Dim video after 10s" (default On).
+  * **Rotate (CCW/CW) and Flip 180**, through the framework framebuffer (HDMI).
+  * **CRT H/V Adjust** (±8) and a horizontal sync position calibrated for consumer 15 kHz sets.
+  * MRA `<buttons>` corrected: seven buttons including Pause, defaults Jump=Y Fire=B Duck=A Bomb=X. Re-run *Define eprom buttons* once.
+  * First release in the official MiSTer distribution (2026-09-03).
+
+* Arcade-Escape_20260830.rbf
+  * **Crowd-scene performance at parity with the Analogue Pocket core:** the Pocket's open-row SDRAM controller, a sprite/CPU interleave arbiter, and the sprite tiles mirrored into an idle SDRAM bank.
+  * Download race fixed; default buttons Jump/Fire/Duck/Bomb on left/bottom/right/top.
+
+* escape_20260829.rbf
+  * First MiSTer release: *Escape from the Planet of the Robot Monsters* (set 1), both 68010s concurrent (68000 selectable), JSA-I sound with TMS5220 speech, hall-effect stick model.
+
 ## Reporting problems
 
 Include the OSD footer line (`ESCAPE v<date> by spoonelli`), the rbf
