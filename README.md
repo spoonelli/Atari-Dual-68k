@@ -4,8 +4,8 @@ An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — 
 whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**).
 
 The Pocket release implements the **`eprom` configuration** — two 68000-family
-CPUs (68010 by default, 68000 selectable) and JSA-I audio. the **MiSTer release
-20261019** (`Escape_20261019.rbf`) adds Escape set 2 and the two unreleased Atari games that ran on
+CPUs (68010 by default, 68000 selectable) and JSA-I audio. **MiSTer v0.2.0**
+(2026-10-19) adds Escape set 2 and the two unreleased Atari games that ran on
 this board, the Klax prototypes and Guts n' Glory; Pocket 0.2 (Escape set 2
 with a set picker) is at release candidate. See [Other games on this hardware](#other-games-on-this-hardware).
 
@@ -71,16 +71,16 @@ Full hardware map, roadmap, and schematic findings: [`docs/ARCHITECTURE.md`](doc
 
 MAME's `eprom.cpp` driver covers five sets on this board family.
 **`eprom` is the original target. All five are supported on MiSTer since
-the 20261019 release**; on the Pocket, `eprom2` is in the 0.2 release
+v0.2.0** (2026-10-19); on the Pocket, `eprom2` is in the 0.2 release
 candidate and the Klax / Guts cores come later.
 
 | Set | Title | Status |
 |---|---|---|
 | **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
-| `eprom2` | Escape … (set 2) | **Supported on MiSTer (release 20261019); Pocket in RC 1.** Device-tested on MiSTer 169/170 (POST, play through level 1, the canal stage and its result screen). Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra` under `_alternatives/`. Pocket: launched from the set picker's `_alternatives` folder (`atari_escape2.rom`), RC 1 not yet device-tested. |
-| `klaxp1` | Klax (prototype set 1) | **Supported on MiSTer (release 20261019; KLAX-165, GAMESEL-167).** Device-tested on MiSTer 169; one Flip/Start button (KLAXBTN-174 — the program reads only Button 1). Pocket core (`spoonelli.klaxp`) later. |
+| `eprom2` | Escape … (set 2) | **Supported on MiSTer (v0.2.0); Pocket in RC 1.** Device-tested on MiSTer 169/170 (POST, play through level 1, the canal stage and its result screen). Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra` under `_alternatives/`. Pocket: launched from the set picker's `_alternatives` folder (`atari_escape2.rom`), RC 1 not yet device-tested. |
+| `klaxp1` | Klax (prototype set 1) | **Supported on MiSTer (v0.2.0; KLAX-165, GAMESEL-167).** Device-tested on MiSTer 169; one Flip/Start button (KLAXBTN-174 — the program reads only Button 1). Pocket core (`spoonelli.klaxp`) later. |
 | `klaxp2` | Klax (prototype set 2) | As `klaxp1` (the two sets differ only in the main pair). |
-| `guts` | Guts n' Glory (prototype) | **Supported on MiSTer (release 20261019; video-map mode GUTS-166, special-sprite fix GUTS-169).** Device-tested on MiSTer 169. Pocket core (`spoonelli.guts`) later. |
+| `guts` | Guts n' Glory (prototype) | **Supported on MiSTer (v0.2.0; video-map mode GUTS-166, special-sprite fix GUTS-169).** Device-tested on MiSTer 169. Pocket core (`spoonelli.guts`) later. |
 
 Two structural differences set the Klax and Guts prototypes apart from
 Escape:
@@ -123,7 +123,7 @@ spoonelli`, identifies the build; the old credits pages were retired in
 mister-v0.1.2), and the OSD has music/speech sliders. It still trails the
 Pocket core in accumulated device hours and is released separately, not as
 part of this package, and since 2026-09-03 is in the official MiSTer
-distribution; the 20261019 release is its current one, built from the
+distribution; v0.2.0 (2026-10-19) is its current release, built from the
 `milestone-0.2-mister` branch. Details: [`docs/MISTER.md`](docs/MISTER.md).
 
 ## Hardware being implemented
@@ -189,7 +189,7 @@ checked rather than asserted:
 - **Pixels**: motion-object output replays MAME scene dumps at **100.0000%
   agreement and coverage** on crowd, door, spawn-flash and factory-map
   fixtures, with draw order proven prefix-compatible by a dedicated gate.
-  That is the v0.1.x record; since MOSHADE-162 (MiSTer release 20261019; Pocket 0.2
+  That is the v0.1.x record; since MOSHADE-162 (MiSTer v0.2.0; Pocket 0.2
   RC) the core departs from MAME on the factory map by design, where
   the board's GAL equations and the PCB capture disagree with MAME
   ([`DEVIATIONS.md`](docs/DEVIATIONS.md) C6/C7).
