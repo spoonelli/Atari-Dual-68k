@@ -157,9 +157,10 @@ with the date matching the `.rbf` filename you installed. Check they
 agree; it is the only guard against a cached or stale `.rbf`, and it
 has caught that more than once.
 
-**Start** in the MiSTer button list is the board's self-test step /
-continue switch on every game: in self-test (**Service Mode** on the root
-menu) it steps through and continues the test screens.
+The machine has no Start button, and no game reads the core's Start
+input, so Define buttons does not ask for it. In self-test (**Service
+Mode** on the root menu) Escape steps through the test screens with
+**Jump**; the prototypes use their own buttons.
 
 ## Controls
 
@@ -168,11 +169,11 @@ not appear in previously saved maps). MiSTer names that entry, and saves
 the map, after each MRA's set name, so 'Escape' set 2, the Klax prototypes and
 Guts show *Define eprom2 / klaxp1 / klaxp2 / guts buttons* and each keeps
 its own map. Escape's buttons are Jump, Fire, Duck, Bomb,
-Start, Coin, and Pause. In play, Jump doubles as Start, as on the board;
-the Start button is the self-test step / continue switch. Fresh installs default to Jump on the left face button, Fire
+Coin, and Pause. Jump also starts a game and steps the self-test, as on
+the board. Fresh installs default to Jump on the left face button, Fire
 on the bottom, Duck on the right, Bomb on top (SNES Y/B/A/X), and Pause
 on the left shoulder. The define
-flow prompts for all seven buttons - answer every prompt before Finish,
+flow prompts for all six buttons - answer every prompt before Finish,
 or the unanswered ones stay unmapped. Note the framework treats your
 global User/Menu button as "Undefine" inside this flow: assigning a
 core button to it silently clears the slot instead.
@@ -182,9 +183,8 @@ which starts or joins a game and drops tiles, on two buttons: **Flip/Start**
 and **Flip (2nd)** (production cabinets have a Flip button on each side of
 the stick; MAME lists four buttons, but the program only reads the first).
 Guts n' Glory uses the analogue stick and three buttons in MAME's order;
-Button 2 is the one its own switch test calls "Left START". Neither
-prototype reads the core's Start input, so Define buttons does not ask for
-it on those games; they start and join from their game buttons. Coins go
+Button 2 is the one its own switch test calls "Left START". Both
+prototypes start and join from their game buttons. Coins go
 through the sound board as on Escape.
 
 ## High scores and settings
@@ -260,7 +260,8 @@ buttons** (or the other set's entry) once — saved maps do not carry over.
   * **Shared-Hardware Support:** 'Escape' set 2, Atari's unreleased **Klax prototypes** (sets 1 and 2) and **Guts n' Glory**. Each MRA carries a one-byte game select; older Escape MRAs keep working.  
   * **High scores and operator settings are saved**, per game, to `config/nvram/`: *Save NVRAM*, Main's *Save settings*, or *Autosave NVRAM* (default Off), the Arcade-Cave convention.
   * **The factory map now matches the original board:** travelled routes dim instead of staying bright as in MAME, matched against a capture of the original PCB.
-  * Klax's one function, **Flip/Start**, on two buttons (Flip/Start and Flip (2nd)), as on a Klax cabinet; Guts n' Glory uses the analogue stick and three buttons. Neither asks for a Start button (neither program reads it).
+  * Klax's one function, **Flip/Start**, on two buttons (Flip/Start and Flip (2nd)), as on a Klax cabinet; Guts n' Glory uses the analogue stick and three buttons.
+  * No Start button in Define buttons for any game: the machine has none, and no game reads the core's Start input (Escape's self-test steps on Jump).
   * Pause now freezes the whole sound board (sound CPU, speech and samples), not only the music chip.
   * Clone MRAs moved under `_alternatives/` (set 2 under `_Escape from the Planet of the Robot Monsters`, the Klax prototypes under `_Klax`, shared with the Klax core); all MRAs use `<rbf>Escape</rbf>`.
   * Autosave NVRAM / Save NVRAM sit in the root menu above Service Mode.

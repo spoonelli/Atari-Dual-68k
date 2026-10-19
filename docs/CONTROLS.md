@@ -61,7 +61,7 @@ Read off `core_top.v` `.p1_buttons` and cross-checked against `input.json`:
 | A             | Duck            | 4               |
 | X             | Bomb — asserts Jump+Fire+Duck together | 6 |
 | Select        | Coin            | 14              |
-| Start         | Self-test step / continue | 15    |
+| Start         | drives 260000 D0, which no game reads (STARTHIDE-179; Escape's self-test steps on Jump) — post-0.2: remap or drop | 15    |
 
 > **P2 bomb - FIXED in build 113.** `.p2_buttons` used to OR in
 > `cont2_key[8]` (**L1**) where `.p1_buttons` uses `cont1_key[6]` (**X**),
@@ -74,9 +74,10 @@ Read off `core_top.v` `.p1_buttons` and cross-checked against `input.json`:
 Unreleased. The Klax prototypes and Guts n' Glory run only on the MiSTer
 test builds (166+ for per-game buttons); the Pocket core is Escape-only until
 their own Pocket cores ship. The MiSTer wrapper builds CD11..CD8 per game from
-the MRA's game byte (MAME `klaxp`/`guts` input ports); neither prototype has a
-Start switch on the board, so each game starts from a button, and MiSTer's
-**Start** is the self-test step/continue switch on every game. Coin goes
+the MRA's game byte (MAME `klaxp`/`guts` input ports); the machine has no Start
+button and no game reads the core's Start input (260000 D0; the self-test
+"step" read is a byte read that tests D8), so every MRA hides Start
+(STARTHIDE-179) and each game starts from a button. Coin goes
 through the sound board, as on Escape.
 
 | Game | Stick | Buttons | MiSTer MRA defaults |
