@@ -172,7 +172,7 @@ Test builds (unreleased, handed to the owner for device testing):
 | MiSTer 168 | + NVRAM-170 (EEPROM persistence, reliable game-byte latch), jt6295 licence notice |
 | MiSTer 169 | + NVRAM-171 (Arcade-Cave saving), ALT-172 (`_alternatives/` clone MRAs) — T1–T10 PASS |
 | MiSTer 170 | + KLAXBTN-174 (Klax one button), PAUSE-174, Cave menu order |
-| MiSTer 171 | **release build of MiSTer v0.2.0** (170 RTL, release commit) |
+| MiSTer 171 | **MiSTer release 20261019** (170 RTL, release commit) |
 | Pocket 39 | current-RTL rebuild of 38 |
 | Pocket 40 | **RC 1** — + POCKETSET-175 set picker, `core.json` 0.2.0 |
 
@@ -196,11 +196,11 @@ yet device-tested beyond a first RC 1 run into the canal stage.
 | # | Gate | State | Note |
 |---|---|---|---|
 | G1 | Device tests T1–T10 on MiSTer 169 | **PASS with notes (2026-10-18)** — Klax buttons fixed in 170; canal STAND BY panel resolved as a ROM-revision difference | T1 Escape set 1 regression vs 161 (POST, attract, play, speech/music, Bomb, OSD pause/dim/rotate, CRT position); T2 H8 map halftone — **PASS on 168**; T3 set 2 POST + play; T4 Klax sets 1/2 boot as Klax every time (five launches), attract, coin, start, OKI audio, buttons; T5 Guts menu tint, attract depth, analogue stick, three buttons, samples; T6 game switching without a power cycle; T7 the 161 set-1 MRA (no game byte) still boots Escape; T8 persistence (Autosave NVRAM Off by default and no "Saving..." on menu changes; Save NVRAM survives a power cycle as a 512-byte `.nvm` named after the MRA; Autosave On saves once per OSD visit; Klax and Escape keep separate files); T9 ten minutes of crowd play, nothing worse than 161; T10 menu layout (Arcade list shows Escape set 1 and Guts only; set 2 and both Klax sets launch from `_alternatives/`). The 168 first run covers boot-and-play for all five MRAs, not the full T-list. |
-| G2 | README / RELEASE_NOTES rows flipped | **DONE (2026-10-19) — owner's final doc pass pending** | README sets table, RELEASE_NOTES 0.2 entry, MISTER.md, DEVIATIONS C6/C7 and the MiSTer release README now describe MiSTer v0.2.0 as released and Pocket 0.2 as RC. |
+| G2 | README / RELEASE_NOTES rows flipped | **DONE (2026-10-19) — owner's final doc pass pending** | README sets table, RELEASE_NOTES 0.2 entry, MISTER.md, DEVIATIONS C6/C7 and the MiSTer release README now describe the MiSTer 20261019 release as released and Pocket 0.2 as RC. |
 | G3 | Release PR into the MiSTer-devel fork's `releases/` | **OPEN — build 171 ready** | The rbf, published in the repo as `Arcade-Escape_YYYYMMDD.rbf` to match the two rbfs already in its `releases/` (the distribution strips `Arcade-`; Klax-style `Escape_` naming would mix two patterns in one folder), plus the five MRAs in the family layout (set 1 and Guts top-level; set 2 under `_alternatives/_Escape from the Planet of the Robot Monsters/`, the Klax prototypes under `_alternatives/_Klax/`), every MRA `<rbf>Escape</rbf>` (done in 167, so the PR does not revert the maintainer's fix). The PR text must note that `_Klax` is shared with RetroShrimp's Arcade-Klax_MiSTer core — each MRA names its own rbf, so the two coexist. |
 | G4 | 0.2 fixes in the build | **DONE in RTL / packaging (167–170)** | GUTS-169, MRA rbf name, NVRAM-170 (including the game-byte latch fix), jt6295 notice, NVRAM-171, ALT-172 with the recursive CI ROM-data gate; 170: KLAXBTN-174 (one button), PAUSE-174, Cave menu order. Device verification is G1 plus a 170 spot-check (Klax Flip/Start, pause mid-music then resume). |
 | G5 | Sprite flicker | **MOVED OUT OF 0.2 (owner, 2026-10-19)** | Not a release gate. The owner's PCB capture also shows sprite-row dropouts and tearing in crowds (frames 21322, 29230, 33012), so the MiSTer "flicker tail" is now an accuracy question baselined to the PCB, not a defect to drive to zero: section H, H1/H2. |
-| G6 | Version metadata | **DONE** | `core.json` 0.2.0 on both branches (Pocket RC 1); MiSTer identifies builds by date (`ESCAPE v<yymmdd>`, rbf date). Tag `mister-v0.2.0` at publish. |
+| G6 | Version metadata | **DONE** | `core.json` 0.2.0 on both branches (Pocket RC 1); MiSTer identifies builds by date (`ESCAPE v<yymmdd>`, rbf date). Git tag `mister-20261019` at publish (MiSTer releases are named by date). |
 
 **Pocket 0.2 (after MiSTer 0.2)**
 
