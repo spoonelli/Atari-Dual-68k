@@ -1302,6 +1302,42 @@ psram #(.CLOCK_SPEED(42.954546)) cram0 (
     // anything 110 is a hair slower on interrupt entry. Anything you can
     // actually SEE on 110 is a finding to chase, not a win.
     localparam CPU_TYPE    = 1;
+
+    // POCKETVAR-182: one tree, three Pocket cores, chosen by a build macro.
+    // CI adds VERILOG_MACRO "GAME_KLAX=1" or "GAME_GUTS=1" to ap_core.qsf for
+    // spoonelli.klaxp / spoonelli.guts; with neither defined this is the
+    // spoonelli.eprom (Escape) build, unchanged. The values mirror the MiSTer
+    // wrapper's runtime game select (KLAX_GUTS.md section 4b), as constants so
+    // synthesis prunes the other games' hardware:
+    //   GAME_SEL   00 Escape, 01 Klax prototype, 10 Guts n' Glory
+    //   EXTRA_EN   second 68000 (Escape only)
+    //   JSA_BOARD  1 = JSA-I (YM2151 + TMS5220), 2 = JSA-II (YM2151 + OKI6295)
+    //   VIDEO_MAP  1 = Guts' FFxxxx video block
+    //   VSHAD3_EN  Escape's half ROM shadow at 0x54000 (outside the
+    //              prototypes' 128 / 256 KB main programs: pure M10K cost)
+    //   PF_TILE_BASE  Guts has its own 1 MB playfield tile ROM at 0x280000
+`ifdef GAME_GUTS
+    localparam [1:0]  GAME_SEL     = 2'b10;
+    localparam        EXTRA_EN     = 0;
+    localparam        JSA_BOARD    = 2;
+    localparam        VIDEO_MAP    = 1;
+    localparam        VSHAD3_EN    = 0;
+    localparam [23:0] PF_TILE_BASE = 24'h280000;
+`elsif GAME_KLAX
+    localparam [1:0]  GAME_SEL     = 2'b01;
+    localparam        EXTRA_EN     = 0;
+    localparam        JSA_BOARD    = 2;
+    localparam        VIDEO_MAP    = 0;
+    localparam        VSHAD3_EN    = 0;
+    localparam [23:0] PF_TILE_BASE = 24'h120000;
+`else
+    localparam [1:0]  GAME_SEL     = 2'b00;
+    localparam        EXTRA_EN     = 1;
+    localparam        JSA_BOARD    = 1;
+    localparam        VIDEO_MAP    = 0;
+    localparam        VSHAD3_EN    = 1;
+    localparam [23:0] PF_TILE_BASE = 24'h120000;
+`endif
     wire [23:0] fpv_addr_w, fpe_addr_w;      // escape_core exports (7.159 dom)
     wire        fpv_spec_w, fpe_spec_w;
     reg  [23:0] fpv_addr_s, fpe_addr_s;      // 35.8-domain samples
@@ -2011,7 +2047,7 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
     reg [7:0]  wdog_rst_cnt = 8'd0;
     reg        wdog_exp_d   = 1'b0;
     always @(posedge clk_sys_7159) begin
-        wdog_exp_d <= wdog_expired | e_dead | mbox_dead;
+        wdog_exp_d <= wdog_expired | e_dead_g | mbox_dead_g;
         if(!reset_n) begin
             wdog_rst_ctr <= 23'd0; wdog_rst_cnt <= 8'd0;
         end else begin
@@ -2021,7 +2057,7 @@ synch_3 s_c2(chk2_ok,  chk2_ok_s,  clk_sys_7159);
             // same way a watchdog timeout does - counted in wdog_rst_cnt
             // LANE4r: a wedged 5A5A/4321 mailbox handshake ('68 freeze:
             // both CPUs alive, logic deadlocked) reboots the core too
-            if((wdog_expired || e_dead || mbox_dead) && !wdog_exp_d && !wdis_s) begin
+            if((wdog_expired || e_dead_g || mbox_dead_g) && !wdog_exp_d && !wdis_s) begin
                 wdog_rst_ctr <= 23'd1;
                 wdog_rst_cnt <= wdog_rst_cnt + 8'd1;
             end else if(wdog_rst_ctr != 23'd0)
@@ -2452,7 +2488,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // and [3:0] (ver slots 2 and 3; slot 1 sits under the chk2 bit row).
     // Write the build number as hex digits: build 41 = 16'h0041. NOT ASCII -
     // 16'h3431 shows '31' (the v0.2.0 release candidate did exactly that).
-    localparam [15:0] BUILD_ID = 16'h0041;   // Pocket v0.2.0 release build - screen shows '41' (38 = EPROM2-163 test build; v0.1.1 shipped '36')
+    localparam [15:0] BUILD_ID = 16'h0042;   // POCKETVAR-182 test builds (Klax / Guts Pocket cores) - screen shows '42' (41 = Pocket v0.2.0 release)
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2502,7 +2538,8 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
 
     escape_pf #(
         .VID_V_BPORCH ( VID_V_BPORCH ),
-        .VID_V_ACTIVE ( VID_V_ACTIVE )
+        .VID_V_ACTIVE ( VID_V_ACTIVE ),
+        .TILE_BASE    ( PF_TILE_BASE )
     ) u_pf (
         .clk          ( clk_sys_7159 ),
         .core_reset_n ( core_reset_n ),
@@ -2544,10 +2581,9 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     wire        mo_stain_s = mo_stain_s_raw & ~m_mokill;
     wire        mo_stain_e = mo_stain_e_raw & ~m_mokill;
 
-// GUTS-168: the Escape Pocket build ties the Guts video mode off; the Guts
-// Pocket core will set it (and the 0x280000 playfield tile base) from its
-// build macro.
-wire game_guts = 1'b0;
+// GUTS-168: the Guts video mode (sprite height/priority rules) - on only in
+// the Guts Pocket core (POCKETVAR-182 build macro; PF_TILE_BASE likewise).
+wire game_guts = (GAME_SEL == 2'b10);
 escape_mob umob (
     .guts     ( game_guts ),
     .clk      ( clk_sys_7159 ),
@@ -2803,6 +2839,11 @@ escape_stain ustain (
     wire [15:0] dbg_ecrash_pc, dbg_ecrash_data;   // LANE4f e-side first fault
     wire [7:0]  dbg_erestart;                     // LANE4h restart counter
     wire        e_dead;                           // LANE4i freeze rescue
+    // POCKETVAR-182: the extra-CPU freeze rescue and the mailbox deadlock
+    // watchdog only mean something with the second CPU; Klax and Guts hold it
+    // in reset and never use the Escape mailbox.
+    wire        e_dead_g    = e_dead    & (EXTRA_EN != 0);
+    wire        mbox_dead_g = mbox_dead & (EXTRA_EN != 0);
     wire [15:0] dbg_estall;                       // LANE4l stall probe (unused in HUD now)
     wire [15:0] dbg_vcyc, dbg_ecyc;               // LANE4s speed meters
     // CADENCE-107: logic-frame STARTS per 256 video frames, per CPU, counted
@@ -2935,8 +2976,23 @@ hall_stick hall_p2 (
 // CPU-110: CPU_TYPE is overridden here as well. The entity's own default is
 // also 1 (68010 / dedicated cabinet), but read THIS line, not the default --
 // and the localparam above is where the JAMMA/68000 setting lives.
+// POCKETVAR-182: per-game controls. Escape as before ({A,-,B,Y}, X = Bomb).
+// Klax: the 8-way d-pad on D15..D12 and one function, Flip/Start, on D8 from
+// A or B (a Klax cabinet has a Flip button each side of the stick; the
+// prototype reads only D8 - traced in MAME). Guts: the analogue stick through
+// hall_stick as Escape, Button 1/2/3 = A/B/X on D9/D8/D11 (MAME guts ports;
+// Guts' own switch test calls D9 'Left FIRE' and D8 'Left START').
+wire [3:0] p1_btn_esc = {cont1_key[4]|cont1_key[6], 1'b0, cont1_key[5]|cont1_key[6], cont1_key[7]|cont1_key[6]};
+wire [3:0] p2_btn_esc = {cont2_key[4]|cont2_key[6], 1'b0, cont2_key[5]|cont2_key[6], cont2_key[7]|cont2_key[6]};
+wire [3:0] p1_btn_klx = {3'b000, cont1_key[4] | cont1_key[5]};
+wire [3:0] p2_btn_klx = {3'b000, cont2_key[4] | cont2_key[5]};
+wire [3:0] p1_btn_gut = {cont1_key[6], 1'b0, cont1_key[4], cont1_key[5]};
+wire [3:0] p2_btn_gut = {cont2_key[6], 1'b0, cont2_key[4], cont2_key[5]};
+wire [3:0] p1_btn_sel = (GAME_SEL == 2'b01) ? p1_btn_klx : (GAME_SEL == 2'b10) ? p1_btn_gut : p1_btn_esc;
+wire [3:0] p2_btn_sel = (GAME_SEL == 2'b01) ? p2_btn_klx : (GAME_SEL == 2'b10) ? p2_btn_gut : p2_btn_esc;
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
-              .VSHAD3_EN(1),
+              .VSHAD3_EN(VSHAD3_EN),
+              .EXTRA_EN(EXTRA_EN), .JSA_BOARD(JSA_BOARD), .VIDEO_MAP(VIDEO_MAP),
               .CPU_TYPE(CPU_TYPE),
               .TASLOCK_EN(TASLOCK_EN)) ecore (
     .clk        ( clk_sys_7159 ),
@@ -2977,8 +3033,10 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     // had to be removed when L became the overlay toggle ('4A': every HUD
     // toggle fed phantom Jump+Fire+Duck), orphaning X entirely - the
     // 'bomb does nothing' report. Bit 6 has no other binding, no conflict.
-    .p1_buttons ( {cont1_key[4]|cont1_key[6], 1'b0,
-                   cont1_key[5]|cont1_key[6], cont1_key[7]|cont1_key[6]} ),
+    .p1_buttons ( p1_btn_sel ),
+    .p1_joy     ( {cont1_key[0], cont1_key[1], cont1_key[2], cont1_key[3]} ),   // Klax only (core gates it)
+    .p2_joy     ( {cont2_key[0], cont2_key[1], cont2_key[2], cont2_key[3]} ),
+    .game_sel   ( GAME_SEL ),
     .uvol_ym    ( uvolym_s ),
     .uvol_tms   ( uvoltms_s ),
     .uvol_fm    ( uvolfm_s ),
@@ -2986,7 +3044,7 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     .coin1      ( coin1_s ),
     .coin2      ( coin2_s ),
     .step_btn   ( step_s ),
-    .skip_test  ( skip_test_s ),
+    .skip_test  ( skip_test_s & (GAME_SEL == 2'b00) ),   // pokes Escape's $3F7F0C boot flag - Escape only
     .irq_strict ( irqstrict_s ),
     .vshad3_on  ( vshad3_on_s ),
     .audio_l    ( core_audio_l ),
@@ -2996,8 +3054,7 @@ escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
     // mapping and the RTL disagreed: X did nothing for P2 and L1 fired the
     // bomb. Same root cause as the P1 'bomb does nothing' report (see the
     // MOSDRAM-72 note above) - bit 8 is L1, not X. P2 now matches P1.
-    .p2_buttons ( {cont2_key[4]|cont2_key[6], 1'b0,
-                   cont2_key[5]|cont2_key[6], cont2_key[7]|cont2_key[6]} ),
+    .p2_buttons ( p2_btn_sel ),
     .adc_p1x    ( adc_p1x ),
     .adc_p1y    ( adc_p1y ),
     .adc_p2x    ( adc_p2x ),

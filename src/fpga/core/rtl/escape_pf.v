@@ -22,6 +22,10 @@ module escape_pf #(
     // PFBW-122: fetch lead in pixels. Any MULTIPLE OF 8 leaves pf_x2[2:0] -
     // the display fine phase - bit-identical, so only the coarse column moves.
     parameter [8:0]   LEAD = 9'd16,
+    // POCKETVAR-182: playfield tile region base in the combined image. Escape
+    // and Klax share the sprite/PF region at 0x120000; Guts n' Glory has its
+    // own 1 MB playfield tile ROM at 0x280000 (KLAX_GUTS.md section 4).
+    parameter [23:0]  TILE_BASE = 24'h120000,
     // PFBW-122: playfield fetch channels, 2 or 4. Motion objects already have
     // 4; the playfield had 2, and the drain rate is what the strip measurement
     // says is binding. Note LEAD and NCH only help TOGETHER: with a 2-cell
@@ -206,10 +210,10 @@ module escape_pf #(
                    && pfq_count != 3'd4
                    && (WRAPFIX == 0 || !vis_x[9] || vis_x[8:0] >= (9'd512 - LEAD))) begin
                     case(pfq_wr)
-                        2'd0: begin pfq_addr0 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot0 <= pf_wp; end
-                        2'd1: begin pfq_addr1 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot1 <= pf_wp; end
-                        2'd2: begin pfq_addr2 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot2 <= pf_wp; end
-                        default: begin pfq_addr3 <= 24'h120000 + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot3 <= pf_wp; end
+                        2'd0: begin pfq_addr0 <= TILE_BASE + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot0 <= pf_wp; end
+                        2'd1: begin pfq_addr1 <= TILE_BASE + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot1 <= pf_wp; end
+                        2'd2: begin pfq_addr2 <= TILE_BASE + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot2 <= pf_wp; end
+                        default: begin pfq_addr3 <= TILE_BASE + {pf_vdata[14:0], 5'd0} + {pf_y[2:0], 2'd0}; pfq_slot3 <= pf_wp; end
                     endcase
                     pfq_wr    <= pfq_wr + 2'd1;
                     pfq_count <= pfq_count + 3'd1;

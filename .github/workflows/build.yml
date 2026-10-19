@@ -15,6 +15,12 @@ on:
         description: "Fitter SEED override for a timing sweep (empty = ap_core.qsf's SEED). Commit the chosen seed before a release build."
         required: false
         default: ""
+      variant:
+        description: "Pocket core to build: eprom (Escape), klaxp (Klax prototypes) or guts (Guts n' Glory)"
+        required: false
+        default: "eprom"
+        type: choice
+        options: [eprom, klaxp, guts]
 
 jobs:
   build:
@@ -27,6 +33,15 @@ jobs:
 
       - name: Compile ap_core
         run: |
+          # POCKETVAR-182: the game variant is a Verilog macro read by core_top.v
+          # (GAME_KLAX / GAME_GUTS; none = Escape). Appended to the qsf only for
+          # this CI run - the committed qsf stays the Escape build.
+          case "${{ github.event.inputs.variant }}" in
+            klaxp) echo 'set_global_assignment -name VERILOG_MACRO "GAME_KLAX=1"' >> src/fpga/ap_core.qsf ;;
+            guts)  echo 'set_global_assignment -name VERILOG_MACRO "GAME_GUTS=1"' >> src/fpga/ap_core.qsf ;;
+            *) ;;
+          esac
+          echo "variant: ${{ github.event.inputs.variant || 'eprom' }}"; grep -E 'VERILOG_MACRO' src/fpga/ap_core.qsf || true
           if [ -n "${{ github.event.inputs.seed }}" ]; then
             sed -i -E 's/^set_global_assignment -name SEED [0-9]+/set_global_assignment -name SEED ${{ github.event.inputs.seed }}/' src/fpga/ap_core.qsf
             echo "SEED override: $(grep -E '^set_global_assignment -name SEED' src/fpga/ap_core.qsf)"
@@ -112,7 +127,7 @@ jobs:
                               # STA report is inspectable without a rebuild
         uses: actions/upload-artifact@v4
         with:
-          name: bitstream
+          name: bitstream${{ (github.event.inputs.variant != '' && github.event.inputs.variant != 'eprom') && format('-{0}', github.event.inputs.variant) || '' }}
           path: |
             output/bitstream.rbf_r
             src/fpga/output_files/ap_core.rbf
