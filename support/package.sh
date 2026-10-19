@@ -276,6 +276,34 @@ if [ "$IMG_SHA" != "$PLACEHOLDER_SHA256" ]; then
     exit 1
 fi
 
+# Guard 6 (BUILDNUM-183): the on-screen build number. The Developer HUD shows
+# only BUILD_ID's LOW TWO HEX DIGITS (core_top.v). The v0.2.0 release candidate
+# carried 16'h3431 with a comment saying "shows '41'" - the screen read 31.
+# (a) always: the digits BUILD_ID will show must equal the "shows 'NN'" claim in
+#     its own comment, so the value and its label can never disagree again;
+# (b) with EXPECT_BUILD=NN: they must equal the build being packaged.
+# Checked against the working tree, so package from the commit that built the
+# bitstream (the CI artifact's head).
+BID_LINE="$(grep -E "localparam \[15:0\] BUILD_ID *= *16'h[0-9A-Fa-f]{4}" "$REPO/src/fpga/core/core_top.v" | head -1)"
+BID_HEX="$(printf '%s' "$BID_LINE" | sed -E "s/.*16'h([0-9A-Fa-f]{4}).*/\1/")"
+BID_SHOWN="$(printf '%s' "$BID_HEX" | cut -c3-4 | tr 'a-f' 'A-F')"
+BID_CLAIM="$(printf '%s' "$BID_LINE" | sed -nE "s/.*shows '([0-9A-Fa-f]{2})'.*/\1/p" | tr 'a-f' 'A-F')"
+if [ -z "$BID_LINE" ] || [ -z "$BID_CLAIM" ]; then
+    echo "!! REFUSING to package: cannot read BUILD_ID and its \"shows 'NN'\" comment in core_top.v" >&2
+    exit 1
+fi
+if [ "$BID_SHOWN" != "$BID_CLAIM" ]; then
+    echo "!! REFUSING to package: BUILD_ID 16'h$BID_HEX shows '$BID_SHOWN' on the HUD," >&2
+    echo "   but its comment says '$BID_CLAIM'. Only the low two hex digits are shown:" >&2
+    echo "   build NN is 16'h00NN." >&2
+    exit 1
+fi
+if [ -n "${EXPECT_BUILD:-}" ] && [ "$BID_SHOWN" != "$(printf '%s' "$EXPECT_BUILD" | tr 'a-f' 'A-F')" ]; then
+    echo "!! REFUSING to package: the HUD will show '$BID_SHOWN', not build $EXPECT_BUILD." >&2
+    exit 1
+fi
+echo "HUD build number: $BID_SHOWN${EXPECT_BUILD:+ (matches EXPECT_BUILD)}"
+
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
 ( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets build_rom.py LICENSE.txt NOTICE.md )

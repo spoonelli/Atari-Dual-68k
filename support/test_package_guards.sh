@@ -100,6 +100,16 @@ fi
 provoke "guard 5: any non-placeholder image (unknown art)" \
         'dd if=/dev/urandom of="$STAGE/Platforms/_images/$PLATFORM.bin" bs=171930 count=1 2>/dev/null' refuse
 
+# BUILDNUM-183: guard 6. (a) replays the v0.2.0 RC mistake - 16'h3431 whose
+# comment claims "shows '41'" (the HUD read 31) - from a scratch copy of
+# core_top.v; (b) an EXPECT_BUILD that differs from what the HUD will show.
+mkdir -p "$TMP/badrepo/src/fpga/core"
+sed -E "s/localparam \[15:0\] BUILD_ID *= *16'h[0-9A-Fa-f]{4};[^\n]*/localparam [15:0] BUILD_ID = 16'h3431;   \/\/ screen shows '41'/" \
+    "$REPO/src/fpga/core/core_top.v" > "$TMP/badrepo/src/fpga/core/core_top.v"
+provoke "guard 6: BUILD_ID value disagrees with its 'shows NN' comment" \
+        'REPO="'"$TMP"'/badrepo"' refuse
+provoke "guard 6: EXPECT_BUILD differs from the HUD number" \
+        'EXPECT_BUILD=00' refuse
 echo
 echo "$pass passed, $fail failed"
 exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)
