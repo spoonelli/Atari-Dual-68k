@@ -209,6 +209,7 @@ yet device-tested beyond a first RC 1 run into the canal stage.
 | G7 | Pocket RC 1 (build 40) device tests | **OPEN** | Set 1 regression; H8 map halftone vs the PCB capture; set 2 launched from `_alternatives` (POST + play); separate saves per set (`atari_escape.sav` untouched by set 2) and a high score surviving a power cycle; an existing 0.1.x card (set 1 files only) still works. |
 | G8 | Release build from the final commit | **OPEN** | Not a test build re-labelled; package guards green on the actual artifact, zero ROMs. |
 | G9 | Metadata bump to 0.2.0 | **OPEN** | `core.json` version + `date_release` (the *release* date, Era 13's lesson), tag `v0.2.0`, RELEASE_NOTES records the build number; `info.txt` refreshed (H5: "v0.2.x", "eprom or eprom2", build stamp behind Developer HUD). |
+| G9a | Pocket publish mechanics (updaters) | **OPEN — at Pocket release** | The openFPGA cores inventory lists `spoonelli/atari-dual-68k` with asset filter `AtariDual68k-pocket-`; pupdate / Pocket Sync read the repo's **latest non-pre-release** GitHub Release. So: tag `v0.2.0` on `main` (bring `milestone-0.2` onto `main` first), release marked Latest, asset named exactly `AtariDual68k-pocket-v0.2.0.zip`; any MiSTer GitHub release stays pre-release so it never takes Latest. Verify in pupdate afterwards. |
 | G10 | Klax / Guts Pocket cores | **LATER — after MiSTer 0.2** | One core per game: `spoonelli.klaxp`, `spoonelli.guts`; `spoonelli.eprom` is untouched. |
 
 **Milestone items that are not release gates**
