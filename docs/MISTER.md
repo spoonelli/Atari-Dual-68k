@@ -1,8 +1,7 @@
 # MiSTer (DE10-Nano) port — reference
 
 Current release **`mister-v0.2.0`** (2026-10-19, build 171,
-`Arcade-Escape_20261019.rbf`; the official distribution names it
-`Escape_20261019.rbf`). The sections after the box below were written for
+`Escape_20261019.rbf`, the same name the official distribution installs). The sections after the box below were written for
 `mister-v0.1.2` (2026-09-02, build 161) and still hold; the box lists what 0.2
 added. The build-by-build engineering history —
 including the arbiter saga and its wrong turns — is preserved separately in
