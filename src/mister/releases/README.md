@@ -10,7 +10,7 @@ fixes land there first and are vendored here per release.
 A MiSTer (DE10-Nano) port of the
 [Atari Dual 68k](https://github.com/spoonelli/Atari-Dual-68k) core,
 implementing Atari Games' 1989 arcade release (MAME set `eprom`) and its
-`eprom2` clone.  Includes support for two unreleased Atari games that ran on the same board:
+`eprom2` clone. Includes support for two unreleased Atari games that ran on the same board:
 the Klax prototypes (`klaxp1` / `klaxp2`) and Guts n' Glory (`guts`). One
 rbf serves all five (see [Install](#install)).
 This LLM-assisted build has been refined extensively through testing and benchmarking against an original dedicated Escape cabinet and PCB, with reference gameplay video captured directly off the PCB.  All architecture decisions default to preserving original gameplay accuracy.  
@@ -24,7 +24,10 @@ handshake, as the board does (68000 selectable — the dedicated cabinet that se
 - The prototypes run the board's single-68000 configuration with the
 JSA-II sound board (6502 + YM2151 + OKI6295) and their own button sets;
 Guts n' Glory also has its own video map. Each MRA carries a one-byte game
-select, so older Escape MRAs keep working unchanged.  While the alternate supported boardsets have not been performance-verified to original hardware, they are utilizing the primary components of the Escape board that have been.  
+select, so older Escape MRAs keep working unchanged. The prototypes have
+not been checked against original hardware (no reference board exists to us),
+but they run on the same machine that has been: only their JSA-II sound
+board, single-CPU setup and Guts' video map are new.
 
 - The hall-effect stick model includes the game's own in-game calibration
 screens; high scores and operator settings are saved to the SD card
@@ -52,7 +55,11 @@ screens; high scores and operator settings are saved to the SD card
 
 This is a **behaviorally accurate** core with authentic timing anchors — not
 a cycle-exact replica. Performance references are against actual machine
-gameplay.  MAME was utilized as the secondary reference for Escape and the alternative supported titles, however, this project has identified and documented several discrepancies between a real Escape board and MAME. Honest classification:
+gameplay. MAME is the secondary reference for Escape and the only reference
+for the Klax and Guts prototypes; comparing against a real Escape board, this
+project found and documented several places where MAME differs
+([docs/DEVIATIONS.md](https://github.com/spoonelli/Atari-Dual-68k/blob/main/docs/DEVIATIONS.md)).
+Honest classification:
 
 **Authentic (schematic-verified):** clock frequencies (7.159 MHz CPUs, true
 pixel clock, all clocks derived from the board's 14.318 MHz colorburst
@@ -71,7 +78,6 @@ through one SDRAM with an open-row controller, bank-partitioned so the
 playfield and sprites keep separate open rows); video internals (same VRAM
 in, same pixels out on the same raster grid, via a re-architected line
 engine whose architecture-level properties come from the schematic).
-
 
 **Measured end-to-end, on hardware, against references:**
 
@@ -171,8 +177,9 @@ or the unanswered ones stay unmapped. Note the framework treats your
 global User/Menu button as "Undefine" inside this flow: assigning a
 core button to it silently clears the slot instead.
 
-**Prototypes:** Klax has an 8-way stick and one button (often mirrored on each side of most reference cabinets)
-**Flip/Start**, which starts or joins a game and drops tiles (MAME lists
+**Prototypes:** Klax has an 8-way stick and one button, **Flip/Start**
+(production cabinets mirror it on both sides of the stick), which starts or
+joins a game and drops tiles (MAME lists
 four buttons, but the program only reads the first); Guts n' Glory uses the analogue stick and three buttons in
 MAME's order. Neither prototype has a Start switch on the board - they
 start from a game button - so MiSTer's Start is only the self-test step /
@@ -250,7 +257,7 @@ buttons** (or the other set's entry) once — saved maps do not carry over.
 * Arcade-Escape_20261019.rbf
   * **Shared-Hardware Support:** 'Escape' set 2, Atari's unreleased **Klax prototypes** (sets 1 and 2) and **Guts n' Glory**. Each MRA carries a one-byte game select; older Escape MRAs keep working.  
   * **High scores and operator settings are saved**, per game, to `config/nvram/`: *Save NVRAM*, Main's *Save settings*, or *Autosave NVRAM* (default Off), the Arcade-Cave convention.
-  * **The factory map UI matches behavior of the original board:** travelled routes dim instead of staying bright as in MAME, matched against a capture of the original PCB.
+  * **The factory map now matches the original board:** travelled routes dim instead of staying bright as in MAME, matched against a capture of the original PCB.
   * Klax has one **Flip/Start** button (the prototypes read only button 1); Guts n' Glory uses the analogue stick and three buttons.
   * Pause now freezes the whole sound board (sound CPU, speech and samples), not only the music chip.
   * Clone MRAs moved under `_alternatives/` (set 2 under `_Escape from the Planet of the Robot Monsters`, the Klax prototypes under `_Klax`, shared with the Klax core); all MRAs use `<rbf>Escape</rbf>`.
