@@ -34,7 +34,7 @@ where that record disagrees with this page, this page wins.
 
 ## Status
 
-Plays on real hardware at **measured performance parity with the Analogue
+Benchmarks to original Escape PCB hardware. **measured performance parity with the Analogue
 Pocket release**: identical crowd-scene scroll-velocity distributions
 (median 5.33 native px per 1/30 s), zero sub-half-speed dips where MAME's
 model dips in 19–28% of samples. Rare one-frame sprite-row
