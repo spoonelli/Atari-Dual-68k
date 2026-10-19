@@ -67,6 +67,7 @@ reference doc above, the reference doc wins.
 | [`CAPTURE_SWEEP_0826.md`](investigations/CAPTURE_SWEEP_0826.md) | Automated artifact sweep of the build-124→128 re-test captures. |
 | [`MISTER_PORT_RECORD.md`](investigations/MISTER_PORT_RECORD.md) | The MiSTer port's build-by-build record, wrong turns included — the arbiter saga lives here. |
 | [`KLAX_GUTS.md`](investigations/KLAX_GUTS.md) | Klax prototypes and Guts n' Glory on this core: the exact deltas from Escape, and the one-rbf game selector (milestone 0.2). |
+| [`ROM_REVISIONS.md`](investigations/ROM_REVISIONS.md) | What changed between Escape's program revisions — set 2, the owner's board (an undumped revision between them) and set 1: chronology, the set-2 MAX LIVES bug, set 1's new operator options and EEPROM layout, the canal STAND BY panel, level-entry music and map data; no cabinet-specific code in any of them. |
 | [`MAP_HALFTONE.md`](investigations/MAP_HALFTONE.md) | The factory-map halftone: how the board dims travelled routes, found against the owner's PCB capture; fixed MOSHADE-162 (milestone 0.2). |
 | [`THUNDERJAWS.md`](investigations/THUNDERJAWS.md) | Could this core run ThunderJaws? Research only — ThunderJaws is future work. |
 | evidence captures | The video captures and crops backing the above are kept off-repo (large, and some contain copyrighted game art). Each investigation names the capture it used. |

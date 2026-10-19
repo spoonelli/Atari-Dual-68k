@@ -218,7 +218,8 @@ are not distributed. **Compare against set 2, not set 1:** the board runs an
 undumped program revision (eight chips matching no MAME set; closest to
 `eprom2`, with no text differences from it). The canal stage shows why it
 matters: set 1 draws a "STAND BY" player-2 panel there, while set 2 and the
-board draw none (confirmed on MiSTer 2026-10-19). The hierarchy:
+board draw none (confirmed on MiSTer 2026-10-19). The full revision-by-revision changelog is in
+[`ROM_REVISIONS.md`](docs/investigations/ROM_REVISIONS.md). The hierarchy:
 
 1. **The original PCB capture** — timing, pacing and on-screen behaviour.
 2. **The SP-332 schematics and the board's GAL fuse maps** — structure, decode
