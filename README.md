@@ -215,7 +215,11 @@ checklist H8, fixed in milestone 0.2 —
 MiSTer capture of the level-3 map that matches it: the same nodes dimmed,
 the "you are here" marker blinks every 10 frames, identical to the PCB
 capture, and the screen timing agrees. The captures are the owner's own and
-are not distributed. The hierarchy:
+are not distributed. **Compare against set 2, not set 1:** the board runs an
+undumped program revision (eight chips matching no MAME set; closest to
+`eprom2`, with no text differences from it). The canal stage shows why it
+matters: set 1 draws a "STAND BY" player-2 panel there, while set 2 and the
+board draw none (confirmed on MiSTer 2026-10-19). The hierarchy:
 
 1. **The original PCB capture** — timing, pacing and on-screen behaviour.
 2. **The SP-332 schematics and the board's GAL fuse maps** — structure, decode
