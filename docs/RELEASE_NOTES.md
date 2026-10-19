@@ -22,8 +22,8 @@ hidden in a footnote; if you are deciding whether to install it, read the
 
 ## 0.2 — MiSTer v0.2.0 (2026-10-19); Pocket 0.2 at release candidate
 
-**MiSTer v0.2.0** is release build 171 (2026-10-19, `Escape_20261019.rbf`, the
-name the official distribution installs), built from
+**MiSTer v0.2.0** is release build 171 (2026-10-19, `Arcade-Escape_20261019.rbf`,
+published by the official distribution as `Escape_20261019.rbf`), built from
 the release commit with the same RTL as test build 170. **Pocket 0.2 is not
 released yet:** RC 1 (build 40) is with the owner for device testing. The
 sections after this one describe the v0.1.x core. Build numbers and work tags are different series (KLAX-165
