@@ -179,12 +179,12 @@ jobs:
       - name: Stage release files
         run: |
           mkdir -p mister-release
-          # MiSTer naming convention: CoreName_YYYYMMDD.rbf. The .mra's
-          # <rbf>Escape</rbf> matches Escape_*.rbf by prefix (Main compares
-          # case-insensitively; MiSTer-devel's official tag is Escape), so the dated
-          # name needs no manifest change.
+          # Arcade naming per the MiSTer contributor guide: Arcade-<core>_YYYYMMDD.rbf.
+          # The official distribution keeps only Arcade- rbfs when any exist in
+          # releases/ and installs them with the prefix stripped (Escape_YYYYMMDD.rbf);
+          # the MRAs' <rbf>Escape</rbf> matches both spellings in Main.
           cp src/mister/output_files/Arcade-Escape.rbf \
-             "mister-release/Escape_$(date -u +%Y%m%d).rbf"
+             "mister-release/Arcade-Escape_$(date -u +%Y%m%d).rbf"
           cp src/mister/releases/*.mra mister-release/
           # ALT-172: clones live in the MiSTer family layout, one folder per
           # parent game under _alternatives/ (as Arcade-Cave / Irem M72), so
