@@ -78,9 +78,9 @@ candidate and the Klax / Guts cores come later.
 |---|---|---|
 | **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
 | `eprom2` | Escape … (set 2) | **Supported on MiSTer and Pocket (v0.2.0).** Device-tested on MiSTer 169/170 (POST, play through level 1, the canal stage and its result screen). Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra` under `_alternatives/`. Pocket: launched from the set picker's `_alternatives` folder (`atari_escape2.rom`), device-tested on Pocket RC 3. |
-| `klaxp1` | Klax (prototype set 1) | **Supported on MiSTer (v0.2.0; KLAX-165, GAMESEL-167).** Device-tested on MiSTer 169; one Flip/Start button (KLAXBTN-174 — the program reads only Button 1). Pocket core (`spoonelli.klaxp`) later. |
+| `klaxp1` | Klax (prototype set 1) | **Supported on MiSTer (v0.2.0; KLAX-165, GAMESEL-167).** Device-tested on MiSTer 169; one Flip/Start button (KLAXBTN-174 — the program reads only Button 1). Pocket core `spoonelli.klaxp`: test builds 42+ on `milestone-0.3` (unreleased). |
 | `klaxp2` | Klax (prototype set 2) | As `klaxp1` (the two sets differ only in the main pair). |
-| `guts` | Guts n' Glory (prototype) | **Supported on MiSTer (v0.2.0; video-map mode GUTS-166, special-sprite fix GUTS-169).** Device-tested on MiSTer 169. Pocket core (`spoonelli.guts`) later. |
+| `guts` | Guts n' Glory (prototype) | **Supported on MiSTer (v0.2.0; video-map mode GUTS-166, special-sprite fix GUTS-169).** Device-tested on MiSTer 169. Pocket core `spoonelli.guts`: test builds 42+ on `milestone-0.3` (unreleased). |
 
 Two structural differences set the Klax and Guts prototypes apart from
 Escape:

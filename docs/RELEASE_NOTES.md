@@ -20,6 +20,18 @@ hidden in a footnote; if you are deciding whether to install it, read the
 
 ---
 
+## Unreleased — Pocket 0.3: the Klax and Guts n' Glory cores
+
+Nothing in this section is released. Branch `milestone-0.3`; test builds for
+the owner's device checks. Two new Pocket cores, each its own zip (owner):
+`spoonelli.klaxp` (platform `klaxp`: Klax prototype set 1, set 2 under
+`_alternatives`) and `spoonelli.guts` (platform `guts`). Escape's core is
+untouched.
+
+| Build | Adds |
+|---|---|
+| 42 | First Klax and Guts Pocket cores (POCKETVAR-182): one tree, a build macro per game (`GAME_KLAX` / `GAME_GUTS`; none = Escape), the same constants the MiSTer core selects at runtime — single 68010, JSA-II sound with the OKI6295, Guts' video mode and its own playfield tile ROM at `0x280000`. Controls as on MiSTer: Klax d-pad + Flip/Start (A) + Flip 2nd (B); Guts analogue stick + Button 1/2/3 (A/B/X). 268/308 M10K each; timing positive (Klax hold +0.008 ns, Guts +0.020 ns). |
+
 ## 0.2 — MiSTer v0.2.0 and Pocket v0.2.0 (2026-10-19)
 
 **MiSTer v0.2.0** is build 172 (2026-10-19, `Arcade-Escape_20261019.rbf`,

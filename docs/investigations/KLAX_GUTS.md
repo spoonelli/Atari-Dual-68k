@@ -293,6 +293,33 @@ MPR2 objects — the same `apply_stain` as Escape's map, so `escape_stain.v`
 serves Guts unchanged. Fixtures: `sim/work/scenes/` (gitignored), results
 in `sweep_results.txt` beside them.
 
+## 4d. The Pocket cores: build-macro variants (POCKETVAR-182, 2026-10-19)
+
+The Pocket ships one core per game (owner: separate zips; platform ids
+`klaxp` and `guts`; v0.3.0). `core_top.v` reads a Verilog macro —
+`GAME_KLAX` or `GAME_GUTS`, none for Escape — that sets `GAME_SEL`,
+`EXTRA_EN`, `JSA_BOARD`, `VIDEO_MAP`, `VSHAD3_EN` and `PF_TILE_BASE` as
+constants, so synthesis prunes the other games' hardware (both variants
+268/308 M10K against Escape's 301). CI appends the macro to the qsf for that
+run (`build.yml` input `variant`); `package.sh VARIANT=klaxp|guts` packages
+from `dist/cores/<short>/`.
+
+What the Pocket path needed beyond the constants:
+- **Guts' playfield tile ROM.** The Pocket playfield fetches from CRAM
+  through `escape_pf.v`, which hard-coded the `0x120000` region; it now takes
+  `TILE_BASE` (Guts `0x280000`). The loader's CRAM mirror already copies every
+  word at or above `0x110000`, so the Guts tiles are there.
+- **Image size.** The APF capture window (32 MB), the 25-bit SDRAM writes and
+  the CRAM mirror already take the 2.5 MB Klax and 3.5 MB Guts images; the
+  OKI's reads at `0x24xxxx` are served on the legacy CPU arm (`OWN_J`).
+- **The char self-check** (`0x110410 == 0x3388`, re-armed every 0.39 s on
+  failure) passes on both images, so no periodic re-DMA.
+- **Escape-only logic gated off:** the extra-CPU freeze rescue and mailbox
+  watchdog (`EXTRA_EN`), and the Skip Self-Test poke of Escape's `$3F7F0C`.
+- **Controls** mirror the MiSTer mappings verified by `tb_mister_inputs` and
+  on the device: Klax d-pad on D15..D12 and Flip on D8 from A or B; Guts
+  hall-stick ADC and Button 1/2/3 = A/B/X on D9/D8/D11.
+
 ## 5. Order of work and what can be proven without ROMs
 
 1. `jt6295` submodule + iverilog smoke bench — **done 2026-09-09** (see
