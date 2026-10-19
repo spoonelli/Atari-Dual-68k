@@ -56,7 +56,7 @@ come later, as separate packages from the same tree.
 | 166 | Per-game button mapping |
 | 167 | Guts special-sprite fix (GUTS-169); MRAs say `<rbf>Escape</rbf>`; rbf named `Escape_YYYYMMDD.rbf` |
 | 168 | High scores saved on MiSTer (NVRAM-170, MRA `<nvram index="4" size="512"/>`); fixes a clock-crossing bug that made 164–167 usually boot Klax and Guts as Escape; `jt6295` licence notice |
-| 172 | Klax **Flip (2nd)** (a second Flip button, KLAXFLIP2-178); Guts MRA button list fixed (Start/Coin/Pause had each landed one bit low since 166, MRABTN-177); Start hidden on Klax and Guts, which never read it (STARTHIDE-179); CI gates for MRA button lists and for both players' input mapping |
+| 172 | Klax **Flip (2nd)** (a second Flip button, KLAXFLIP2-178); Guts MRA button list fixed (Start/Coin/Pause had each landed one bit low since 166, MRABTN-177); Start hidden on every game: the machine has no Start button and no game reads the core's Start input (STARTHIDE-179; Escape's self-test steps on Jump, confirmed on the device); CI gates for MRA button lists and for both players' input mapping |
 | 171 | Release build of the 170 RTL — superseded by 172 before publishing |
 | 170 | Klax prototypes get one **Flip/Start** button (KLAXBTN-174: MAME declares four, the programs read only the first); Pause now freezes the whole sound board (6502, TMS5220, OKI), not only the YM2151 (PAUSE-174); NVRAM rows above Service Mode, the Cave order |
 | 169 | Arcade-Cave-style saving (NVRAM-171): "Autosave NVRAM" (default Off) and "Save NVRAM" in the OSD root menu, and *Save settings* also saves; file `config/nvram/<MRA name>.nvm`. Clone MRAs in the MiSTer family layout (ALT-172): set 1 and Guts at the top level, set 2 and both Klax prototypes under `_alternatives/` |

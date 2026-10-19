@@ -250,9 +250,11 @@ entity escape_core is
         -- JSA coin inputs (active high; coin1 = Pocket Select at core_top)
         coin1      : in  std_logic := '0';
         coin2      : in  std_logic := '0';
-        -- 260000 D0: factory step/continue switch (unpopulated on production
-        -- cabs, MAME marks it unused, but the self-test error loop reads it:
-        -- 0x776 btst #0,$260000 — held low = step past a failed region)
+        -- 260000 D0. Wired to the wrappers' Start, but NO game reads it
+        -- (STARTHIDE-179, traced in MAME 0.289): the self-test error loop's
+        -- 0x776 btst #0,$260000 is a BYTE read of the even address, so it
+        -- tests D8 (Jump), not D0. MAME marks D0 unused; the machine has no
+        -- Start button. Kept as a harmless input; the MRAs hide Start.
         step_btn   : in  std_logic := '0';   -- active-high pressed
         -- diagnostic: force reads of the tests-passed flag ($3F7F0C) to 0x0100
         -- so the boot takes its already-passed branch (Interact "Skip Self-Test")
@@ -2441,7 +2443,8 @@ begin
             cfg_q    when (v_sel_mobc='1' or v_sel_slip='1') else
             ee_q     when v_sel_eeprom='1' else
             -- 260000: P1 inputs on D11-D8 (duck/spare/fire/jump, active low);
-            -- D0 = step/continue switch (active low)
+            -- D0 = the wrappers' Start (step_btn), which no game reads
+            -- (STARTHIDE-179: the self-test step is D8)
             (p1_joy_n & not p1_buttons & "1111111" & not step_btn)
                                              when v_sel_io='1' and v_addr(5 downto 4)="00" else
             -- 260010: P2 inputs + status: D4 ADEOC (conversion done, from the
