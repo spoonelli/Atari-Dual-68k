@@ -3,11 +3,11 @@
 An LLM-assisted openFPGA core for Atari Games' **"Escape"** arcade hardware — the dual-68010 board
 whose flagship title is *Escape from the Planet of the Robot Monsters* (**E.P.R.O.M.**).
 
-The Pocket release implements the **`eprom` configuration** — two 68000-family
-CPUs (68010 by default, 68000 selectable) and JSA-I audio. **MiSTer v0.2.0**
-(2026-10-19) adds Escape set 2 and the two unreleased Atari games that ran on
-this board, the Klax prototypes and Guts n' Glory; Pocket 0.2 (Escape set 2
-with a set picker) is at release candidate. See [Other games on this hardware](#other-games-on-this-hardware).
+The core implements the **Escape** board — two 68000-family CPUs (68010 by
+default, 68000 selectable) and JSA-I audio. **v0.2.0** (2026-10-19) adds
+Escape set 2 on both platforms (the Pocket picks the set at launch) and, on
+MiSTer, the two unreleased Atari games that ran on this board: the Klax
+prototypes and Guts n' Glory. See [Other games on this hardware](#other-games-on-this-hardware).
 
 > Built for the [Analogue Pocket](https://www.analogue.co/pocket) via the openFPGA framework.
 > This project ships **no ROMs**. You must supply your own dumps.
@@ -77,7 +77,7 @@ candidate and the Klax / Guts cores come later.
 | Set | Title | Status |
 |---|---|---|
 | **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
-| `eprom2` | Escape … (set 2) | **Supported on MiSTer (v0.2.0); Pocket in RC 1.** Device-tested on MiSTer 169/170 (POST, play through level 1, the canal stage and its result screen). Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra` under `_alternatives/`. Pocket: launched from the set picker's `_alternatives` folder (`atari_escape2.rom`), RC 1 not yet device-tested. |
+| `eprom2` | Escape … (set 2) | **Supported on MiSTer and Pocket (v0.2.0).** Device-tested on MiSTer 169/170 (POST, play through level 1, the canal stage and its result screen). Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra` under `_alternatives/`. Pocket: launched from the set picker's `_alternatives` folder (`atari_escape2.rom`), device-tested on Pocket RC 3. |
 | `klaxp1` | Klax (prototype set 1) | **Supported on MiSTer (v0.2.0; KLAX-165, GAMESEL-167).** Device-tested on MiSTer 169; one Flip/Start button (KLAXBTN-174 — the program reads only Button 1). Pocket core (`spoonelli.klaxp`) later. |
 | `klaxp2` | Klax (prototype set 2) | As `klaxp1` (the two sets differ only in the main pair). |
 | `guts` | Guts n' Glory (prototype) | **Supported on MiSTer (v0.2.0; video-map mode GUTS-166, special-sprite fix GUTS-169).** Device-tested on MiSTer 169. Pocket core (`spoonelli.guts`) later. |
@@ -315,7 +315,7 @@ third_party/                             Arcade-Atari-system1_MiSTer submodule (
 
 | Platform | Release tag | Package |
 |---|---|---|
-| **Analogue Pocket** | [`v0.1.1`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/v0.1.1) (plain `v*` tags) | `AtariDual68k-pocket-v*.zip` |
+| **Analogue Pocket** | [`v0.2.0`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/v0.2.0) (plain `v*` tags) | `AtariDual68k-pocket-v*.zip` |
 | **MiSTer (DE10-Nano)** | [`mister-v0.1.2`](https://github.com/spoonelli/Atari-Dual-68k/releases/tag/mister-v0.1.2) here, and the standard-layout distribution repo [**Arcade-Escape_MiSTer**](https://github.com/spoonelli/Arcade-Escape_MiSTer) (`releases/` folder), forked into [MiSTer-devel](https://github.com/MiSTer-devel/Arcade-Escape_MiSTer) — a stock `update_all` installs it as `Escape_YYYYMMDD.rbf` ([DISTRIBUTION.md](docs/DISTRIBUTION.md)). | `AtariDual68k-mister-*.zip` / `Arcade-Escape_YYYYMMDD.rbf` |
 
 Download the packaged zip from the
@@ -329,10 +329,10 @@ always points at the current Pocket release.
    `Assets/` into the existing folders.
 2. Put **your own** `atari_escape.rom` in `/Assets/eprom/common/`. This project
    distributes no ROM data; build the image from dumps you own per
-   [`docs/ROMS.md`](docs/ROMS.md). *(Pocket 0.2 RC: set 2 goes beside it
-   as `atari_escape2.rom`.)*
-3. Launch the core. It asks for the ROM on startup *(0.2: it lists the sets
-   instead — set 1 at the top, set 2 in `_alternatives`)*. High scores save
+   [`docs/ROMS.md`](docs/ROMS.md). Set 2 (optional) goes beside it as
+   `atari_escape2.rom`.
+3. Launch the core. It lists the sets: set 1 at the top, set 2 in
+   `_alternatives`. High scores save
    themselves to `/Saves/eprom/common/` — you do not create that file.
 
 Requires Pocket firmware 1.1+ set up for unofficial cores. The core boots to a

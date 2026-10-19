@@ -57,7 +57,7 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
      placeholder you can replace on your SD.
 3. Insert SD, power on, open **Esc Robot Monst** from the Pocket menu. It lists
    the sets on launch: pick set 1, or open `_alternatives` for set 2. Set 2 is
-   a 0.2 RC test item: it must pass self-test (its POST checksums the tenth
+   a 0.2 test item (passed on RC 3): it must pass self-test (its POST checksums the tenth
    program pair through the A19 remap) and play, and its high scores must land
    in `atari_escape2.sav` without touching set 1's.
 
