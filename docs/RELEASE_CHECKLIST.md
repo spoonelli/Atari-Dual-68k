@@ -235,6 +235,21 @@ yet device-tested beyond a first RC 1 run into the canal stage.
 
 ---
 
+## I. Pocket 0.3 release gates — the Klax and Guts n' Glory cores (added 2026-10-19)
+
+Owner decisions: one zip per core, platform ids `klaxp` / `guts`, version
+v0.3.0. Branch `milestone-0.3`.
+
+| # | Gate | State | Note |
+|---|---|---|---|
+| I1 | Device tests, test build 42 | **OPEN** | K1–K7 (Klax sets 1/2, both Flip buttons, saves per set) and G1–G7 (Guts, including its own playfield tile ROM), owner's test plan. |
+| I2 | Release builds from the final commit | **OPEN** | One CI run per core (`build.yml` input `variant`), timing gate green (seed sweep if a hold row goes negative); `BUILD_ID` bumped to the release build number. |
+| I3 | Package guards on the actual artifacts | **OPEN** | `VARIANT=klaxp|guts EXPECT_BUILD=NN ./support/package.sh` per core; download each artifact **by run id and artifact name** and `cmp` the zip's `bitstream.rbf_r` against it (build 42's first packaging put the Guts bitstream in the Klax zip). |
+| I4 | Metadata | **OPEN** | `dist/cores/*/core.json` version 0.3.0 and `date_release` = the release date; Escape's `core.json` only if its package changes. |
+| I5 | Asset names and the cores inventory | **OPEN** | Attach all three zips to the release so its "latest" is never Escape-less: `AtariDual68k-pocket-v0.x.x.zip` (Escape), `AtariDual68k-klaxp-v0.3.0.zip`, `AtariDual68k-guts-v0.3.0.zip`. One-time PR to `openfpga-cores-inventory/analogue-pocket` `_data/sources.yml` changing our entry's `assets` from `AtariDual68k-pocket-` to `AtariDual68k-pocket-v`, `AtariDual68k-klaxp-`, `AtariDual68k-guts-` (the multi-pattern form `budude2/openfpga-gbc` uses). Owner's go before the PR. |
+| I6 | Release mechanics | **OPEN** | `milestone-0.3` onto `main`, tag `v0.3.0`, GitHub release marked Latest; verify the inventory lists all three cores and pupdate offers them. |
+| I7 | Docs flipped | **OPEN** | README sets table, RELEASE_NOTES 0.3 entry, ROMS 3b / POCKET_TEST from "test builds" to released. |
+
 ## H. Post-v0.1.1 work (drafted 2026-08-31 as "v0.1.2 planning")
 
 Sequenced after the MiSTer-devel submission (sent 2026-08-31); nothing here

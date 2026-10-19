@@ -165,6 +165,26 @@ a photo of the HUD report the same number.
 > `12`. That has been enough so far — consecutive builds differ in the low
 > digits — but it is worth knowing when comparing two builds far apart.
 
+Write build NN as `16'h00NN` — the digits are hex nibbles, not ASCII
+(`16'h3431` shows `31`, which is how the v0.2.0 release candidate first came
+out). `package.sh` guard 6 refuses a package whose `BUILD_ID` disagrees with
+its own `shows 'NN'` comment, or with `EXPECT_BUILD=NN` when given.
+
+## The Klax and Guts n' Glory cores (milestone 0.3, test builds)
+
+Two more cores from the same tree, each its own zip: `spoonelli.klaxp`
+(platform `klaxp`) and `spoonelli.guts` (platform `guts`). Install exactly as
+above, with their own folders and ROM names ([`ROMS.md`](ROMS.md) section 3b).
+
+| Core | Controls | Menu differences from Escape |
+|---|---|---|
+| Klax | d-pad = paddle; **A** Flip / Start, **B** Flip (2nd) - the same function, as on the cabinet's two Flip buttons; Select = coin | no Skip Self-Test, no ROM-shadow toggle, no analogue-stick options; "Sample Volume" replaces "Speech Volume" (it scales the OKI6295) |
+| Guts n' Glory | analogue stick or d-pad; **A** Button 1 (fire), **B** Button 2 (the game's own "Left START"), **X** Button 3; Select = coin | no Skip Self-Test, no ROM-shadow toggle; "Sample Volume" |
+
+Both are single-CPU, so the "Waiting for Second Processor" boot hold does not
+appear. The Developer HUD and build number work as on Escape. The device test
+plan for the first test builds is K1–K7 / G1–G7 (owner's test plan).
+
 ## Reporting problems
 
 Tick **Developer HUD**, press **L1** to bring up the HUD, then **R1** to reach page 2 (main-CPU

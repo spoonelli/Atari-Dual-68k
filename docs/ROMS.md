@@ -28,14 +28,12 @@ itself, named for the set it detects: `atari_escape.rom` (set 1),
 paths explicitly if you want them somewhere else. The set is detected from the chips present (`136069-3025.50a` = set 1,
 `136069-1025.50a` = set 2). A set-2 folder that lacks the shared
 graphics/sound chips may sit next to an `eprom` folder and borrow them, the
-way MAME's clone lookup does. Set 2 is implemented but not yet verified on a
-device (see the README's supported-sets table). The tool also assembles the
-Klax prototype and Guts n' Glory images (`klaxp1`/`klaxp2`/`guts`, detected
-from their first main chip; 2.5 MB and 3.5 MB, with the JSA-II ADPCM at
-`0x240000` and Guts' tile region at `0x280000`). Those images are for the
-future Klax and Guts Pocket cores (`spoonelli.klaxp`, `spoonelli.guts`), which
-are not built yet; the milestone 0.2 MiSTer test builds that run these games
-use MRAs and the MAME zips instead (see [MiSTer](#mister) below and
+way MAME's clone lookup does. Set 2 is device-verified on both platforms. The
+tool also assembles the Klax prototype and Guts n' Glory images
+(`klaxp1`/`klaxp2`/`guts`, detected from their first main chip; 2.5 MB and
+3.5 MB, with the JSA-II ADPCM at `0x240000` and Guts' tile region at
+`0x280000`) for their Pocket cores (section 3b). MiSTer runs those games from
+MRAs and the MAME zips instead (see [MiSTer](#mister) below and
 `investigations/KLAX_GUTS.md`).
 
 Every chip is **CRC32-verified** against MAME's known-good values, and its size
@@ -94,6 +92,22 @@ unchanged. The APF loads the chosen image into SDRAM at boot, where the core's m
 the CPUs and video. `eprom` is the core's platform id, so the folder name is
 fixed too. Full SD layout and the on-device test procedure are in
 [`POCKET_TEST.md`](POCKET_TEST.md).
+
+### 3b. The Klax and Guts n' Glory Pocket cores (milestone 0.3, test builds)
+
+Each is its own core with its own platform folder (POCKETVAR-182):
+
+```
+/Assets/klaxp/common/klaxp1.rom      python3 build_rom.py <klax set> --set klaxp1
+/Assets/klaxp/common/klaxp2.rom      python3 build_rom.py <klax set> --set klaxp2   (optional)
+/Assets/guts/common/guts.rom         python3 build_rom.py <guts set>
+```
+
+`<klax set>` can be a merged `klax.zip` / `klax` folder (the prototypes in
+`klaxp1/` and `klaxp2/` subfolders) or a split `klaxp1.zip` next to
+`klax.zip`. The Klax core lists set 1 at launch, set 2 inside
+`_alternatives`; saves are per set (`/Saves/klaxp/common/klaxp1.sav`,
+`klaxp2.sav`; `/Saves/guts/common/guts.sav`).
 
 ## Zero-ROM guarantee
 
