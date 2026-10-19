@@ -14,6 +14,11 @@ on:
     branches: [main, mister-port, mister-112]
   pull_request:
   workflow_dispatch:
+    inputs:
+      seed:
+        description: "Fitter SEED override for a timing sweep (empty = the .qsf's SEED). Commit the chosen seed before a release build."
+        required: false
+        default: ""
 
 jobs:
   # VSHAD3-112, in its OWN job so it runs alongside Quartus instead of in front
@@ -122,6 +127,10 @@ jobs:
 
       - name: Compile Arcade-Escape
         run: |
+          if [ -n "${{ github.event.inputs.seed }}" ]; then
+            sed -i -E 's/^set_global_assignment -name SEED [0-9]+/set_global_assignment -name SEED ${{ github.event.inputs.seed }}/' src/mister/Arcade-Escape.qsf
+            echo "SEED override: $(grep -E '^set_global_assignment -name SEED' src/mister/Arcade-Escape.qsf)"
+          fi
           docker run --rm -v "$PWD":/work -w /work/src/mister \
             theypsilon/quartus-lite-c5:18.1 \
             quartus_sh --flow compile Arcade-Escape
