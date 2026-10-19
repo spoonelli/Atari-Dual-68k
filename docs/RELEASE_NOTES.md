@@ -26,15 +26,18 @@ Nothing in this section is in a shipped release. These are test builds handed
 to the owner for device checks; the sections after this one describe the
 shipped v0.1.x core. Build numbers and work tags are different series (KLAX-165
 is in MiSTer 164, GUTS-166 in 165, GUTS-169 in 167, NVRAM-170 in 168,
-NVRAM-171 and ALT-172 in 169).
+NVRAM-171 and ALT-172 in 169, MISTER-174 in 170, POCKETSET-175 in Pocket
+40).
 
-**Pocket** — Pocket 0.2 is Escape set 2 plus the factory-map fix. Neither
-test build has been run on a device yet.
+**Pocket** — Pocket 0.2 is Escape set 2 plus the factory-map fix. None of
+these test builds has been run on a device yet.
 
 | Build | Adds |
 |---|---|
 | 37 | **Factory-map halftone** (H8, MOSHADE-162): travelled routes and the START box dim on the between-level map, as on the owner's PCB capture, where MAME leaves them bright ([`DEVIATIONS.md`](DEVIATIONS.md) C6/C7, [`MAP_HALFTONE.md`](investigations/MAP_HALFTONE.md)). |
 | 38 | **Escape set 2** (`eprom2`, EPROM2-163): `build_rom.py` builds a set-2 image; the core serves set 2's tenth program pair. |
+| 39 | Rebuilt from the current shared RTL (the Klax/Guts/JSA-II work of MiSTer 164–169, all tied off on the Pocket); no intended Pocket-visible change. |
+| 40 (RC 1) | **Set picker** (POCKETSET-175): the core lists its romsets at launch through APF instance JSONs in `Assets/eprom/spoonelli.eprom/` (set 2 under `_alternatives/`, jotego's layout); set 2 loads `atari_escape2.rom` and saves to `atari_escape2.sav`; set 1 keeps its 0.1.x file names. `build_rom.py` names its output for the set it detects. `core.json` 0.2.0. |
 
 The Klax and Guts n' Glory Pocket cores (`spoonelli.klaxp`, `spoonelli.guts`)
 come later, as separate packages from the same tree.
@@ -51,6 +54,7 @@ come later, as separate packages from the same tree.
 | 166 | Per-game button mapping |
 | 167 | Guts special-sprite fix (GUTS-169); MRAs say `<rbf>Escape</rbf>`; rbf named `Escape_YYYYMMDD.rbf` |
 | 168 | High scores saved on MiSTer (NVRAM-170, MRA `<nvram index="4" size="512"/>`); fixes a clock-crossing bug that made 164–167 usually boot Klax and Guts as Escape; `jt6295` licence notice |
+| 170 | Klax prototypes get one **Flip/Start** button (KLAXBTN-174: MAME declares four, the programs read only the first); Pause now freezes the whole sound board (6502, TMS5220, OKI), not only the YM2151 (PAUSE-174); NVRAM rows above Service Mode, the Cave order |
 | 169 | Arcade-Cave-style saving (NVRAM-171): "Autosave NVRAM" (default Off) and "Save NVRAM" in the OSD root menu, and *Save settings* also saves; file `config/nvram/<MRA name>.nvm`. Clone MRAs in the MiSTer family layout (ALT-172): set 1 and Guts at the top level, set 2 and both Klax prototypes under `_alternatives/` |
 
 **Device status:** the owner's first run of MiSTer 168 booted and played all
@@ -59,8 +63,12 @@ PCB reference capture: the same nodes dimmed, the "you are here" marker blinks
 every 10 frames, identical to the PCB capture, and the screen timing agrees.
 Colour differences between those two captures are not attributed to the core
 (different capture paths); a same-path comparison is a post-0.2 palette item.
-The full test plan is still pending on MiSTer 169, and Pocket 37/38 are not yet
-device-tested.
+The owner ran the full MiSTer test plan (T1–T10) on 169 (2026-10-18): all pass
+except three notes — Klax showed four buttons (fixed in 170), the canal-stage
+"STAND BY" panel differs from the PCB capture (under investigation), and one
+session lost all audio and then showed "YOU MADE IT!" after the canal timer ran
+out, where a timeout normally ends on "YOU DID NOT MAKE IT!" (not reproduced;
+open). Pocket 37–40 are not yet device-tested.
 
 ThunderJaws remains future work; the research is in
 [`investigations/THUNDERJAWS.md`](investigations/THUNDERJAWS.md).

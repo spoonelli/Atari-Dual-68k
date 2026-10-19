@@ -252,7 +252,8 @@ usual (`./support/package.sh <bitstream.rbf_r>`) and merge onto the SD card; the
 ROM is still user-supplied and no ROM data is in the package.
 
 The save file is created by the Pocket itself at
-`/Saves/eprom/common/atari_escape.sav`, 512 bytes. You do not have to create it
+`/Saves/eprom/common/atari_escape.sav`, 512 bytes (milestone 0.2: set 2 has its
+own, `atari_escape2.sav`, named by its instance JSON). You do not have to create it
 - but if you already have a MAME `eprom` nvram dump you can drop it there and it
 will load.
 
@@ -308,8 +309,10 @@ Interact (**+**) menu. Saving on a clean core exit still happens.
   selectable on the Pocket (today they are selectable only in the MiSTer
   milestone 0.2 test builds, where each MRA gets its own `.nvm` - section 8).
   Left clear for now because the derived-name behaviour is one more
-  thing that cannot be checked without a Pocket, and today there is exactly one
-  ROM filename.
+  thing that cannot be checked without a Pocket. Milestone 0.2 (POCKETSET-175)
+  gets per-set saves without it: each set's instance JSON names its save
+  explicitly (`atari_escape.sav` / `atari_escape2.sav`), the way jotego's
+  instances do, and set 1 keeps the original name so existing saves load.
 * **The EEPROM's write-lock is still not emulated.** The real 2804 is
   `lock_after_write(true)` and needs the 0x1F0000 unlock sequence before each
   store; `escape_core.vhd` accepts every write (`we_ee <= v_wr and

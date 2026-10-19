@@ -56,7 +56,11 @@ diagnostic HUD latches the 6502 address it died at. The measured gap list is
 development identity `spoonelli.ataridual68k` at v0.1.0 — if you ran dev
 builds, delete the old core folder to avoid a duplicate menu entry). The
 platform id is `eprom`, so the ROM goes in `Assets/eprom/common/` and saves in
-`Saves/eprom/common/`; saves are platform-keyed and carry over. Platform art
+`Saves/eprom/common/`; saves are platform-keyed and carry over. From milestone
+0.2 the core lists its romsets when it starts (one instance file per set in
+`Assets/eprom/spoonelli.eprom/`, set 2 under `_alternatives/`, the jotego
+layout); set 1 keeps `atari_escape.rom` / `atari_escape.sav`, so existing cards
+work unchanged. Platform art
 is an original text placeholder; real marquee art is user-supplied and not
 distributed, like the ROMs.
 
@@ -291,7 +295,7 @@ src/fpga/                                Quartus project
   core/core_top.v                        top level: SDRAM/CRAM services, download, video, HUD
   core/rtl/                              our core: escape_core, decode, SDRAM ctrl, BRAMs
 sim/                                     GHDL simulation harness + testbenches
-support/build_rom.py                     assemble user ROM dumps -> atari_escape.rom
+support/build_rom.py                     assemble user ROM dumps -> atari_escape.rom (set 2: atari_escape2.rom)
 support/package.sh                       build a Pocket SD-layout release zip (no ROMs)
 reference/                               MAME driver sources; schematics stay local-only
 docs/PIPELINES.md                        how the data/processing pipelines should work
@@ -321,8 +325,10 @@ always points at the current Pocket release.
    `Assets/` into the existing folders.
 2. Put **your own** `atari_escape.rom` in `/Assets/eprom/common/`. This project
    distributes no ROM data; build the image from dumps you own per
-   [`docs/ROMS.md`](docs/ROMS.md).
-3. Launch the core. It asks for the ROM on startup. High scores save
+   [`docs/ROMS.md`](docs/ROMS.md). *(Milestone 0.2, unreleased: set 2 goes
+   beside it as `atari_escape2.rom`.)*
+3. Launch the core. It asks for the ROM on startup *(0.2: it lists the sets
+   instead — set 1 at the top, set 2 in `_alternatives`)*. High scores save
    themselves to `/Saves/eprom/common/` — you do not create that file.
 
 Requires Pocket firmware 1.1+ set up for unofficial cores. The core boots to a
@@ -348,8 +354,9 @@ No local FPGA toolchain needed — GitHub Actions compiles the bitstream for you
    ```bash
    ./support/package.sh path/to/bitstream/output/bitstream.rbf_r
    ```
-6. **ROM**: build `atari_escape.rom` from your own verified dumps per
-   [`docs/ROMS.md`](docs/ROMS.md) and place it at `Assets/eprom/common/` on the SD.
+6. **ROM**: build `atari_escape.rom` (set 1) and optionally `atari_escape2.rom`
+   (set 2) from your own verified dumps per [`docs/ROMS.md`](docs/ROMS.md) and
+   place them in `Assets/eprom/common/` on the SD.
 7. Unzip the package onto the SD, launch **Esc Robot Monst** on the Pocket.
 
 Every build shows a small cyan build number in the bottom-right corner once

@@ -17,9 +17,10 @@ python3 support/build_rom.py /path/to/eprom.zip ./atari_escape.rom
 ```
 
 Both forms produce a byte-identical image. With no arguments it looks for an
-`eprom` folder next to the repository and writes `atari_escape.rom` next to
-the script itself; pass both paths explicitly if you want them somewhere
-else. The set is detected from the chips present (`136069-3025.50a` = set 1,
+`eprom` folder next to the repository and writes the image next to the script
+itself, named for the set it detects: `atari_escape.rom` (set 1),
+`atari_escape2.rom` (set 2), or `<setname>.rom` for the prototypes; pass both
+paths explicitly if you want them somewhere else. The set is detected from the chips present (`136069-3025.50a` = set 1,
 `136069-1025.50a` = set 2). A set-2 folder that lacks the shared
 graphics/sound chips may sit next to an `eprom` folder and borrow them, the
 way MAME's clone lookup does. Set 2 is implemented but not yet verified on a
@@ -72,15 +73,19 @@ Region contents were checked against MAME's own `ROM_START(eprom)` offsets and
 
 ## 3. Put it on the Pocket SD card
 
-Copy `atari_escape.rom` to:
+Copy `atari_escape.rom` (and, for set 2, `atari_escape2.rom`) to:
 
 ```
 /Assets/eprom/common/atari_escape.rom
+/Assets/eprom/common/atari_escape2.rom
 ```
 
-The filename matters — `data.json` declares a required data slot (id 1,
-`atari_escape.rom`) and the Pocket will ask for that exact file; the APF loads
-it into SDRAM at boot, where the core's memory controller serves each region to
+The filenames matter. From milestone 0.2 (POCKETSET-175) the core starts by
+listing its romsets: the package ships one APF instance JSON per set in
+`/Assets/eprom/spoonelli.eprom/` (set 2 inside `_alternatives/`, the layout
+jotego's Pocket cores use), and each names its set's file above and its own
+save file. Set 1 keeps the original names, so a card set up for 0.1.x works
+unchanged. The APF loads the chosen image into SDRAM at boot, where the core's memory controller serves each region to
 the CPUs and video. `eprom` is the core's platform id, so the folder name is
 fixed too. Full SD layout and the on-device test procedure are in
 [`POCKET_TEST.md`](POCKET_TEST.md).

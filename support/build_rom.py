@@ -25,10 +25,12 @@ Combined image layout (SDRAM byte offsets):
                               chunky 4bpp. This is NOT a raw MAME region dump.
 
 Usage: build_rom.py [romset_dir_or_zip] [out_file]
-  By default atari_escape.rom is written NEXT TO THIS SCRIPT; an explicit
-  out_file overrides that. In the release package, move the result into
-  Assets/eprom/common/ (the SD location the Pocket loads from -- "eprom" is
-  the core platform id). romset default: ../eprom next to the project.
+  By default the image is written NEXT TO THIS SCRIPT, named for the set it
+  detected: atari_escape.rom (set 1), atari_escape2.rom (set 2), or
+  <setname>.rom for the Klax/Guts prototypes; an explicit out_file overrides
+  that. On the Pocket, move the result into Assets/eprom/common/ (the SD
+  location the core's instance JSONs load from -- "eprom" is the core platform
+  id). romset default: ../eprom next to the project.
 """
 import os, sys, zipfile, zlib
 
@@ -200,8 +202,6 @@ def main() -> int:
     elif not os.path.isdir(romdir):
         raise SystemExit(f"no such romset directory: {romdir}\n"
                          f"pass a folder of 136069-* chip dumps, or a MAME eprom.zip")
-    out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "atari_escape.rom")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
 
     def present(name):
         if _zip is not None:
@@ -214,6 +214,11 @@ def main() -> int:
         raise SystemExit("no supported set found in " + romdir + ": expected one of "
                          + ", ".join(c for c, _ in DETECT))
     T = SETS[setname]
+    # POCKETSET-175: the default name follows the set, matching the Pocket
+    # instance JSONs (set 1 keeps the original name, so existing SD cards work)
+    DEFNAME = {"eprom": "atari_escape.rom", "eprom2": "atari_escape2.rom"}.get(setname, setname + ".rom")
+    out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, DEFNAME)
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     img = bytearray(T["SIZE"])
     DESC = {"eprom": "Escape set 1, rev 3/4 program", "eprom2": "Escape set 2, rev 1 program + 0x80000 window",
             "klaxp1": "Klax prototype set 1 - needs the single-CPU JSA-II core build (EXTRA_EN=0, JSA_BOARD=2)",
