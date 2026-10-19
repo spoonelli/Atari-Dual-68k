@@ -87,6 +87,11 @@ level of this zip (and in the project source at support/build_rom.py):
 
   python3 build_rom.py /path/to/eprom.zip
   python3 build_rom.py /path/to/eprom2.zip
+  python3 build_rom.py /path/to/eprom.zip --set eprom2   (merged set)
+
+Non-merged, split and merged MAME sets all work: a split eprom2.zip borrows
+the shared chips from eprom.zip next to it; a merged eprom.zip builds set 1,
+or set 2 with --set eprom2.
 
 It detects the set and writes atari_escape.rom or atari_escape2.rom next to
 the script -- move the file(s) into this folder, then copy the package's

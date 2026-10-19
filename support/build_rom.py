@@ -24,7 +24,14 @@ Combined image layout (SDRAM byte offsets):
                               (ROMREGION_INVERT) then repack 4 bit-planes into
                               chunky 4bpp. This is NOT a raw MAME region dump.
 
-Usage: build_rom.py [romset_dir_or_zip] [out_file]
+Usage: build_rom.py [romset_dir_or_zip] [out_file] [--set NAME]
+  Accepts non-merged, split and merged MAME sets, as zips or folders.
+  A merged zip (clone chips in a subfolder, e.g. eprom.zip with eprom2/)
+  builds the parent set unless --set names the clone (--set eprom2); a split
+  clone zip (eprom2.zip holding only its own chips) borrows the shared chips
+  from the parent zip next to it (eprom.zip). Folders work the same way: a
+  clone folder borrows from its parent folder, and --set picks a clone
+  subfolder of a parent folder.
   By default the image is written NEXT TO THIS SCRIPT, named for the set it
   detected: atari_escape.rom (set 1), atari_escape2.rom (set 2), or
   <setname>.rom for the Klax/Guts prototypes; an explicit out_file overrides
@@ -69,14 +76,28 @@ CRCS = {
 }
 
 _zip = None   # set in main() when romdir is a zip
+# BUILDROM-176: ordered (zipfile, member-prefix) sources searched for each chip
+# - a merged zip's clone subfolder first, then its root; a split clone zip,
+# then the parent zip beside it. Built in main(); empty for folders.
+SOURCES = []
+PARENT = {"eprom2": "eprom", "klaxp1": "klax", "klaxp2": "klax"}
 
 # the same chars chip appears under two names across MAME's two sets (identical CRC)
 CHARS_NAMES = ("136069-1007.125d", "136069.125d", "klax125d")   # one chip, three MAME names, one CRC
 ALIAS = {n: [m for m in CHARS_NAMES if m != n] for n in CHARS_NAMES}
 
+def _zfind(name):
+    """(zipfile, member) for the first source holding name or an alias."""
+    for cand in [name] + ALIAS.get(name, []):
+        for z, pre in SOURCES:
+            if pre + cand in z.namelist():
+                return z, pre + cand
+    return None
+
 def rd(romdir, name, size=0x10000):
-    if _zip is not None and name not in _zip.namelist() and name in ALIAS:
-        name = next((m for m in ALIAS[name] if m in _zip.namelist()), name)
+    hit = _zfind(name) if _zip is not None else None
+    if _zip is not None and hit is not None:
+        name = hit[1].rsplit("/", 1)[-1]
     if _zip is None:
         cands = [name] + ALIAS.get(name, [])
         dirs = [romdir, os.path.dirname(os.path.abspath(romdir)), os.path.join(os.path.dirname(os.path.abspath(romdir)), "eprom")]
@@ -84,10 +105,9 @@ def rd(romdir, name, size=0x10000):
         if found:
             name = os.path.basename(found); romdir = os.path.dirname(found)
     if _zip is not None:
-        try:
-            b = _zip.read(name)
-        except KeyError:
+        if hit is None:
             raise SystemExit(f"missing {name} in {romdir}")
+        b = hit[0].read(hit[1])
     else:
         path = os.path.join(romdir, name)
         if not os.path.exists(path):
@@ -190,7 +210,17 @@ def repack_planar(romdir, names):
 def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
     repo = os.path.abspath(os.path.join(here, ".."))
-    romdir = sys.argv[1] if len(sys.argv) > 1 else os.path.abspath(os.path.join(repo, "..", "eprom"))
+    args = sys.argv[1:]
+    want = None
+    if "--set" in args:
+        k = args.index("--set")
+        if k + 1 >= len(args):
+            raise SystemExit("--set needs a set name: eprom, eprom2, klaxp1, klaxp2 or guts")
+        want = args[k + 1]
+        del args[k:k + 2]
+        if want not in SETS:
+            raise SystemExit(f"unknown set {want!r}: expected one of " + ", ".join(SETS))
+    romdir = args[0] if len(args) > 0 else os.path.abspath(os.path.join(repo, "..", "eprom"))
     global _zip
     if romdir.lower().endswith(".zip"):
         if not os.path.isfile(romdir):
@@ -199,20 +229,43 @@ def main() -> int:
             _zip = zipfile.ZipFile(romdir)
         except zipfile.BadZipFile:
             raise SystemExit(f"not a zip file: {romdir}")
+        if want and any(n.startswith(want + "/") for n in _zip.namelist()):
+            SOURCES.append((_zip, want + "/"))          # merged zip: the clone's subfolder first
+        SOURCES.append((_zip, ""))
+        stem = os.path.splitext(os.path.basename(romdir))[0].lower()
+        parent = PARENT.get(want or stem)
+        ppath = os.path.join(os.path.dirname(os.path.abspath(romdir)), f"{parent}.zip") if parent else None
+        if ppath and os.path.isfile(ppath) and os.path.abspath(ppath) != os.path.abspath(romdir):
+            SOURCES.append((zipfile.ZipFile(ppath), ""))   # split clone zip: shared chips from the parent
     elif not os.path.isdir(romdir):
         raise SystemExit(f"no such romset directory: {romdir}\n"
                          f"pass a folder of 136069-* chip dumps, or a MAME eprom.zip")
+    elif want and os.path.isdir(os.path.join(romdir, want)):
+        romdir = os.path.join(romdir, want)            # parent folder holding the clone's subfolder
 
     def present(name):
+        # detection looks only in the file the user named (a merged zip's
+        # subfolder included); a split clone's parent zip only supplies chips
         if _zip is not None:
-            return name in _zip.namelist()
+            return any(pre + name in z.namelist() for z, pre in SOURCES if z is _zip)
         return os.path.exists(os.path.join(romdir, name))
     DETECT = [("136069-3025.50a", "eprom"), ("136069-1025.50a", "eprom2"),
               ("klax_ft1.50a", "klaxp1"), ("klax_ft2.50a", "klaxp2"), ("guts-hi0.50a", "guts")]
-    setname = next((n for chip, n in DETECT if present(chip)), None)
+    if want:
+        chip = next(c for c, n in DETECT if n == want)
+        if not present(chip):
+            raise SystemExit(f"set {want} not found in {romdir} (no {chip})")
+        setname = want
+    else:
+        setname = next((n for chip, n in DETECT if present(chip)), None)
     if setname is None:
         raise SystemExit("no supported set found in " + romdir + ": expected one of "
                          + ", ".join(c for c, _ in DETECT))
+    if _zip is not None and not want:
+        clones = sorted({n.split("/", 1)[0] for n in _zip.namelist() if "/" in n} & set(SETS))
+        if clones:
+            print(f"note: this merged zip also holds {', '.join(clones)}; build it with --set "
+                  + clones[0])
     T = SETS[setname]
     # POCKETSET-175: the default name follows the set, matching the Pocket
     # instance JSONs (set 1 keeps the original name, so existing SD cards work)

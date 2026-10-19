@@ -16,7 +16,12 @@ folder of the individual `136069-*.xxx` chips:
 python3 support/build_rom.py /path/to/eprom.zip ./atari_escape.rom
 ```
 
-Both forms produce a byte-identical image. With no arguments it looks for an
+Both forms produce a byte-identical image, and every MAME set type works
+(BUILDROM-176): non-merged; split, where a clone zip such as `eprom2.zip`
+borrows the shared chips from `eprom.zip` beside it; and merged, where
+`eprom.zip` carries set 2 in an `eprom2/` subfolder — that builds set 1 by
+default and set 2 with `--set eprom2` (the tool prints a note naming the other
+sets it found). With no arguments it looks for an
 `eprom` folder next to the repository and writes the image next to the script
 itself, named for the set it detects: `atari_escape.rom` (set 1),
 `atari_escape2.rom` (set 2), or `<setname>.rom` for the prototypes; pass both
