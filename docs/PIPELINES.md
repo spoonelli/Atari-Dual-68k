@@ -225,11 +225,12 @@ either operation, and the planar to chunky repack is not expressible as an inter
 
 ### 2.3 Pocket: APF data slots into memory
 
-`data.json` declares exactly two slots:
+`data.json` declares three slots (slot 0 since POCKETSET-175, milestone 0.2):
 
 | id | name | file | bridge address | size | required |
 |---|---|---|---|---|---|
-| 1 | `ROM` | `atari_escape.rom` | `0x10000000` | image is 0x220000 | **yes** |
+| 0 | `Arcade Game` | an instance `.json` (parameters `0x113`: reloadable, core-specific, instance, full reload) | none - never sent to the core | - | **yes** |
+| 1 | `ROM` | `atari_escape.rom` (the instance may name `atari_escape2.rom`) | `0x10000000` | image is 0x220000 | **yes** |
 | 2 | `EEPROM` | `atari_escape.sav` | `0x20000000` | 512, nonvolatile | no |
 
 The APF streams the file over the bridge as 32-bit writes, captured in the `clk_74a`

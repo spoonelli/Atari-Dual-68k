@@ -34,20 +34,32 @@ in the emulated 2804 EEPROM and **survive a power cycle** — see
    /Platforms/eprom.json
    /Platforms/_images/eprom.bin        (text placeholder; swap in your own art)
    /Assets/eprom/common/atari_escape.rom
+   /Assets/eprom/common/atari_escape2.rom (set 2, optional)
+   /Assets/eprom/spoonelli.eprom/Escape from the Planet of the Robot Monsters (set 1).json
+   /Assets/eprom/spoonelli.eprom/_alternatives/Escape from the Planet of the Robot Monsters (set 2).json
    /Saves/eprom/common/atari_escape.sav   (created by the Pocket, 512 bytes)
+   /Saves/eprom/common/atari_escape2.sav  (set 2's own, likewise)
    ```
    - `atari_escape.sav` is the EEPROM — high scores and operator settings.
      **You do not create it**: the Pocket writes it the first time the game
      changes anything, and reloads it on every launch. Deleting it resets the
      machine to a factory-fresh EEPROM. If you have a MAME `eprom` nvram dump
      you can drop it in as this file and it will load.
+   - The two `.json` files ship in the package (POCKETSET-175): each is an APF
+     instance naming one set's ROM and save file, so the launch browser lists
+     set 1 at the top and set 2 inside `_alternatives`, and each set keeps its
+     own high scores.
    - `atari_escape.rom` is built from your own verified dumps:
-     `python3 support/build_rom.py /path/to/eprom ./atari_escape.rom`
+     `python3 support/build_rom.py /path/to/eprom` (an `eprom2` dump writes
+     `atari_escape2.rom`)
      (see [`ROMS.md`](ROMS.md)). This project never distributes ROM data —
      and no platform artwork either; the shipped image is an original text
      placeholder you can replace on your SD.
-3. Insert SD, power on, open **Esc Robot Monst** from the Pocket menu. It asks
-   for the ROM (required slot) on launch.
+3. Insert SD, power on, open **Esc Robot Monst** from the Pocket menu. It lists
+   the sets on launch: pick set 1, or open `_alternatives` for set 2. Set 2 is
+   a 0.2 RC test item: it must pass self-test (its POST checksums the tenth
+   program pair through the A19 remap) and play, and its high scores must land
+   in `atari_escape2.sav` without touching set 1's.
 
 ## Controls
 

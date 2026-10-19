@@ -65,6 +65,15 @@ provoke "guard 1: payload staged as *.rom in Assets/" \
         'cp "'"$TMP"'/big.bin" "$STAGE/Assets/$PLATFORM/common/atari_escape.rom"' refuse
 provoke "guard 2: payload renamed .bin in Assets/" \
         'cp "'"$TMP"'/big.bin" "$STAGE/Assets/$PLATFORM/common/gfxdata.bin"' refuse
+# POCKETSET-175: the instance JSONs are legitimate Assets/ files, so a payload
+# could hide under an instance's exact path. Guard 2's content check must
+# refuse it, and must refuse a valid-looking instance that smuggles a field.
+provoke "guard 2: payload under an instance JSON's name" \
+        'cp "'"$TMP"'/small.bin" "$STAGE/$INST_DIR/_alternatives/Escape from the Planet of the Robot Monsters (set 2).json"' refuse
+provoke "guard 2: instance JSON with an extra field" \
+        'printf "%s" "{\"instance\":{\"magic\":\"APF_VER_1\",\"data_slots\":[],\"memory_writes\":[{\"address\":0,\"data\":0}]}}" > "$STAGE/$INST_DIR/Escape from the Planet of the Robot Monsters (set 1).json"' refuse
+provoke "guard 2: an instance JSON gone missing" \
+        'rm -f "$STAGE/$INST_DIR/Escape from the Planet of the Robot Monsters (set 1).json"' refuse
 provoke "guard 3: oversized payload in Cores/" \
         'cp "'"$TMP"'/big.bin" "$STAGE/$CORE_DIR/tables.dat"' refuse
 provoke "guard 3: oversized payload in Platforms/" \

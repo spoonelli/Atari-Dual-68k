@@ -5,6 +5,8 @@
 #   Platforms/<platform_id>.json
 #   Platforms/_images/<platform_id>.bin
 #   Assets/<platform_id>/common/  (empty -- the user supplies their own ROM)
+#   Assets/<platform_id>/<author>.<shortname>/  instance JSONs, one per set
+#                                 (set 2 under _alternatives/, jotego's layout)
 #
 # Saves/<platform_id>/common/ is NOT packaged: the Pocket creates it itself the
 # first time the core writes its EEPROM (see docs/EEPROM_SAVE.md). Shipping a
@@ -30,6 +32,7 @@ test -f "$RBF" || { echo "!! bitstream not found: $RBF" >&2; exit 1; }
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
+INST_DIR="Assets/$PLATFORM/${AUTHOR}.${SHORT}"
 mkdir -p "$STAGE/$CORE_DIR" "$STAGE/Platforms/_images" "$STAGE/Assets/$PLATFORM/common"
 
 # core definition files (repo root, per the official core template).
@@ -51,28 +54,53 @@ cp "$REPO/dist/platforms/_images/$PLATFORM.bin" "$STAGE/Platforms/_images/"
 # not merged onto the SD by users following the folder-copy instructions.
 cp "$REPO/support/build_rom.py" "$STAGE/build_rom.py"
 
-# Assets dir ships EMPTY (plus a note) -- ROMs are user-supplied, never distributed
-cat > "$STAGE/Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" <<'EOF'
-Put your self-built atari_escape.rom in this folder, under exactly that name --
-data.json declares it as a required slot and the Pocket asks for that filename.
+# licence texts MUST accompany the binary: GPL-3.0 requires a copy of the
+# licence with conveyed object code, and psram.sv's MIT requires its notice
+# accompany all copies including binaries (NOTICE.md is the inventory that
+# points at each vendored header).
+cp "$REPO/LICENSE"   "$STAGE/LICENSE.txt"
+cp "$REPO/NOTICE.md" "$STAGE/NOTICE.md"
 
-Build it from your own verified dumps of the MAME 'eprom' set. The tool is
-included at the top level of this zip (and in the project source at
-support/build_rom.py):
+# POCKETSET-175: one instance JSON per romset. The Pocket's launch browser
+# lists these (set 2 inside _alternatives/, the jotego/MiSTer convention);
+# each names the ROM file in common/ and its own save file. INSTANCES is the
+# single source of truth for the copy and for guard 2.
+INSTANCES="Escape from the Planet of the Robot Monsters (set 1).json
+_alternatives/Escape from the Planet of the Robot Monsters (set 2).json"
+while IFS= read -r f; do
+    mkdir -p "$(dirname "$STAGE/$INST_DIR/$f")"
+    cp "$REPO/dist/instances/$f" "$STAGE/$INST_DIR/$f"
+done <<< "$INSTANCES"
+
+# Assets/common ships EMPTY (plus a note) -- ROMs are user-supplied, never distributed
+cat > "$STAGE/Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" <<'EOF'
+Put your self-built ROM image(s) in this folder, under exactly these names:
+
+  atari_escape.rom    Escape set 1 (MAME 'eprom')
+  atari_escape2.rom   Escape set 2 (MAME 'eprom2', optional)
+
+When you start the core, the Pocket lists the games: set 1 at the top, set 2
+inside the _alternatives folder. Each entry loads the matching file above.
+
+Build them from your own verified dumps. The tool is included at the top
+level of this zip (and in the project source at support/build_rom.py):
 
   python3 build_rom.py /path/to/eprom.zip
+  python3 build_rom.py /path/to/eprom2.zip
 
-It writes atari_escape.rom next to the script -- move that file into this
-folder, then copy the package's folders onto the SD card as usual.
+It detects the set and writes atari_escape.rom or atari_escape2.rom next to
+the script -- move the file(s) into this folder, then copy the package's
+folders onto the SD card as usual.
 
 Python 3 is the only requirement. Every chip is CRC32-checked against MAME's
 known-good values; a wrong or incomplete set is refused rather than half-built.
 See docs/ROMS.md. This project does not distribute ROMs.
 
-High scores and operator settings are saved automatically to
-  /Saves/eprom/common/atari_escape.sav
-The Pocket creates that file on its own -- nothing to install. Delete it to
-reset the machine to a factory-fresh EEPROM.
+High scores and operator settings are saved automatically, per set, to
+  /Saves/eprom/common/atari_escape.sav    (set 1)
+  /Saves/eprom/common/atari_escape2.sav   (set 2)
+The Pocket creates these on its own -- nothing to install. Delete one to
+reset that set to a factory-fresh EEPROM.
 EOF
 
 # ---------------------------------------------------------------- ROM guards
@@ -95,15 +123,37 @@ if find "$STAGE" -iname '*.rom' | grep -q .; then
     exit 1
 fi
 
-# Guard 2: the Assets tree ships EXACTLY the placeholder, whatever it is called.
-# This is where a ROM would land, and it is asserted by content, not by name.
+# Guard 2: the Assets tree ships EXACTLY the placeholder plus the instance
+# JSONs, whatever they are called. This is where a ROM would land, and it is
+# asserted by manifest AND content: each instance must parse as an APF
+# instance with only filename references (POCKETSET-175), so a renamed binary
+# cannot pass as one.
 ASSET_FILES="$(cd "$STAGE" && find "Assets" -type f | sort)"
-if [ "$ASSET_FILES" != "Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" ]; then
-    echo "!! REFUSING to package: Assets/ must contain only the ROM placeholder." >&2
-    echo "   found:" >&2
-    echo "$ASSET_FILES" | sed 's/^/     /' >&2
+ASSET_EXPECTED="$( { echo "Assets/$PLATFORM/common/PLACE_ROM_HERE.txt"
+                     while IFS= read -r f; do echo "$INST_DIR/$f"; done <<< "$INSTANCES"; } | sort )"
+if [ "$ASSET_FILES" != "$ASSET_EXPECTED" ]; then
+    echo "!! REFUSING to package: Assets/ must contain only the ROM placeholder" >&2
+    echo "   and the instance JSONs." >&2
+    diff <(printf '%s\n' "$ASSET_EXPECTED") <(printf '%s\n' "$ASSET_FILES") | sed 's/^/     /' >&2
     exit 1
 fi
+while IFS= read -r f; do
+    if ! python3 -I - "$STAGE/$INST_DIR/$f" <<'PYCHECK'
+import json, sys
+p = sys.argv[1]
+if len(open(p, "rb").read()) > 2048: sys.exit("too large for an instance JSON")
+j = json.load(open(p, encoding="ascii"))
+i = j["instance"]
+assert set(j) == {"instance"} and i["magic"] == "APF_VER_1"
+assert set(i) <= {"magic", "data_path", "data_slots"}
+for d in i["data_slots"]:
+    assert set(d) == {"id", "filename"} and d["filename"].endswith((".rom", ".sav"))
+PYCHECK
+    then
+        echo "!! REFUSING to package: $INST_DIR/$f is not a plain instance JSON." >&2
+        exit 1
+    fi
+done <<< "$INSTANCES"
 
 # Guard 3: nothing but the bitstream may be big. Catches ROM data smuggled in
 # under a non-.rom name (the platform image is the largest legitimate asset).
@@ -159,6 +209,6 @@ fi
 
 mkdir -p "$(dirname "$OUT")"
 rm -f "$OUT"
-( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets build_rom.py )
+( cd "$STAGE" && zip -qr "$OUT" Cores Platforms Assets build_rom.py LICENSE.txt NOTICE.md )
 echo "packaged: $OUT"
 unzip -l "$OUT"
