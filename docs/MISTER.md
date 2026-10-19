@@ -38,10 +38,12 @@ Plays on real hardware at **measured performance parity with the Analogue
 Pocket release**: identical crowd-scene scroll-velocity distributions
 (median 5.33 native px per 1/30 s), zero sub-half-speed dips where MAME's
 model dips in 19–28% of samples. Rare one-frame sprite-row
-flickers on the very heaviest scanlines: the original board shows sprite-row
-dropouts and tearing in crowds too (PCB capture), so how closely ours matches
-the board is a post-0.2 investigation ([checklist section H](RELEASE_CHECKLIST.md)),
-not a known defect. The machine RTL is shared
+flickers on the very heaviest scanlines: measured against the PCB capture
+(2026-10-19), the original board shows the same kind of one-frame sprite
+glitches in crowds — mostly tearing, where the game rewrites sprite RAM while
+the screen is drawn — and both cores show them on the same sprites at similar
+or lower rates. Not a known defect; the remaining questions are in
+[checklist section H](RELEASE_CHECKLIST.md). The machine RTL is shared
 verbatim with the Pocket build.
 
 ## Where to get it
