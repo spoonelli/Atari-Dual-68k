@@ -22,9 +22,9 @@ hidden in a footnote; if you are deciding whether to install it, read the
 
 ## 0.2 — MiSTer v0.2.0 (2026-10-19); Pocket 0.2 at release candidate
 
-**MiSTer v0.2.0** is release build 171 (2026-10-19, `Arcade-Escape_20261019.rbf`,
+**MiSTer v0.2.0** is release candidate build 172 (2026-10-19, `Arcade-Escape_20261019.rbf`,
 published by the official distribution as `Escape_20261019.rbf`), built from
-the release commit with the same RTL as test build 170. **Pocket 0.2 is not
+the release branch (fitter SEED 9; the 170 RTL plus Klax's second Flip button). **Pocket 0.2 is not
 released yet:** RC 1 (build 40) is with the owner for device testing. The
 sections after this one describe the v0.1.x core. Build numbers and work tags are different series (KLAX-165
 is in MiSTer 164, GUTS-166 in 165, GUTS-169 in 167, NVRAM-170 in 168,
@@ -57,7 +57,7 @@ come later, as separate packages from the same tree.
 | 167 | Guts special-sprite fix (GUTS-169); MRAs say `<rbf>Escape</rbf>`; rbf named `Escape_YYYYMMDD.rbf` |
 | 168 | High scores saved on MiSTer (NVRAM-170, MRA `<nvram index="4" size="512"/>`); fixes a clock-crossing bug that made 164–167 usually boot Klax and Guts as Escape; `jt6295` licence notice |
 | 172 | Klax **Flip (2nd)** (a second Flip button, KLAXFLIP2-178); Guts MRA button list fixed (Start/Coin/Pause had each landed one bit low since 166, MRABTN-177); Start hidden on Klax and Guts, which never read it (STARTHIDE-179); CI gates for MRA button lists and for both players' input mapping |
-| 171 | **Release build of MiSTer v0.2.0** — the 170 RTL, rebuilt from the release commit |
+| 171 | Release build of the 170 RTL — superseded by 172 before publishing |
 | 170 | Klax prototypes get one **Flip/Start** button (KLAXBTN-174: MAME declares four, the programs read only the first); Pause now freezes the whole sound board (6502, TMS5220, OKI), not only the YM2151 (PAUSE-174); NVRAM rows above Service Mode, the Cave order |
 | 169 | Arcade-Cave-style saving (NVRAM-171): "Autosave NVRAM" (default Off) and "Save NVRAM" in the OSD root menu, and *Save settings* also saves; file `config/nvram/<MRA name>.nvm`. Clone MRAs in the MiSTer family layout (ALT-172): set 1 and Guts at the top level, set 2 and both Klax prototypes under `_alternatives/` |
 
