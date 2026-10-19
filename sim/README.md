@@ -77,6 +77,7 @@ through `run_tb.sh`. **G** = in `run_all_gates.sh`; **i** = iverilog, **g** = GH
 | `run_tb.sh tb_escape_jshad 30ms` | g | 6502 boot through the jshad serve FSM; with `G_GAME`/`G_JSART`, OKI requests present for JSA-II and absent for JSA-I | 0.2 generics; see the note at the end |
 | `run_hps_bridge_tb.sh` | i | `escape_hps_bridge.v`: game-byte latch and EEPROM load/save across clk_ram→clk_sys (NVRAM-170); expects `HPS BRIDGE PASS` | **MiSTer only** — exists only on `milestone-0.2-mister`, where it is a CI gate |
 | `run_mister_pf_tb.sh` | i | playfield fetches served by the MiSTer arbiter through download, reset release and one frame | **MiSTer only** — exists only on `milestone-0.2-mister` |
+| `run_mister_inputs_tb.sh` | i | every pad control, both players, reaches its own player's input port with MAME's bits for Escape / Klax / Guts; sticks, analog channels, coins (INPUTS-180) | **MiSTer only** — exists only on `milestone-0.2-mister`; CI gate |
 | `run_mister_moarb_tb.sh` | i | MO vs fastpath arbitration on MiSTer, gated against hardware verdicts (MOARB-146/147) | **MiSTer only** — exists only on `milestone-0.2-mister` |
 
 Coverage gaps worth knowing: no bench exercises EPROM2-163's `v_img` remap (set 2's
