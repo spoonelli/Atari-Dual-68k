@@ -73,7 +73,12 @@ except two notes — Klax showed four buttons (fixed in 170), the canal-stage
 difference — set 1's HUD code has a canal-only branch that prints STAND BY;
 set 2 and the owner's board, an undumped revision closest to set 2, have no
 such branch; confirmed on MiSTer 170 with set 2). Pocket 37–40 are not yet
-device-tested.
+device-tested. The final MiSTer plan on release candidate 172
+(2026-10-19) passed M1–M7: Escape set 1 regression, Pause mid-music resume,
+Start hidden (the machine has none; Escape's self-test steps on Jump), set 2,
+Klax with both Flip buttons, Guts coin / start / pause (broken before 172),
+two players on all three games, and NVRAM persistence (Escape's coin audit
+survived a save).
 
 ThunderJaws remains future work; the research is in
 [`investigations/THUNDERJAWS.md`](investigations/THUNDERJAWS.md).
