@@ -12,7 +12,7 @@ A MiSTer (DE10-Nano) port of the
 implementing Atari Games' 1989 arcade release (MAME set `eprom`) and its
 `eprom2` clone, plus two unreleased Atari games that ran on the same board:
 the Klax prototypes (`klaxp1` / `klaxp2`) and Guts n' Glory (`guts`). One
-rbf serves all five; the prototypes are test items (see [Install](#install)).
+rbf serves all five (see [Install](#install)).
 This LLM-assisted build has been refined extensively through testing and benchmarking against an original dedicated cabinet and PCB, with architecture decisions defaulting to preserving original gameplay accuracy.  
 
 **Features:** 
@@ -38,12 +38,12 @@ screens; high scores and operator settings are saved to the SD card
 | Build (CI, Quartus in Docker) | ✅ per-push compile, timing summary, rbf artifact |
 | Native simulation (GHDL + iverilog, upstream) | ✅ boot, march, JSA, sprite-scene replay benches, plus MiSTer-specific gates: playfield fetch service, crowd-load arbiter bench with hardware-calibrated thresholds |
 | ROM loading (MRA + ioctl → SDRAM, sprite repack in RTL, BRAM shadows) | ✅ CRC-checked by the MRA; no ROM data distributed |
-| Games (one rbf, game byte in each MRA) | Escape set 1 ✅; set 2, both Klax prototypes and Guts n' Glory boot and play on the first device run (MiSTer 168), full test pending; the prototypes are test items |
+| Games (one rbf, game byte in each MRA) | ✅ all five: Escape sets 1 and 2, both Klax prototypes, Guts n' Glory (full device test plan passed on MiSTer 169; sets 1 and 2 re-checked on 170) |
 | Dual 68010s + shared RAM + mailbox handshake (Escape; the prototypes use one 68000) | ✅ genuinely concurrent on hardware |
 | SDRAM subsystem (open-row controller, bank-partitioned MO tile mirror, MO/CPU interleaved arbiter) | ✅ bench-gated; crowd performance measured at Pocket parity |
 | Video: alpha / playfield / motion objects, IRGB palette + intensity | ✅ pixel-verified vs MAME scene replay; the factory map's halftone follows the real board (matches the PCB capture on MiSTer 168), where MAME differs |
 | Sound, JSA-I (Escape: 6502 + YM2151 + TMS5220 speech) | ✅ full pipeline; liveness watchdog self-heals a wedged sound CPU |
-| Sound, JSA-II (prototypes: 6502 + YM2151 + OKI6295) | bench-proven on the real Klax/Guts firmware; first device run on MiSTer 168; full test pending |
+| Sound, JSA-II (prototypes: 6502 + YM2151 + OKI6295) | ✅ bench-proven on the real Klax/Guts firmware; device-tested on MiSTer 169 |
 | Inputs (buttons, hall-stick model, keyboard) | ✅ incl. in-game calibration screens; per-game button sets for the prototypes (new in 0.2) |
 | OSD (Video / Audio / Pause options / Debug pages; pause, rotate, CRT adjust) | ✅ build identity in the about line `ESCAPE v<date> by spoonelli` |
 | High scores / operator settings | ✅ saved per game to `config/nvram/` with Save NVRAM, Save settings, or Autosave NVRAM — see below (new in 0.2; earlier MiSTer builds did not save) |
@@ -131,8 +131,7 @@ The rbf, the MRAs and the `_alternatives/` folder are in
      `klax`). The official distribution's `_Klax` folder also holds the
      production Klax sets, served by a different core; each MRA names its
      own core, so they coexist.
-   The prototypes are **test items** until the full test plan passes (the
-   first device run, MiSTer 168, booted and played all five games); the
+   All five games passed the device test plan on MiSTer 169; the
    MRA tells the core which game it is loading (a one-byte
    index-1 block), so old Escape MRAs keep working unchanged.
 3. Put your own MAME romsets in `games/mame/`: `eprom.zip` (set 2 also
@@ -171,7 +170,7 @@ or the unanswered ones stay unmapped. Note the framework treats your
 global User/Menu button as "Undefine" inside this flow: assigning a
 core button to it silently clears the slot instead.
 
-**Prototypes (test items):** Klax has an 8-way stick and one button,
+**Prototypes:** Klax has an 8-way stick and one button,
 **Flip/Start**, which starts or joins a game and drops tiles (MAME lists
 four buttons, but the program only reads the first); Guts n' Glory uses the analogue stick and three buttons in
 MAME's order. Neither prototype has a Start switch on the board - they
