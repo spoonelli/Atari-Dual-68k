@@ -17,8 +17,13 @@
 	     here are in MAME's order. Start is the self-test step/continue
 	     switch, as on every game - the board has no Start switch, the game
 	     starts from a button. Coin goes through the sound board, as on
-	     Escape. Pause on the left shoulder as on the Escape MRA. -->
-	<buttons names="Button 1,Button 2,Button 3,Start,Coin,Pause" default="B,A,X,Start,Select,L"/>
+	     Escape. Pause on the left shoulder as on the Escape MRA.
+	     The names map onto the core's J1 positions in order (Jump, Fire,
+	     Duck, Bomb, Start, Coin, Pause = joystick bits 4..10), so the
+	     unused Bomb slot is a "-" placeholder (hidden from Define buttons).
+	     MRABTN-177: without it, Start, Coin and Pause each landed one bit
+	     low - Coin pressed Start and Pause inserted a coin. -->
+	<buttons names="Button 1,Button 2,Button 3,-,Start,Coin,Pause" default="B,A,X,Y,Start,Select,L"/>
 
 	<!--
 	  ROM STREAM LAYOUT (Guts n' Glory on Escape hardware, KLAX_GUTS.md)
