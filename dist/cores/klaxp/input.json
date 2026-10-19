@@ -1,0 +1,47 @@
+{
+    "input": {
+        "magic": "APF_VER_1",
+        "controllers": [
+            {
+                "type": "default",
+                "mappings": [
+                    {
+                        "id": 0,
+                        "name": "Flip / Start",
+                        "key": "pad_btn_a"
+                    },
+                    {
+                        "id": 1,
+                        "name": "Flip (2nd)",
+                        "key": "pad_btn_b"
+                    },
+                    {
+                        "id": 2,
+                        "name": "Coin",
+                        "key": "pad_btn_select"
+                    }
+                ]
+            },
+            {
+                "type": "default",
+                "mappings": [
+                    {
+                        "id": 0,
+                        "name": "Flip / Start",
+                        "key": "pad_btn_a"
+                    },
+                    {
+                        "id": 1,
+                        "name": "Flip (2nd)",
+                        "key": "pad_btn_b"
+                    },
+                    {
+                        "id": 2,
+                        "name": "Coin",
+                        "key": "pad_btn_select"
+                    }
+                ]
+            }
+        ]
+    }
+}

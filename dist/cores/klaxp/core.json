@@ -1,0 +1,36 @@
+{
+    "core": {
+        "magic": "APF_VER_1",
+        "metadata": {
+            "platform_ids": [
+                "klaxp"
+            ],
+            "shortname": "klaxp",
+            "description": "Atari's unreleased Klax prototypes on the 'Escape' hardware (68010, JSA-II sound with the OKI6295).",
+            "author": "spoonelli",
+            "url": "https://github.com/spoonelli/Atari-Dual-68k",
+            "version": "0.3.0",
+            "date_release": "2026-10-19"
+        },
+        "framework": {
+            "target_product": "Analogue Pocket",
+            "version_required": "1.1",
+            "sleep_supported": false,
+            "dock": {
+                "supported": true,
+                "analog_output": false
+            },
+            "hardware": {
+                "link_port": false,
+                "cartridge_adapter": -1
+            }
+        },
+        "cores": [
+            {
+                "name": "default",
+                "id": 0,
+                "filename": "bitstream.rbf_r"
+            }
+        ]
+    }
+}

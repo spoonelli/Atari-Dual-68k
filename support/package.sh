@@ -23,9 +23,18 @@ OUT="${2:-$REPO/output/AtariDual68k-pocket.zip}"
 case "$OUT" in /*) ;; *) OUT="$PWD/$OUT";; esac
 
 AUTHOR="spoonelli"
-SHORT="eprom"                    # release identity (A1): installs as Cores/spoonelli.eprom
-PLATFORM="eprom"                 # must match core.json platform_ids[0]
+# POCKETVAR-182: VARIANT picks the Pocket core: eprom (Escape, the default -
+# release identity A1, installs as Cores/spoonelli.eprom), klaxp (Klax
+# prototypes) or guts (Guts n' Glory). The bitstream must be the matching CI
+# variant build (build.yml 'variant' input).
+VARIANT="${VARIANT:-eprom}"
+case "$VARIANT" in eprom|klaxp|guts) ;; *) echo "!! unknown VARIANT '$VARIANT' (eprom|klaxp|guts)" >&2; exit 1;; esac
+SHORT="$VARIANT"
+PLATFORM="$VARIANT"              # must match core.json platform_ids[0]
 CORE_DIR="Cores/${AUTHOR}.${SHORT}"
+# Escape's definition files live at the repo root (the official core template);
+# the other cores' under dist/cores/<short>/.
+if [ "$VARIANT" = eprom ]; then DEFDIR="$REPO"; else DEFDIR="$REPO/dist/cores/$SHORT"; fi
 
 test -f "$RBF" || { echo "!! bitstream not found: $RBF" >&2; exit 1; }
 
@@ -40,7 +49,7 @@ mkdir -p "$STAGE/$CORE_DIR" "$STAGE/Platforms/_images" "$STAGE/Assets/$PLATFORM/
 # guard 4 below, so the two can never drift apart.
 CORE_FILES="core.json audio.json data.json input.json interact.json variants.json video.json info.txt"
 for f in $CORE_FILES; do
-    cp "$REPO/$f" "$STAGE/$CORE_DIR/"
+    cp "$DEFDIR/$f" "$STAGE/$CORE_DIR/"
 done
 cp "$REPO/dist/icon.bin" "$STAGE/$CORE_DIR/"
 cp "$RBF" "$STAGE/$CORE_DIR/bitstream.rbf_r"
@@ -65,14 +74,23 @@ cp "$REPO/NOTICE.md" "$STAGE/NOTICE.md"
 # lists these (set 2 inside _alternatives/, the jotego/MiSTer convention);
 # each names the ROM file in common/ and its own save file. INSTANCES is the
 # single source of truth for the copy and for guard 2.
-INSTANCES="Escape from the Planet of the Robot Monsters (set 1).json
-_alternatives/Escape from the Planet of the Robot Monsters (set 2).json"
+case "$VARIANT" in
+  eprom) INST_SRC="$REPO/dist/instances"
+         INSTANCES="Escape from the Planet of the Robot Monsters (set 1).json
+_alternatives/Escape from the Planet of the Robot Monsters (set 2).json" ;;
+  klaxp) INST_SRC="$REPO/dist/instances/klaxp"
+         INSTANCES="Klax (prototype set 1).json
+_alternatives/Klax (prototype set 2).json" ;;
+  guts)  INST_SRC="$REPO/dist/instances/guts"
+         INSTANCES="Guts n' Glory (prototype).json" ;;
+esac
 while IFS= read -r f; do
     mkdir -p "$(dirname "$STAGE/$INST_DIR/$f")"
-    cp "$REPO/dist/instances/$f" "$STAGE/$INST_DIR/$f"
+    cp "$INST_SRC/$f" "$STAGE/$INST_DIR/$f"
 done <<< "$INSTANCES"
 
 # Assets/common ships EMPTY (plus a note) -- ROMs are user-supplied, never distributed
+if [ "$VARIANT" = eprom ]; then
 cat > "$STAGE/Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" <<'EOF'
 Put your self-built ROM image(s) in this folder, under exactly these names:
 
@@ -107,6 +125,48 @@ High scores and operator settings are saved automatically, per set, to
 The Pocket creates these on its own -- nothing to install. Delete one to
 reset that set to a factory-fresh EEPROM.
 EOF
+elif [ "$VARIANT" = klaxp ]; then
+cat > "$STAGE/Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" <<'EOF'
+Put your self-built ROM image(s) in this folder, under exactly these names:
+
+  klaxp1.rom   Klax (prototype set 1)   (MAME 'klaxp1')
+  klaxp2.rom   Klax (prototype set 2)   (MAME 'klaxp2', optional)
+
+When you start the core, the Pocket lists the sets: set 1 at the top, set 2
+inside the _alternatives folder. Each entry loads the matching file above.
+
+Build them from your own verified dumps with the tool at the top level of
+this zip (also support/build_rom.py in the project source):
+
+  python3 build_rom.py /path/to/klax.zip --set klaxp1
+  python3 build_rom.py /path/to/klax.zip --set klaxp2
+
+(a merged klax.zip holds both prototypes in klaxp1/ and klaxp2/ subfolders;
+a split klaxp1.zip borrows the shared chips from klax.zip next to it). Every
+chip is CRC32-checked; a wrong or incomplete set is refused. This project does
+not distribute ROMs.
+
+High scores and settings save per set to /Saves/klaxp/common/klaxp1.sav and
+klaxp2.sav - the Pocket creates them.
+EOF
+else
+cat > "$STAGE/Assets/$PLATFORM/common/PLACE_ROM_HERE.txt" <<'EOF'
+Put your self-built ROM image in this folder, under exactly this name:
+
+  guts.rom   Guts n' Glory (prototype)   (MAME 'guts')
+
+Build it from your own verified dumps with the tool at the top level of this
+zip (also support/build_rom.py in the project source):
+
+  python3 build_rom.py /path/to/guts.zip
+
+Every chip is CRC32-checked; a wrong or incomplete set is refused. This
+project does not distribute ROMs.
+
+High scores and settings save to /Saves/guts/common/guts.sav - the Pocket
+creates it.
+EOF
+fi
 
 # ---------------------------------------------------------------- ROM guards
 # The project rule is absolute: no ROM data in any package, ever. These four
@@ -197,7 +257,11 @@ fi
 # would package silently. This pins it by hash instead. If you are legitimately
 # changing the placeholder art, update PLACEHOLDER_SHA256 in the same commit -
 # that edit is the point at which someone has to think about what is shipping.
-PLACEHOLDER_SHA256="4733b92befd0a72b16716c03144f6225dc36346fcb7500e6efb7bf0b8a9040ec"
+case "$PLATFORM" in   # POCKETVAR-182: one original text placeholder per platform
+  eprom) PLACEHOLDER_SHA256="4733b92befd0a72b16716c03144f6225dc36346fcb7500e6efb7bf0b8a9040ec" ;;
+  klaxp) PLACEHOLDER_SHA256="abc6f9703d18dda27a7bc2ad81190f61a4ec73294b0748392570e0e9e8d5b104" ;;
+  guts)  PLACEHOLDER_SHA256="b683016f51b14abe2509631db16a132390dd4f2fde883560235f7a79835906ef" ;;
+esac
 IMG="$STAGE/Platforms/_images/$PLATFORM.bin"
 IMG_SHA="$(shasum -a 256 < "$IMG" | cut -d' ' -f1)"
 if [ "$IMG_SHA" != "$PLACEHOLDER_SHA256" ]; then

@@ -1,0 +1,16 @@
+{
+    "instance": {
+        "magic": "APF_VER_1",
+        "data_path": "",
+        "data_slots": [
+            {
+                "id": 1,
+                "filename": "klaxp1.rom"
+            },
+            {
+                "id": 2,
+                "filename": "klaxp1.sav"
+            }
+        ]
+    }
+}
