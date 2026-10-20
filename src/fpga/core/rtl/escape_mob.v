@@ -649,13 +649,22 @@ module escape_mob (
         // measured 85 such lines per frame with dbg_trunc reading ZERO: this
         // was the dropout mechanism, invisible to the old counter. Count a
         // line trigger only when UNCONSUMED entries remain - the scout still
-        // walking the list, or matched entries parked unblitted. A walk merely
-        // finishing its final stamp has drawn everything it was asked to and
-        // is not a truncation.
+        // walking the list, or matched entries parked unblitted.
+        // MOTEL-191: ...or the blitter still mid-sprite. The old comment said
+        // a walk finishing its final stamp "has drawn everything it was asked
+        // to" - not if the trigger lands before that stamp's tile rows arrive:
+        // list walked, queue empty, but the last sprite only partly drawn. The
+        // Klax replay bench (19 MAME scenes, GFX_LAT 28-31) lost up to 128 px
+        // a frame exactly that way with dbg_trunc reading 0. A finished build
+        // sits in S_IDLE (S_NEXT exits there once the scout is done); S_CLEAR /
+        // S_SLIP* only exist in the first cycles after a trigger, and S_NEXT
+        // with work left is already covered by the first two terms.
         // LASTROW-190: shares line_trig with the swap, so the row-239 build -
         // shown on screen now - is counted when it is cut, like every other row.
         if(line_trig
-           && (q_cnt != 3'd0 || (sstate != SC_DONE && sstate != SC_IDLE))
+           && (q_cnt != 3'd0 || (sstate != SC_DONE && sstate != SC_IDLE)
+               || (state != S_IDLE && state != S_NEXT && state != S_CLEAR
+                   && state != S_SLIP0 && state != S_SLIP1))
            && tel_trunc != 8'hFF)
             tel_trunc <= tel_trunc + 8'd1;
     end

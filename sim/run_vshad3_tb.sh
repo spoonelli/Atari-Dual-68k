@@ -77,7 +77,9 @@ check() {
     # "Served by neither": the fastpath suppressed AND the BRAM not read, so
     # every fetch waits out the 16-clock watchdog. This is the specific silent
     # bug the three decodes exist to avoid, so trip on it by name.
-    if [ "$got" -ge 6000 ]; then
+    # (Skipped for a row that EXPECTS >= 6.000 - the SHADFAST-187 control row
+    # runs the fastpath slowed to 8 on purpose and should read 11.015.)
+    if [ "$want" -lt 6000 ] && [ "$got" -ge 6000 ]; then
         echo "    FAIL: ${got} (x1000) clocks per bus cycle. >=6.000 is the"
         echo "          SERVED-BY-NEITHER signature: v_shad_rng and v_sel_shad3"
         echo "          disagree about this range, so the fastpath is suppressed"
