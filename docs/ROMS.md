@@ -17,11 +17,11 @@ python3 support/build_rom.py /path/to/eprom.zip ./atari_escape.rom
 ```
 
 Both forms produce a byte-identical image, and every MAME set type works
-(BUILDROM-176): non-merged; split, where a clone zip such as `eprom2.zip`
+(BUILDROM-176/184): non-merged; split, where a clone zip such as `eprom2.zip`
 borrows the shared chips from `eprom.zip` beside it; and merged, where
-`eprom.zip` carries set 2 in an `eprom2/` subfolder — that builds set 1 by
-default and set 2 with `--set eprom2` (the tool prints a note naming the other
-sets it found). With no arguments it looks for an
+`eprom.zip` carries set 2 in an `eprom2/` subfolder. With no `--set` the tool
+builds every supported set it finds (a merged `eprom.zip` gives both
+`atari_escape.rom` and `atari_escape2.rom`); `--set eprom2` builds just one. With no arguments it looks for an
 `eprom` folder next to the repository and writes the image next to the script
 itself, named for the set it detects: `atari_escape.rom` (set 1),
 `atari_escape2.rom` (set 2), or `<setname>.rom` for the prototypes; pass both
@@ -98,14 +98,16 @@ fixed too. Full SD layout and the on-device test procedure are in
 Each is its own core with its own platform folder (POCKETVAR-182):
 
 ```
-/Assets/klaxp/common/klaxp1.rom      python3 build_rom.py <klax set> --set klaxp1
-/Assets/klaxp/common/klaxp2.rom      python3 build_rom.py <klax set> --set klaxp2   (optional)
+/Assets/klaxp/common/klaxp1.rom   \  python3 build_rom.py <klax set>   (builds both;
+/Assets/klaxp/common/klaxp2.rom   /                                  --set picks one)
 /Assets/guts/common/guts.rom         python3 build_rom.py <guts set>
 ```
 
 `<klax set>` can be a merged `klax.zip` / `klax` folder (the prototypes in
-`klaxp1/` and `klaxp2/` subfolders) or a split `klaxp1.zip` next to
-`klax.zip`. The Klax core lists set 1 at launch, set 2 inside
+`klaxp1/` and `klaxp2/` subfolders; the shared chips live only under
+`klaxp1/`, which the tool finds by CRC — BUILDROM-184) or split `klaxp1.zip` /
+`klaxp2.zip` next to `klax.zip`. With no `--set` the tool builds every
+supported set it finds, each under its own name. The Klax core lists set 1 at launch, set 2 inside
 `_alternatives`; saves are per set (`/Saves/klaxp/common/klaxp1.sav`,
 `klaxp2.sav`; `/Saves/guts/common/guts.sav`).
 

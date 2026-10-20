@@ -103,13 +103,11 @@ inside the _alternatives folder. Each entry loads the matching file above.
 Build them from your own verified dumps. The tool is included at the top
 level of this zip (and in the project source at support/build_rom.py):
 
-  python3 build_rom.py /path/to/eprom.zip
-  python3 build_rom.py /path/to/eprom2.zip
-  python3 build_rom.py /path/to/eprom.zip --set eprom2   (merged set)
+  python3 build_rom.py /path/to/eprom.zip      (a merged set builds BOTH images)
+  python3 build_rom.py /path/to/eprom2.zip     (a split set 2 borrows from eprom.zip beside it)
 
-Non-merged, split and merged MAME sets all work: a split eprom2.zip borrows
-the shared chips from eprom.zip next to it; a merged eprom.zip builds set 1,
-or set 2 with --set eprom2.
+With no --set the tool builds every set it finds; --set eprom or --set
+eprom2 builds just one. Non-merged, split and merged MAME sets all work.
 
 It detects the set and writes atari_escape.rom or atari_escape2.rom next to
 the script -- move the file(s) into this folder, then copy the package's
@@ -138,11 +136,11 @@ inside the _alternatives folder. Each entry loads the matching file above.
 Build them from your own verified dumps with the tool at the top level of
 this zip (also support/build_rom.py in the project source):
 
-  python3 build_rom.py /path/to/klax.zip --set klaxp1
-  python3 build_rom.py /path/to/klax.zip --set klaxp2
+  python3 build_rom.py /path/to/klax.zip      (builds BOTH klaxp1.rom and klaxp2.rom)
 
-(a merged klax.zip holds both prototypes in klaxp1/ and klaxp2/ subfolders;
-a split klaxp1.zip borrows the shared chips from klax.zip next to it). Every
+A merged klax.zip holds both prototypes in klaxp1/ and klaxp2/ subfolders;
+split klaxp1.zip / klaxp2.zip borrow the shared chips from klax.zip next to
+them. --set klaxp1 or --set klaxp2 builds just one. Every
 chip is CRC32-checked; a wrong or incomplete set is refused. This project does
 not distribute ROMs.
 

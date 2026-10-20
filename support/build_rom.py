@@ -26,8 +26,9 @@ Combined image layout (SDRAM byte offsets):
 
 Usage: build_rom.py [romset_dir_or_zip] [out_file] [--set NAME]
   Accepts non-merged, split and merged MAME sets, as zips or folders.
-  A merged zip (clone chips in a subfolder, e.g. eprom.zip with eprom2/)
-  builds the parent set unless --set names the clone (--set eprom2); a split
+  With no --set it builds EVERY supported set it finds, each under its own
+  name: a merged eprom.zip gives atari_escape.rom and atari_escape2.rom, a
+  merged klax.zip klaxp1.rom and klaxp2.rom. --set picks one; a split
   clone zip (eprom2.zip holding only its own chips) borrows the shared chips
   from the parent zip next to it (eprom.zip). Folders work the same way: a
   clone folder borrows from its parent folder, and --set picks a clone
@@ -87,11 +88,25 @@ CHARS_NAMES = ("136069-1007.125d", "136069.125d", "klax125d")   # one chip, thre
 ALIAS = {n: [m for m in CHARS_NAMES if m != n] for n in CHARS_NAMES}
 
 def _zfind(name):
-    """(zipfile, member) for the first source holding name or an alias."""
+    """(zipfile, member) for the first source holding name or an alias - by
+    name in the expected folders first, then (BUILDROM-184) by CRC anywhere in
+    any source zip. A MERGED MAME zip stores a chip shared by two clones only
+    once, in one clone's subfolder: klax.zip keeps the prototypes' sound,
+    ADPCM, sprite and char chips under klaxp1/ and klaxp2/ holds only its two
+    program chips. MiSTer's loader matches parts by CRC for the same reason."""
     for cand in [name] + ALIAS.get(name, []):
         for z, pre in SOURCES:
             if pre + cand in z.namelist():
                 return z, pre + cand
+    want = {int(CRCS[c], 16) for c in [name] + ALIAS.get(name, []) if c in CRCS}
+    seen = set()
+    for z, _ in SOURCES:
+        if id(z) in seen:
+            continue
+        seen.add(id(z))
+        for info in z.infolist():
+            if not info.is_dir() and info.CRC in want:
+                return z, info.filename
     return None
 
 def rd(romdir, name, size=0x10000):
@@ -100,7 +115,12 @@ def rd(romdir, name, size=0x10000):
         name = hit[1].rsplit("/", 1)[-1]
     if _zip is None:
         cands = [name] + ALIAS.get(name, [])
-        dirs = [romdir, os.path.dirname(os.path.abspath(romdir)), os.path.join(os.path.dirname(os.path.abspath(romdir)), "eprom")]
+        up = os.path.dirname(os.path.abspath(romdir))
+        dirs = [romdir, up, os.path.join(up, "eprom")]
+        # BUILDROM-184: a merged FOLDER keeps shared clone chips in a sibling
+        # clone's subfolder (klax/klaxp2 borrows from klax/klaxp1)
+        dirs += sorted(os.path.join(up, d) for d in os.listdir(up)
+                       if os.path.isdir(os.path.join(up, d)) and os.path.join(up, d) != os.path.abspath(romdir))
         found = next((os.path.join(d, c) for d in dirs for c in cands if os.path.exists(os.path.join(d, c))), None)
         if found:
             name = os.path.basename(found); romdir = os.path.dirname(found)
@@ -207,76 +227,54 @@ def repack_planar(romdir, names):
             chunky[i*4 + half] = (p0 << 4) | p1
     return chunky
 
-def main() -> int:
-    here = os.path.dirname(os.path.abspath(__file__))
-    repo = os.path.abspath(os.path.join(here, ".."))
-    args = sys.argv[1:]
-    want = None
-    if "--set" in args:
-        k = args.index("--set")
-        if k + 1 >= len(args):
-            raise SystemExit("--set needs a set name: eprom, eprom2, klaxp1, klaxp2 or guts")
-        want = args[k + 1]
-        del args[k:k + 2]
-        if want not in SETS:
-            raise SystemExit(f"unknown set {want!r}: expected one of " + ", ".join(SETS))
-    romdir = args[0] if len(args) > 0 else os.path.abspath(os.path.join(repo, "..", "eprom"))
-    global _zip
-    if romdir.lower().endswith(".zip"):
-        if not os.path.isfile(romdir):
-            raise SystemExit(f"no such file: {romdir}")
-        try:
-            _zip = zipfile.ZipFile(romdir)
-        except zipfile.BadZipFile:
-            raise SystemExit(f"not a zip file: {romdir}")
-        if want and any(n.startswith(want + "/") for n in _zip.namelist()):
-            SOURCES.append((_zip, want + "/"))          # merged zip: the clone's subfolder first
-        SOURCES.append((_zip, ""))
-        stem = os.path.splitext(os.path.basename(romdir))[0].lower()
-        parent = PARENT.get(want or stem)
-        ppath = os.path.join(os.path.dirname(os.path.abspath(romdir)), f"{parent}.zip") if parent else None
-        if ppath and os.path.isfile(ppath) and os.path.abspath(ppath) != os.path.abspath(romdir):
-            SOURCES.append((zipfile.ZipFile(ppath), ""))   # split clone zip: shared chips from the parent
-    elif not os.path.isdir(romdir):
-        raise SystemExit(f"no such romset directory: {romdir}\n"
-                         f"pass a folder of 136069-* chip dumps, or a MAME eprom.zip")
-    elif want and os.path.isdir(os.path.join(romdir, want)):
-        romdir = os.path.join(romdir, want)            # parent folder holding the clone's subfolder
+DETECT = [("136069-3025.50a", "eprom"), ("136069-1025.50a", "eprom2"),
+          ("klax_ft1.50a", "klaxp1"), ("klax_ft2.50a", "klaxp2"), ("guts-hi0.50a", "guts")]
+DESC = {"eprom": "Escape set 1, rev 3/4 program", "eprom2": "Escape set 2, rev 1 program + 0x80000 window",
+        "klaxp1": "Klax prototype set 1 - the spoonelli.klaxp Pocket core",
+        "klaxp2": "Klax prototype set 2 - the spoonelli.klaxp Pocket core",
+        "guts":   "Guts n' Glory prototype - the spoonelli.guts Pocket core"}
+# POCKETSET-175: the default name follows the set, matching the Pocket
+# instance JSONs (set 1 keeps the original name, so existing SD cards work)
+DEFNAME = {"eprom": "atari_escape.rom", "eprom2": "atari_escape2.rom"}
 
-    def present(name):
-        # detection looks only in the file the user named (a merged zip's
-        # subfolder included); a split clone's parent zip only supplies chips
-        if _zip is not None:
-            return any(pre + name in z.namelist() for z, pre in SOURCES if z is _zip)
-        return os.path.exists(os.path.join(romdir, name))
-    DETECT = [("136069-3025.50a", "eprom"), ("136069-1025.50a", "eprom2"),
-              ("klax_ft1.50a", "klaxp1"), ("klax_ft2.50a", "klaxp2"), ("guts-hi0.50a", "guts")]
-    if want:
-        chip = next(c for c, n in DETECT if n == want)
-        if not present(chip):
-            raise SystemExit(f"set {want} not found in {romdir} (no {chip})")
-        setname = want
+def find_sets(romdir):
+    """BUILDROM-184: every supported set in a zip or folder, as (set, where):
+    at the top level, or in a subfolder named after it (merged MAME sets keep
+    clones there). 'where' is a member prefix for a zip, a directory otherwise."""
+    found = {}
+    if _zip is not None:
+        names = set(_zip.namelist())
+        places = [""] + sorted({n.split("/", 1)[0] + "/" for n in names if "/" in n})
+        for pre in places:
+            for chip, setname in DETECT:
+                if pre + chip in names:
+                    found.setdefault(setname, pre)
     else:
-        setname = next((n for chip, n in DETECT if present(chip)), None)
-    if setname is None:
-        raise SystemExit("no supported set found in " + romdir + ": expected one of "
-                         + ", ".join(c for c, _ in DETECT))
-    if _zip is not None and not want:
-        clones = sorted({n.split("/", 1)[0] for n in _zip.namelist() if "/" in n} & set(SETS))
-        if clones:
-            print(f"note: this merged zip also holds {', '.join(clones)}; build it with --set "
-                  + clones[0])
+        places = [romdir] + sorted(os.path.join(romdir, d) for d in os.listdir(romdir)
+                                   if os.path.isdir(os.path.join(romdir, d)))
+        for d in places:
+            for chip, setname in DETECT:
+                if os.path.exists(os.path.join(d, chip)):
+                    found.setdefault(setname, d)
+    return [(n, found[n]) for _, n in DETECT if n in found]
+
+def build_set(setname, where, zip_path, out):
+    global SOURCES
+    SOURCES = []
+    if _zip is not None:
+        if where:
+            SOURCES.append((_zip, where))          # the set's own subfolder first
+        SOURCES.append((_zip, ""))
+        stem = os.path.splitext(os.path.basename(zip_path))[0].lower()
+        parent = PARENT.get(setname) if not where and stem == setname else None
+        ppath = os.path.join(os.path.dirname(os.path.abspath(zip_path)), f"{parent}.zip") if parent else None
+        if ppath and os.path.isfile(ppath) and os.path.abspath(ppath) != os.path.abspath(zip_path):
+            SOURCES.append((zipfile.ZipFile(ppath), ""))   # split clone zip: shared chips from the parent
+        romdir = zip_path
+    else:
+        romdir = where
     T = SETS[setname]
-    # POCKETSET-175: the default name follows the set, matching the Pocket
-    # instance JSONs (set 1 keeps the original name, so existing SD cards work)
-    DEFNAME = {"eprom": "atari_escape.rom", "eprom2": "atari_escape2.rom"}.get(setname, setname + ".rom")
-    out = args[1] if len(args) > 1 else os.path.join(here, DEFNAME)   # BUILDROM-181: args, not sys.argv (--set was taken as the out name)
-    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     img = bytearray(T["SIZE"])
-    DESC = {"eprom": "Escape set 1, rev 3/4 program", "eprom2": "Escape set 2, rev 1 program + 0x80000 window",
-            "klaxp1": "Klax prototype set 1 - needs the single-CPU JSA-II core build (EXTRA_EN=0, JSA_BOARD=2)",
-            "klaxp2": "Klax prototype set 2 - needs the single-CPU JSA-II core build (EXTRA_EN=0, JSA_BOARD=2)",
-            "guts":   "Guts n' Glory prototype - needs the Guts core build (single CPU, JSA-II, FFxxxx video map)"}
     print(f"romset: {setname} ({DESC[setname]})")
 
     # maincpu @0x000000
@@ -309,11 +307,59 @@ def main() -> int:
     if T["TILES"]:
         chunky = repack_planar(romdir, T["TILES"]); img[0x280000:0x280000+len(chunky)] = chunky
 
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "wb") as f:
         f.write(img)
     print(f"wrote {out}: {len(img)} bytes (0x{len(img):X})")
     print("  0x000000 maincpu | 0x080000 extra | 0x100000 jsa6502 | 0x110000 chars | 0x120000 sprites"
           + (" | 0x240000 adpcm" if T["OKI"] else "") + (" | 0x280000 tiles" if T["TILES"] else ""))
+
+def main() -> int:
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo = os.path.abspath(os.path.join(here, ".."))
+    args = sys.argv[1:]
+    want = None
+    if "--set" in args:
+        k = args.index("--set")
+        if k + 1 >= len(args):
+            raise SystemExit("--set needs a set name: eprom, eprom2, klaxp1, klaxp2 or guts")
+        want = args[k + 1]
+        del args[k:k + 2]
+        if want not in SETS:
+            raise SystemExit(f"unknown set {want!r}: expected one of " + ", ".join(SETS))
+    romdir = args[0] if len(args) > 0 else os.path.abspath(os.path.join(repo, "..", "eprom"))
+    out = args[1] if len(args) > 1 else None          # BUILDROM-181: args, not sys.argv
+    global _zip
+    if romdir.lower().endswith(".zip"):
+        if not os.path.isfile(romdir):
+            raise SystemExit(f"no such file: {romdir}")
+        try:
+            _zip = zipfile.ZipFile(romdir)
+        except zipfile.BadZipFile:
+            raise SystemExit(f"not a zip file: {romdir}")
+    elif not os.path.isdir(romdir):
+        raise SystemExit(f"no such romset directory: {romdir}\n"
+                         f"pass a folder of chip dumps, or a MAME zip (eprom, eprom2, klax, klaxp1, klaxp2, guts)")
+
+    sets = find_sets(romdir)
+    if want:
+        sets = [s for s in sets if s[0] == want]
+        if not sets:
+            chip = next(c for c, n in DETECT if n == want)
+            raise SystemExit(f"set {want} not found in {romdir} (no {chip})")
+    if not sets:
+        raise SystemExit("no supported set found in " + romdir + ": expected one of "
+                         + ", ".join(c for c, _ in DETECT))
+    # BUILDROM-184: no --set = build EVERY supported set found (a merged
+    # eprom.zip gives both Escape images, klax.zip both Klax prototypes)
+    if out and len(sets) > 1:
+        raise SystemExit(f"{romdir} holds {', '.join(n for n, _ in sets)}: name the set with --set "
+                         "when you give an output file, or leave the output name out to build them all")
+    if len(sets) > 1:
+        print(f"building {len(sets)} sets: {', '.join(n for n, _ in sets)}")
+    for setname, where in sets:
+        dest = out or os.path.join(here, DEFNAME.get(setname, setname + ".rom"))
+        build_set(setname, where, romdir, dest)
     return 0
 
 if __name__ == "__main__":
