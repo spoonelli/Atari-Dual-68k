@@ -1313,22 +1313,35 @@ psram #(.CLOCK_SPEED(42.954546)) cram0 (
     //   EXTRA_EN   second 68000 (Escape only)
     //   JSA_BOARD  1 = JSA-I (YM2151 + TMS5220), 2 = JSA-II (YM2151 + OKI6295)
     //   VIDEO_MAP  1 = Guts' FFxxxx video block
-    //   VSHAD3_EN  Escape's half ROM shadow at 0x54000 (outside the
-    //              prototypes' 128 / 256 KB main programs: pure M10K cost)
+    //   VSHAD3_EN  third 16 KB ROM shadow (Escape: the half shadow at 0x54000)
+    //   VSHADn_BASE  SHADBASE-185: where the video CPU's three zero-wait ROM
+    //              shadows (16 KB / 32 KB / 16 KB) sit. Escape's windows cover
+    //              only 12% of Klax's and 8% of Guts' program reads (MAME read
+    //              profile, attract + play), so on build 42 nearly every
+    //              prototype fetch went to SDRAM and starved the motion-object
+    //              fetches (missing sprites on Klax). These windows cover
+    //              98.8% (Klax: 0x04000 / 0x08000 / 0x10000) and 92.2% (Guts:
+    //              0x20000 / 0x00000 / 0x3C000; 0x6800 alone is 77%).
     //   PF_TILE_BASE  Guts has its own 1 MB playfield tile ROM at 0x280000
 `ifdef GAME_GUTS
     localparam [1:0]  GAME_SEL     = 2'b10;
     localparam        EXTRA_EN     = 0;
     localparam        JSA_BOARD    = 2;
     localparam        VIDEO_MAP    = 1;
-    localparam        VSHAD3_EN    = 0;
+    localparam        VSHAD3_EN    = 1;
+    localparam        VSHAD1_BASE  = 32'h20000;
+    localparam        VSHAD2_BASE  = 32'h00000;
+    localparam        VSHAD3_BASE  = 32'h3C000;
     localparam [23:0] PF_TILE_BASE = 24'h280000;
 `elsif GAME_KLAX
     localparam [1:0]  GAME_SEL     = 2'b01;
     localparam        EXTRA_EN     = 0;
     localparam        JSA_BOARD    = 2;
     localparam        VIDEO_MAP    = 0;
-    localparam        VSHAD3_EN    = 0;
+    localparam        VSHAD3_EN    = 1;
+    localparam        VSHAD1_BASE  = 32'h04000;
+    localparam        VSHAD2_BASE  = 32'h08000;
+    localparam        VSHAD3_BASE  = 32'h10000;
     localparam [23:0] PF_TILE_BASE = 24'h120000;
 `else
     localparam [1:0]  GAME_SEL     = 2'b00;
@@ -1336,6 +1349,9 @@ psram #(.CLOCK_SPEED(42.954546)) cram0 (
     localparam        JSA_BOARD    = 1;
     localparam        VIDEO_MAP    = 0;
     localparam        VSHAD3_EN    = 1;
+    localparam        VSHAD1_BASE  = 32'h00000;
+    localparam        VSHAD2_BASE  = 32'h48000;
+    localparam        VSHAD3_BASE  = 32'h54000;
     localparam [23:0] PF_TILE_BASE = 24'h120000;
 `endif
     wire [23:0] fpv_addr_w, fpe_addr_w;      // escape_core exports (7.159 dom)
@@ -2488,7 +2504,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // and [3:0] (ver slots 2 and 3; slot 1 sits under the chk2 bit row).
     // Write the build number as hex digits: build 41 = 16'h0041. NOT ASCII -
     // 16'h3431 shows '31' (the v0.2.0 release candidate did exactly that).
-    localparam [15:0] BUILD_ID = 16'h0042;   // POCKETVAR-182 test builds (Klax / Guts Pocket cores) - screen shows '42' (41 = Pocket v0.2.0 release)
+    localparam [15:0] BUILD_ID = 16'h0043;   // SHADBASE-185 test build (Klax / Guts per-game ROM shadows) - screen shows '43' (41 = Pocket v0.2.0 release)
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
@@ -2992,6 +3008,9 @@ wire [3:0] p1_btn_sel = (GAME_SEL == 2'b01) ? p1_btn_klx : (GAME_SEL == 2'b10) ?
 wire [3:0] p2_btn_sel = (GAME_SEL == 2'b01) ? p2_btn_klx : (GAME_SEL == 2'b10) ? p2_btn_gut : p2_btn_esc;
 escape_core #(.PAR4_EN(1), .FASTPATH_EN(FASTPATH_EN), .EIRQ_MODE(0),
               .VSHAD3_EN(VSHAD3_EN),
+              .VSHAD1_BASE(VSHAD1_BASE),
+              .VSHAD2_BASE(VSHAD2_BASE),
+              .VSHAD3_BASE(VSHAD3_BASE),
               .EXTRA_EN(EXTRA_EN), .JSA_BOARD(JSA_BOARD), .VIDEO_MAP(VIDEO_MAP),
               .CPU_TYPE(CPU_TYPE),
               .TASLOCK_EN(TASLOCK_EN)) ecore (

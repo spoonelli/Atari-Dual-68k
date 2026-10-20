@@ -47,6 +47,17 @@ entity escape_core is
         -- decode only - it does not remove the BRAM.
         -- sim/run_busrate.sh measures the per-fetch clock cost of both paths.
         VSHAD3_EN : integer := 1;
+        -- SHADBASE-185: base addresses of the video CPU's three ROM shadows,
+        -- in bytes. Defaults are Escape's measured hot spots (unchanged):
+        -- shadow 1 = 16 KB at 0x00000, shadow 2 = 32 KB at 0x48000, shadow 3 =
+        -- 16 KB at 0x54000. Each must be aligned to its own size and below
+        -- 0x80000 (the video CPU's identity-mapped program space). The Klax
+        -- and Guts Pocket cores move them onto their own hot code (MAME
+        -- read profile); with Escape's windows nearly every prototype fetch
+        -- went to SDRAM and starved the motion-object fetches.
+        VSHAD1_BASE : integer := 16#00000#;
+        VSHAD2_BASE : integer := 16#48000#;
+        VSHAD3_BASE : integer := 16#54000#;
         -- SDSCHED-81: 1 = per-byte parity on the ROM CDC (rom_par4 valid).
         -- The legacy single bit passes any 2-bit error - and a passed error
         -- is EXECUTED. Per-byte detection feeds the existing retry path.
@@ -535,6 +546,10 @@ architecture rtl of escape_core is
     signal v_fast_to, e_fast_to   : std_logic := '0';
     signal v_to_ctr, e_to_ctr     : unsigned(3 downto 0) := (others=>'0');
     signal v_shad_rng, e_shad_rng : std_logic;
+    -- SHADBASE-185: window tags (address bits above each window's size)
+    constant VS1_TAG : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(VSHAD1_BASE / 16#4000#, 10));
+    constant VS2_TAG : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(VSHAD2_BASE / 16#8000#, 9));
+    constant VS3_TAG : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(VSHAD3_BASE / 16#4000#, 10));
     -- VSHAD3-112: the single gate term for the partial shadow. v_s3_en is
     -- what BOTH v_shad_rng's third term and v_sel_shad3 key on, so they
     -- cannot diverge - see the comment above v_shad_rng. v_s3_arm is the
@@ -863,8 +878,8 @@ begin
     -- 35.8 side can fill speculatively) plus the same image-address mapping
     -- the arbiter uses. Combinational on purpose; sampled by single FFs in
     -- the 35.8 domain (timed paths per the SDSCHED-73 SDC grouping).
-    -- VSHAD3-107/112: the third term is the vshad3 range, now 16 KB at
-    -- 0x54000-0x57FFF (v_addr(23 downto 14) = "0000010101"). With the shadow
+    -- VSHAD3-107/112: the third term is the vshad3 range, 16 KB at
+    -- VSHAD3_BASE (Escape: 0x54000-0x57FFF; SHADBASE-185). With the shadow
     -- disabled - by VSHAD3_EN=0 at compile time OR by the vshad3_on port at
     -- runtime - it drops out of BOTH this decode and v_sel_shad3 below, so
     -- those addresses stop suppressing the fastpath as well as stopping being
@@ -890,10 +905,10 @@ begin
         end if;
     end process;
 
-    v_shad_rng <= '1' when SHAD_EN = 1 and (v_addr(23 downto 14) = "0000000000"
-                       or v_addr(23 downto 15) = "000001001"
+    v_shad_rng <= '1' when SHAD_EN = 1 and (v_addr(23 downto 14) = VS1_TAG
+                       or v_addr(23 downto 15) = VS2_TAG
                        or (v_s3_en = '1'
-                           and v_addr(23 downto 14) = "0000010101")) else '0';
+                           and v_addr(23 downto 14) = VS3_TAG)) else '0';
     e_shad_rng <= '1' when SHAD_EN = 1 and (e_addr(23 downto 14) = "0000000000"
                        or e_addr(23 downto 12) = x"00F") else '0';
     fast_v_spec <= '1' when FASTPATH_EN = 1 and v_shad_rng = '0'
@@ -1615,16 +1630,16 @@ begin
     -- (main) and page 0 (extra); all boot/ISR/march code sits below 0x4000
     -- on both CPUs (v58 hot-address inventory concurs).
     v_sel_shad1 <= '1' when SHAD_EN=1 and v_sel_rom='1'
-                            and v_addr(23 downto 14) = "0000000000" else '0';
+                            and v_addr(23 downto 14) = VS1_TAG else '0';
     v_sel_shad2 <= '1' when SHAD_EN=1 and v_sel_rom='1'
-                            and v_addr(23 downto 15) = "000001001" else '0';
+                            and v_addr(23 downto 15) = VS2_TAG else '0';
     -- VSHAD3-112: 16 KB at 0x54000-0x57FFF (the measured-busier half; the
     -- 0x50000-0x53FFF half now takes the fastpath), gated by the SAME
     -- v_s3_en that gates v_shad_rng's third term above. Do not open-code the
     -- enable here and do not open-code the range - if these two decodes ever
     -- disagree, the range is served by neither.
     v_sel_shad3 <= '1' when SHAD_EN=1 and v_s3_en='1' and v_sel_rom='1'
-                            and v_addr(23 downto 14) = "0000010101" else '0';
+                            and v_addr(23 downto 14) = VS3_TAG else '0';
     -- MOSDRAM-72: MAME miss-profiles (attract incl. demo gameplay) put 77%
     -- of the extra's SDRAM reads in 0xA000-0xBFFF - eshad3 shadows it.
     -- (A matching main-CPU 0x46xxx shadow overflowed the 308-M10K ceiling;
@@ -1637,13 +1652,13 @@ begin
     -- sdram-sched: no eshad3 here - this branch buys speed with the
     -- synchronizer cut instead of BRAM (the 308-M10K ceiling is spent).
     e_sel_shad <= e_sel_shad1 or e_sel_shad2;
-    vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000000000" else '0';
-    vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = "000001001" else '0';
+    vshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = VS1_TAG else '0';
+    vshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 15) = VS2_TAG else '0';
     -- VSHAD3-112: DELIBERATELY not gated by v_s3_en. The fill happens once,
     -- during the ROM download; if the runtime toggle also gated the fill then
     -- toggling the shadow ON after boot would switch the CPU onto an unfilled
     -- BRAM and execute zeros. The toggle gates the DECODE only.
-    vshad3_we <= '1' when VSHAD3_EN=1 and shad_we='1' and shad_waddr(23 downto 14) = "0000010101" else '0';
+    vshad3_we <= '1' when VSHAD3_EN=1 and shad_we='1' and shad_waddr(23 downto 14) = VS3_TAG else '0';
     eshad_we  <= '1' when shad_we='1' and shad_waddr(23 downto 14) = "0000100000" else '0';
     eshad2_we <= '1' when shad_we='1' and shad_waddr(23 downto 12) = x"08F" else '0';
     jshad_we <= '1' when shad_we='1' and shad_waddr(23 downto 16) = x"10" else '0';
