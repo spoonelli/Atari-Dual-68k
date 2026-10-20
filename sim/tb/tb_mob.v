@@ -364,9 +364,10 @@ escape_prio uprio (
                  occ_rej, occ_ok, (occ_rej+occ_ok)>0 ? 100.0*occ_rej/(occ_rej+occ_ok) : 0.0, spc_seen, spc_rej);
         $finish;
     end
+    // LASTROW-190: the engine's own line trigger, probed rather than copied -
+    // the hand copy here carried the old one-short bound along with the RTL.
     always @(posedge clk)
-        if(x_count == 10'd0 && y_count >= VID_V_BPORCH - 10'd1
-           && y_count < VID_V_BPORCH + VID_V_ACTIVE - 10'd1
+        if(dut.line_trig
            && (dut.state != 4'd0 || dut.q_cnt != 3'd0))
             n_abort = n_abort + 1;
     always @(posedge clk) begin

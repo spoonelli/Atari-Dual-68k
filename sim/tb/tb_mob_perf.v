@@ -94,9 +94,24 @@ module tb_mob_perf;
     // measurement window flag - declared early, the gfx model's concurrency
     // census below needs it
     reg measuring = 0, dumping = 0;
-    // the line-abort/restart cycle, exactly as escape_mob tests for it
-    wire abort_now = (x_count == 10'd0 && y_count >= VID_V_BPORCH-1
-                      && y_count < VID_V_BPORCH+VID_V_ACTIVE-1);
+    // the line-abort/restart cycle, exactly as escape_mob tests for it.
+    // LASTROW-190: the engine now triggers on every raster in
+    // [vbporch-1, vbporch+vactive) - VID_V_ACTIVE+1 builds a frame, the last
+    // one (ly = 240+yscroll) never shown. The old copy here stopped one raster
+    // short, in step with the old RTL bound that left row 239 blank. This
+    // bench cannot simply probe dut.line_trig: run_mob_order_check also drives
+    // OLDER engines through it under MOB_BASE. So the window is written ONCE
+    // here, every use below goes through it, and trig_check (current engine
+    // only) counts any cycle where it disagrees with the DUT's own trigger.
+    localparam BUILD_LINES = VID_V_ACTIVE + 1;
+    wire build_win_y = (y_count >= VID_V_BPORCH-1
+                        && y_count < VID_V_BPORCH+VID_V_ACTIVE);
+    wire abort_now = (x_count == 10'd0) && build_win_y;
+`ifndef MOB_BASE
+    integer n_trigdrift = 0;
+    always @(posedge clk)
+        if(abort_now !== dut.line_trig) n_trigdrift = n_trigdrift + 1;
+`endif
 
     // ---------------- gfx model: real chunky image bytes, GFX_LAT latency
     reg [7:0] gfx [0:(1<<22)-1];        // image bytes 0..0x220000
@@ -202,10 +217,12 @@ module tb_mob_perf;
     //
     //   frame-mean  = total / VID_V_TOTAL (262). Every scanline in the frame,
     //                 blanking included. Sums to exactly VID_H_TOTAL.
-    //   during-build= in-build total / VID_V_ACTIVE (240). escape_mob only
-    //                 STARTS a build for y in [vbporch-1, vbporch+vactive-1),
-    //                 which is 240 lines, so this answers "when a build is
-    //                 running, where do the 456 cycles of that line go".
+    //   during-build= in-build total / BUILD_LINES (241). escape_mob only
+    //                 STARTS a build for y in [vbporch-1, vbporch+vactive),
+    //                 which is 241 lines (LASTROW-190; 240 before it, when
+    //                 row 239's build was never swapped in), so this answers
+    //                 "when a build is running, where do the 456 cycles of
+    //                 that line go".
     //
     // MEASURED, not assumed: a build started on the last build line runs on
     // into vblank, so the phase counters are NOT confined to the 240 build
@@ -490,8 +507,8 @@ module tb_mob_perf;
             n_tilerows = n_tilerows + 1;
         state_d <= dut.state;
         // PERFDIV-111: build-window split. Same gate escape_mob.v uses to
-        // start a build, so b_win is exactly VID_V_ACTIVE lines.
-        if(y_count >= VID_V_BPORCH-1 && y_count < VID_V_BPORCH+VID_V_ACTIVE-1) begin
+        // start a build, so b_win is exactly BUILD_LINES lines.
+        if(build_win_y) begin
             b_win = b_win + 1;
             case(dut.state)
                 S_IDLE:  b_idle  = b_idle  + 1;
@@ -536,6 +553,9 @@ module tb_mob_perf;
         end
         mo_vaddr_d <= {8'd0, mo_vaddr[1:0]};
         // end of scanline: did the build for the NEXT line finish?
+        // LASTROW-190: only the VID_V_ACTIVE builds that are SHOWN - row r is
+        // built on raster r+vbporch-1 - so the last build-window raster, whose
+        // build (ly = 240+yscroll) runs on into vblank, is not scored here.
         if(x_count == VID_H_TOTAL-1
            && y_count >= VID_V_BPORCH-1 && y_count < VID_V_BPORCH+VID_V_ACTIVE-1) begin
             n_lines = n_lines + 1;
@@ -667,8 +687,7 @@ module tb_mob_perf;
             sh_pen[{dut.wr_xo, 1'b1}] = {dut.wr_hi[3:0], dut.wr_pen_o};
             sh_val[{dut.wr_xo, 1'b1}] = 1'b1;
         end
-        if(x_count == 10'd0 && y_count >= VID_V_BPORCH-1
-           && y_count < VID_V_BPORCH+VID_V_ACTIVE-1) begin
+        if(abort_now) begin
             for(si = 0; si < 512; si = si + 1) begin
                 dsh_val[si] = sh_val[si]; dsh_pen[si] = sh_pen[si];
                 sh_val[si]  = 0;
@@ -730,6 +749,11 @@ module tb_mob_perf;
                  n_pf_slot[0], n_pf_slot[1], n_pf_slot[2], n_pf_slot[3], n_pf_slot[4]);
         $display("PERF scout walk=%0d queue_full=%0d port_yield=%0d chan_clash=%0d order_slips=%0d",
                  c_sc_walk, c_sc_room, c_yield, n_chclash, n_orderslip);
+        if(n_trigdrift == 0)
+            $display("PERF trig_check OK bench build window == dut.line_trig on every clock");
+        else
+            $display("PERF trig_check DRIFT %0d clocks where the bench window != dut.line_trig -- window-gated figures from this run are NOT trustworthy",
+                     n_trigdrift);
         $display("PERF primewhy unissued=%0d inflight=%0d tx1=%0d txN=%0d pump_blocked=%0d chan_occupancy=%0d.%02d (of prime %0d)",
                  c_pr_unissued, c_pr_inflight, c_pr_t1, c_pr_tn, c_pumpblk,
                  c_chbusy/(VID_V_TOTAL*VID_H_TOTAL),                 // PERFDIV-111: was 240*456
@@ -752,26 +776,26 @@ module tb_mob_perf;
         // stopped being gated on `measuring` alone - do not trust any per-line
         // figure from that run.
         $display("PERF cycles_build idle=%0d traverse=%0d prime=%0d blit=%0d (per build line of %0d: %0d.%02d/%0d.%02d/%0d.%02d/%0d.%02d)",
-                 b_idle, b_trav, b_prime, b_blit, VID_V_ACTIVE,
-                 b_idle /VID_V_ACTIVE, (100*b_idle /VID_V_ACTIVE)%100,
-                 b_trav /VID_V_ACTIVE, (100*b_trav /VID_V_ACTIVE)%100,
-                 b_prime/VID_V_ACTIVE, (100*b_prime/VID_V_ACTIVE)%100,
-                 b_blit /VID_V_ACTIVE, (100*b_blit /VID_V_ACTIVE)%100);
+                 b_idle, b_trav, b_prime, b_blit, BUILD_LINES,
+                 b_idle /BUILD_LINES, (100*b_idle /BUILD_LINES)%100,
+                 b_trav /BUILD_LINES, (100*b_trav /BUILD_LINES)%100,
+                 b_prime/BUILD_LINES, (100*b_prime/BUILD_LINES)%100,
+                 b_blit /BUILD_LINES, (100*b_blit /BUILD_LINES)%100);
         // How much engine work lands outside the build window. If these are
         // nonzero (they are), the "phases only happen on build lines" model
-        // is false and total/VID_V_ACTIVE is not a valid per-line figure.
+        // is false and total/BUILD_LINES is not a valid per-line figure.
         $display("PERF cycles_vblank idle=%0d traverse=%0d prime=%0d blit=%0d (over %0d vblank lines)",
                  c_idle-b_idle, c_trav-b_trav, c_prime-b_prime, c_blit-b_blit,
                  v_win/VID_H_TOTAL);
         if(c_idle + c_trav + c_prime + c_blit === VID_V_TOTAL*VID_H_TOTAL
-           && b_win === VID_V_ACTIVE*VID_H_TOTAL)
+           && b_win === BUILD_LINES*VID_H_TOTAL)
             $display("PERF cycles_check OK frame_sum=%0d == %0d, build_win=%0d == %0d (both per-line divisors are sound)",
                      c_idle+c_trav+c_prime+c_blit, VID_V_TOTAL*VID_H_TOTAL,
-                     b_win, VID_V_ACTIVE*VID_H_TOTAL);
+                     b_win, BUILD_LINES*VID_H_TOTAL);
         else
             $display("PERF cycles_check MISMATCH frame_sum=%0d (want %0d) build_win=%0d (want %0d) -- per-line figures from this run are NOT trustworthy",
                      c_idle+c_trav+c_prime+c_blit, VID_V_TOTAL*VID_H_TOTAL,
-                     b_win, VID_V_ACTIVE*VID_H_TOTAL);
+                     b_win, BUILD_LINES*VID_H_TOTAL);
         $finish;
     end
     always @(posedge clk) begin

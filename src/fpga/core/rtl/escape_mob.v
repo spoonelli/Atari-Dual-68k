@@ -591,6 +591,27 @@ module escape_mob (
     // measuring anything real. The line abort - not the budget - is what
     // bounds a build; never-wedge is unaffected.
     reg [6:0]  fetch_budget;
+    // LASTROW-190: THE LINE TRIGGER - swap buffers, abort and restart the
+    // build. The buffer built during raster Y is shown on raster Y+1 (see
+    // MOPLACE-1 below), so showing visible rows 0..vactive-1 on rasters
+    // vbporch..vbporch+vactive-1 needs a swap on EACH of those rasters plus
+    // the one before them. The old bound stopped one short
+    // (y < vbporch+vactive-1): the row-239 build (raster 250) was never
+    // swapped in, so raster 251 re-read the buffer row 238 had already shown
+    // and self-cleared - MO never drew on the last visible row. That was every
+    // VS-MAME "missing" pixel on the crowd fixture (50/50 at 123/253, 25/25 at
+    // 222/422, all y=239).
+    // The extra trigger also starts a build for ly = 240+yscroll during the
+    // last visible raster. It runs on into vblank and is first displayed on
+    // raster vbporch-1 of the next frame, which is blanked, where the readout
+    // self-clears it before it is built over - the same fate the row-239
+    // build used to have, one row lower. Cost: one more line of MO fetches a
+    // frame, lowest-priority traffic, landing mostly in vblank.
+    // ONE wire, used by the swap AND by MOTEL's time-truncation counter: the
+    // two windows had to be kept in step by hand, and the counter's job is to
+    // count exactly the aborts this trigger performs.
+    wire line_trig = (x_count == 10'd0) && (y_count >= vbporch - 10'd1)
+                     && (y_count < vbporch + vactive);
     // MOTEL-129 accumulators (frame-local), latched into dbg_* at frame start.
     reg [7:0]  tel_trunc = 8'd0;
     reg [7:0]  tel_maxlat = 8'd0;
@@ -631,8 +652,9 @@ module escape_mob (
         // walking the list, or matched entries parked unblitted. A walk merely
         // finishing its final stamp has drawn everything it was asked to and
         // is not a truncation.
-        if(x_count == 10'd0 && y_count >= vbporch - 10'd1
-           && y_count < vbporch + vactive - 10'd1
+        // LASTROW-190: shares line_trig with the swap, so the row-239 build -
+        // shown on screen now - is counted when it is cut, like every other row.
+        if(line_trig
            && (q_cnt != 3'd0 || (sstate != SC_DONE && sstate != SC_IDLE))
            && tel_trunc != 8'hFF)
             tel_trunc <= tel_trunc + 8'd1;
@@ -913,8 +935,8 @@ module escape_mob (
             // by fetch starvation previously missed the restart and kept
             // blitting stale rows into the now-DISPLAYED buffer (the
             // interior garble on tall attract objects). Abort and restart.
-            if(x_count == 10'd0 && y_count >= vbporch - 10'd1
-               && y_count < vbporch + vactive - 10'd1) begin
+            // LASTROW-190: the window lives in line_trig (see there).
+            if(line_trig) begin
                 build_sel <= ~build_sel;
                 // MOPLACE-1: the buffer built during raster line Y is displayed
                 // on line Y+1, i.e. at visible_y = Y - vbporch + 1. The
