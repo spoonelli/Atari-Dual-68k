@@ -747,6 +747,7 @@ set_global_assignment -name VERILOG_FILE core/rtl/escape_mo_cache.v
 set_global_assignment -name VERILOG_FILE core/rtl/escape_pf.v
 set_global_assignment -name VERILOG_FILE core/rtl/escape_stain.v
 set_global_assignment -name VERILOG_FILE core/rtl/hall_stick.v
+set_global_assignment -name VERILOG_FILE core/rtl/iir_filter.v
 set_global_assignment -name VHDL_FILE core/rtl/escape_core.vhd
 set_global_assignment -name VHDL_FILE core/rtl/TMS5220.vhd
 set_global_assignment -name VHDL_FILE core/rtl/escape_jsa.vhd

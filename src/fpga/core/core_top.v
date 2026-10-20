@@ -719,50 +719,53 @@ end
     reg             audgen_dac;
     // AUDCDC-189: JSA audio into the I2S bit clock. It used to be a free-
     // running 2-FF sample of the live 16-bit mixer bus, which (a) could tear a
-    // word that changed under the capture (bits of two values), and (b) took
-    // each output sample at a moment unrelated to the source's own steps - the
-    // OKI6295's 7.2 / 9.0 kHz staircase landed at a random point inside each
-    // 48 kHz period, a timing jitter that fills the spectrum with inharmonic
-    // noise moving against the pitch (the "warble"/grit measured on Pocket
-    // Guts: the OKI's 7.23 / 14.46 kHz zero-order-hold nulls only 35-40 dB deep
-    // against 61 dB on MiSTer and 72-74 dB in MAME). Now:
-    //  1. two one-pole low-passes in clk_sys_7159 (k = 1/32 each, 35.6 kHz per
-    //     pole, ~23 kHz overall: transparent to the music, but every source
-    //     step becomes a ramp with a 4.5 us time constant, far longer than the
-    //     ~0.5 us capture uncertainty below);
+    // word that changed under the capture, and (b) took each output sample at a
+    // moment unrelated to the source's own steps - the OKI6295's 7.2 / 9.0 kHz
+    // staircase landed at a random point inside each 48 kHz period, a timing
+    // jitter heard as warble/hash (build-45 capture: OKI zero-order-hold nulls
+    // 38 dB deep vs MiSTer 56-61 dB, MAME 72-74 dB). MiSTer never shows it
+    // because its framework (sys/audio_out.v) filters core audio before the
+    // 48 kHz output; openFPGA hands the core a raw I2S DAC, so the core must.
+    //  1. AUDFLT-190: MiSTer's own default filter - Sorgelig's IIR_filter
+    //     (rtl/iir_filter.v, verbatim from MiSTer sys, GPLv2+) with its default
+    //     coefficients (= sys_top.v acx/acy defaults), one mono instance per
+    //     channel computing every clk_sys_7159 cycle. MiSTer runs each channel
+    //     at 7.056 MHz; identical coefficients at 7.159 MHz give the same
+    //     response 1.5% higher in frequency. (Build 47 used two gentle one-pole
+    //     stages, -3 dB 23 kHz: measured within 1 dB of MiSTer below 17 kHz but
+    //     7-12 dB more hash above.)
     //  2. the sample is TAKEN ON REQUEST: once per 48 kHz frame the bit-clock
-    //     side flips aud_req; the 7.159 side resynchronises it, freezes the
-    //     filtered pair into aud_hold_* and flips aud_ack; the bit-clock side
-    //     resynchronises that and copies the frozen words, which then stay put
-    //     until the next request ~20 us later. Whole words, at a fixed delay
-    //     from the output frame.
+    //     side flips aud_req; the 7.159 side resynchronises it, pulses the
+    //     filters' sample_ce (they register their output on it) and flips
+    //     aud_ack one clock later; the bit-clock side resynchronises that and
+    //     copies the frozen words, which stay put until the next request.
     reg     [15:0]  aud_l_s, aud_r_s;
     reg     [15:0]  audgen_shift;
-    reg  signed [23:0] aud_f1l = 24'sd0, aud_f2l = 24'sd0, aud_f1r = 24'sd0, aud_f2r = 24'sd0;
-    reg     [15:0]  aud_hold_l = 16'd0, aud_hold_r = 16'd0;
-    reg             aud_req = 1'b0, aud_ack = 1'b0;
+    reg             aud_req = 1'b0, aud_ack = 1'b0, aud_take = 1'b0;
     reg     [2:0]   aud_req_s = 3'd0, aud_ack_s = 3'd0;
-    // state is the output scaled by 32 (5 fraction bits): F += x - F/32.
-    // Every operand is $signed so the >>> stays arithmetic (one unsigned
-    // concatenation would make the whole expression - and the shift - unsigned).
-    wire signed [15:0] aud_y1l = aud_f1l[20:5], aud_y1r = aud_f1r[20:5];
+    wire    [15:0]  aud_flt_l, aud_flt_r;
+    wire            aud_take_now = (aud_req_s[2] != aud_req_s[1]);
+    reg     [3:0]   aud_por = 4'd0;      // clears the filter state once at power-up
+    wire            aud_rst = ~aud_por[3];
 always @(posedge clk_sys_7159) begin
-    aud_f1l <= aud_f1l + $signed({{8{aud_l_feed[15]}}, aud_l_feed}) - (aud_f1l >>> 5);
-    aud_f1r <= aud_f1r + $signed({{8{aud_r_feed[15]}}, aud_r_feed}) - (aud_f1r >>> 5);
-    aud_f2l <= aud_f2l + $signed({{8{aud_y1l[15]}}, aud_y1l}) - (aud_f2l >>> 5);
-    aud_f2r <= aud_f2r + $signed({{8{aud_y1r[15]}}, aud_y1r}) - (aud_f2r >>> 5);
+    if(!aud_por[3]) aud_por <= aud_por + 4'd1;
     aud_req_s <= {aud_req_s[1:0], aud_req};
-    if(aud_req_s[2] != aud_req_s[1]) begin
-        aud_hold_l <= aud_f2l[20:5];
-        aud_hold_r <= aud_f2r[20:5];
-        aud_ack    <= ~aud_ack;
-    end
+    aud_take  <= aud_take_now;           // filter outputs registered this clock
+    if(aud_take) aud_ack <= ~aud_ack;    // ...so they are frozen from here on
 end
+IIR_filter #(.stereo(0)) aud_iir_l (
+    .clk(clk_sys_7159), .reset(aud_rst), .ce(1'b1), .sample_ce(aud_take_now),
+    .cx(40'd0), .cx0(8'd0), .cx1(8'd0), .cx2(8'd0), .cy0(24'd0), .cy1(24'd0), .cy2(24'd0),
+    .input_l(aud_l_feed), .input_r(16'd0), .output_l(aud_flt_l), .output_r() );
+IIR_filter #(.stereo(0)) aud_iir_r (
+    .clk(clk_sys_7159), .reset(aud_rst), .ce(1'b1), .sample_ce(aud_take_now),
+    .cx(40'd0), .cx0(8'd0), .cx1(8'd0), .cx2(8'd0), .cy0(24'd0), .cy1(24'd0), .cy2(24'd0),
+    .input_l(aud_r_feed), .input_r(16'd0), .output_l(aud_flt_r), .output_r() );
 always @(negedge audgen_sclk) begin
     aud_ack_s <= {aud_ack_s[1:0], aud_ack};
     if(aud_ack_s[2] != aud_ack_s[1]) begin
-        aud_l_s <= aud_hold_l;
-        aud_r_s <= aud_hold_r;
+        aud_l_s <= aud_flt_l;
+        aud_r_s <= aud_flt_r;
     end
     // I2S: MSB-first 16 active bits, then zeros for the rest of the 32-bit slot
     audgen_dac   <= audgen_shift[15];
@@ -2548,7 +2551,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // and [3:0] (ver slots 2 and 3; slot 1 sits under the chk2 bit row).
     // Write the build number as hex digits: build 41 = 16'h0041. NOT ASCII -
     // 16'h3431 shows '31' (the v0.2.0 release candidate did exactly that).
-    localparam [15:0] BUILD_ID = 16'h0047;   // AUDCDC-189 test build (Klax / Guts; 45 + filtered, request-driven audio crossing) - screen shows '47' (41 = Pocket v0.2.0 release)
+    localparam [15:0] BUILD_ID = 16'h0048;   // AUDFLT-190 test build (Klax / Guts; 47 with MiSTer's default audio IIR) - screen shows '48' (41 = Pocket v0.2.0 release)
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
