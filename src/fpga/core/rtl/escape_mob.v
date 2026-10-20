@@ -1009,7 +1009,9 @@ module escape_mob (
                     s_link  <= link;
                     s_w3    <= mo_vdata;
                     s_ydiff <= ydiff_e;
-                    s_last  <= (nlink == first_link) || (ent_count == 7'd63);
+                    // MOSELF-188: a self-linked entry also ends the list
+                    s_last  <= (nlink == first_link) || (nlink == link)
+                               || (ent_count == 7'd63);
                     // MOCOV-1: ...and go read this entry's w1 (the tile code)
                     // so the first tile-row can be asked for right away. The
                     // address is issued now; MO RAM answers two cycles later,
@@ -1018,9 +1020,21 @@ module escape_mob (
                     // been committed to the RAM's address register.
                     mo_vaddr <= {link, 2'd1};
                     sstate   <= SC_W1;
-                end else if(nlink == first_link || ent_count == 7'd63
-                            || fetch_budget == 0) begin
-                    // the same three terminators the walk has always applied
+                end else if(nlink == first_link || nlink == link
+                            || ent_count == 7'd63 || fetch_budget == 0) begin
+                    // the three terminators the walk has always applied, plus
+                    // MOSELF-188: an entry that links to ITSELF. Klax ends its
+                    // band chains that way (MAME klaxp1 dumps: 8-24 of 64 SLIP
+                    // chains per frame end on a self-linked, usually visible,
+                    // sprite); Escape's always return to the SLIP start. The
+                    // walk used to revisit that entry until ent_count ran out,
+                    // re-queuing the same sprite ~60 times on every line it
+                    // covers - identical pixels, but ~60 redundant tile-row
+                    // fetches a line on the lowest-priority SDRAM client, and
+                    // a line abort on nearly every such line. MAME's walker
+                    // stops on any revisit (visited bitmap); a self-link is
+                    // the revisit Klax actually produces, and stopping there
+                    // draws exactly what the repeats drew.
                     sstate <= SC_DONE;
                 end else begin
                     ent_count <= ent_count + 7'd1;
