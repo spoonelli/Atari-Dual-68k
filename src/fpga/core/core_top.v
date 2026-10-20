@@ -717,13 +717,38 @@ end
     reg     [4:0]   audgen_lrck_cnt;    
     reg             audgen_lrck;
     reg             audgen_dac;
-    // JSA audio: samples from the 7.159 domain; quasi-static double-register
-    // (tearing at 48 kHz boundaries is inaudible)
-    reg     [15:0]  aud_l_m, aud_l_s, aud_r_m, aud_r_s;
+    // AUDCDC-189: JSA audio crosses from clk_sys_7159 into the I2S bit clock
+    // with a toggle handshake. It used to be a free-running 2-FF sample of the
+    // live 16-bit bus: the mixer re-registers every 7.16 MHz clock and its
+    // value moves whenever the YM2151 or OKI output does, so a capture that
+    // landed on a change could take some bits from the old word and some from
+    // the new - across a carry or sign change that is a full-scale spike.
+    // (The "tearing is inaudible" note assumed a quasi-static bus; it is not.)
+    // Now the 7.159 side freezes both channels into aud_hold_* every 128
+    // clocks (55.9 kHz, the YM2151's own rate) and flips aud_tog; the bit-clock
+    // side resynchronises the toggle and copies the hold registers only on a
+    // flip - at that point they have been stable for >= 1 bit clock and stay
+    // so for 17.9 us, so every word crosses whole.
+    reg     [15:0]  aud_l_s, aud_r_s;
     reg     [15:0]  audgen_shift;
+    reg     [6:0]   aud_div = 7'd0;
+    reg     [15:0]  aud_hold_l = 16'd0, aud_hold_r = 16'd0;
+    reg             aud_tog = 1'b0;
+    reg     [2:0]   aud_tog_s = 3'd0;
+always @(posedge clk_sys_7159) begin
+    aud_div <= aud_div + 7'd1;
+    if(aud_div == 7'd0) begin
+        aud_hold_l <= aud_l_feed;
+        aud_hold_r <= aud_r_feed;
+        aud_tog    <= ~aud_tog;
+    end
+end
 always @(negedge audgen_sclk) begin
-    aud_l_m <= aud_l_feed;  aud_l_s <= aud_l_m;
-    aud_r_m <= aud_r_feed;  aud_r_s <= aud_r_m;
+    aud_tog_s <= {aud_tog_s[1:0], aud_tog};
+    if(aud_tog_s[2] != aud_tog_s[1]) begin
+        aud_l_s <= aud_hold_l;
+        aud_r_s <= aud_hold_r;
+    end
     // I2S: MSB-first 16 active bits, then zeros for the rest of the 32-bit slot
     audgen_dac   <= audgen_shift[15];
     audgen_shift <= {audgen_shift[14:0], 1'b0};
@@ -2504,7 +2529,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // and [3:0] (ver slots 2 and 3; slot 1 sits under the chk2 bit row).
     // Write the build number as hex digits: build 41 = 16'h0041. NOT ASCII -
     // 16'h3431 shows '31' (the v0.2.0 release candidate did exactly that).
-    localparam [15:0] BUILD_ID = 16'h0045;   // MOSELF-188 + SHADFAST-187 + OKICACHE-186 test build (Klax / Guts) - screen shows '45' (41 = Pocket v0.2.0 release)
+    localparam [15:0] BUILD_ID = 16'h0046;   // AUDCDC-189 test build (Klax / Guts; 45 + audio clock-crossing fix) - screen shows '46' (41 = Pocket v0.2.0 release)
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
