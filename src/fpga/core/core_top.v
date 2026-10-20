@@ -717,35 +717,50 @@ end
     reg     [4:0]   audgen_lrck_cnt;    
     reg             audgen_lrck;
     reg             audgen_dac;
-    // AUDCDC-189: JSA audio crosses from clk_sys_7159 into the I2S bit clock
-    // with a toggle handshake. It used to be a free-running 2-FF sample of the
-    // live 16-bit bus: the mixer re-registers every 7.16 MHz clock and its
-    // value moves whenever the YM2151 or OKI output does, so a capture that
-    // landed on a change could take some bits from the old word and some from
-    // the new - across a carry or sign change that is a full-scale spike.
-    // (The "tearing is inaudible" note assumed a quasi-static bus; it is not.)
-    // Now the 7.159 side freezes both channels into aud_hold_* every 128
-    // clocks (55.9 kHz, the YM2151's own rate) and flips aud_tog; the bit-clock
-    // side resynchronises the toggle and copies the hold registers only on a
-    // flip - at that point they have been stable for >= 1 bit clock and stay
-    // so for 17.9 us, so every word crosses whole.
+    // AUDCDC-189: JSA audio into the I2S bit clock. It used to be a free-
+    // running 2-FF sample of the live 16-bit mixer bus, which (a) could tear a
+    // word that changed under the capture (bits of two values), and (b) took
+    // each output sample at a moment unrelated to the source's own steps - the
+    // OKI6295's 7.2 / 9.0 kHz staircase landed at a random point inside each
+    // 48 kHz period, a timing jitter that fills the spectrum with inharmonic
+    // noise moving against the pitch (the "warble"/grit measured on Pocket
+    // Guts: the OKI's 7.23 / 14.46 kHz zero-order-hold nulls only 35-40 dB deep
+    // against 61 dB on MiSTer and 72-74 dB in MAME). Now:
+    //  1. two one-pole low-passes in clk_sys_7159 (k = 1/32 each, 35.6 kHz per
+    //     pole, ~23 kHz overall: transparent to the music, but every source
+    //     step becomes a ramp with a 4.5 us time constant, far longer than the
+    //     ~0.5 us capture uncertainty below);
+    //  2. the sample is TAKEN ON REQUEST: once per 48 kHz frame the bit-clock
+    //     side flips aud_req; the 7.159 side resynchronises it, freezes the
+    //     filtered pair into aud_hold_* and flips aud_ack; the bit-clock side
+    //     resynchronises that and copies the frozen words, which then stay put
+    //     until the next request ~20 us later. Whole words, at a fixed delay
+    //     from the output frame.
     reg     [15:0]  aud_l_s, aud_r_s;
     reg     [15:0]  audgen_shift;
-    reg     [6:0]   aud_div = 7'd0;
+    reg  signed [23:0] aud_f1l = 24'sd0, aud_f2l = 24'sd0, aud_f1r = 24'sd0, aud_f2r = 24'sd0;
     reg     [15:0]  aud_hold_l = 16'd0, aud_hold_r = 16'd0;
-    reg             aud_tog = 1'b0;
-    reg     [2:0]   aud_tog_s = 3'd0;
+    reg             aud_req = 1'b0, aud_ack = 1'b0;
+    reg     [2:0]   aud_req_s = 3'd0, aud_ack_s = 3'd0;
+    // state is the output scaled by 32 (5 fraction bits): F += x - F/32.
+    // Every operand is $signed so the >>> stays arithmetic (one unsigned
+    // concatenation would make the whole expression - and the shift - unsigned).
+    wire signed [15:0] aud_y1l = aud_f1l[20:5], aud_y1r = aud_f1r[20:5];
 always @(posedge clk_sys_7159) begin
-    aud_div <= aud_div + 7'd1;
-    if(aud_div == 7'd0) begin
-        aud_hold_l <= aud_l_feed;
-        aud_hold_r <= aud_r_feed;
-        aud_tog    <= ~aud_tog;
+    aud_f1l <= aud_f1l + $signed({{8{aud_l_feed[15]}}, aud_l_feed}) - (aud_f1l >>> 5);
+    aud_f1r <= aud_f1r + $signed({{8{aud_r_feed[15]}}, aud_r_feed}) - (aud_f1r >>> 5);
+    aud_f2l <= aud_f2l + $signed({{8{aud_y1l[15]}}, aud_y1l}) - (aud_f2l >>> 5);
+    aud_f2r <= aud_f2r + $signed({{8{aud_y1r[15]}}, aud_y1r}) - (aud_f2r >>> 5);
+    aud_req_s <= {aud_req_s[1:0], aud_req};
+    if(aud_req_s[2] != aud_req_s[1]) begin
+        aud_hold_l <= aud_f2l[20:5];
+        aud_hold_r <= aud_f2r[20:5];
+        aud_ack    <= ~aud_ack;
     end
 end
 always @(negedge audgen_sclk) begin
-    aud_tog_s <= {aud_tog_s[1:0], aud_tog};
-    if(aud_tog_s[2] != aud_tog_s[1]) begin
+    aud_ack_s <= {aud_ack_s[1:0], aud_ack};
+    if(aud_ack_s[2] != aud_ack_s[1]) begin
         aud_l_s <= aud_hold_l;
         aud_r_s <= aud_hold_r;
     end
@@ -758,6 +773,10 @@ always @(negedge audgen_sclk) begin
         // switch channels; load the next channel's sample
         audgen_lrck  <= ~audgen_lrck;
         audgen_shift <= audgen_lrck ? aud_l_s : aud_r_s;
+        // AUDCDC-189: ask for the next pair once per frame, as the right
+        // word loads; the answer is back ~1.5 us later, well before the next
+        // left word loads 32 bit clocks (10.4 us) on
+        if(!audgen_lrck) aud_req <= ~aud_req;
     end 
 end
 
@@ -2529,7 +2548,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // and [3:0] (ver slots 2 and 3; slot 1 sits under the chk2 bit row).
     // Write the build number as hex digits: build 41 = 16'h0041. NOT ASCII -
     // 16'h3431 shows '31' (the v0.2.0 release candidate did exactly that).
-    localparam [15:0] BUILD_ID = 16'h0046;   // AUDCDC-189 test build (Klax / Guts; 45 + audio clock-crossing fix) - screen shows '46' (41 = Pocket v0.2.0 release)
+    localparam [15:0] BUILD_ID = 16'h0047;   // AUDCDC-189 test build (Klax / Guts; 45 + filtered, request-driven audio crossing) - screen shows '47' (41 = Pocket v0.2.0 release)
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
