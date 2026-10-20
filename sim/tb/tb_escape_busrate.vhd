@@ -39,6 +39,7 @@ entity tb_escape_busrate is
         G_SHAD   : integer := 1;      -- shadow BRAMs filled + enabled
         G_VS3    : integer := 1;      -- escape_core VSHAD3_EN (compile-time)
         G_VS3ON  : integer := 1;      -- escape_core vshad3_on port (runtime)
+        G_SHFAST : integer := 0;      -- escape_core SHAD_FAST (SHADFAST-187)
         G_LAT    : integer := 2;      -- legacy rom service latency
         G_WARM   : integer := 20000;  -- clocks to settle before counting
         G_CLKS   : integer := 200000; -- clocks to count over
@@ -106,7 +107,7 @@ begin
     clk <= not clk after 5 ns when not done else '0';
 
     uut : entity work.escape_core
-        generic map ( YM_ENABLE => 0, SHAD_EN => G_SHAD, VSHAD3_EN => G_VS3,
+        generic map ( YM_ENABLE => 0, SHAD_EN => G_SHAD, VSHAD3_EN => G_VS3, SHAD_FAST => G_SHFAST,
                       FASTPATH_EN => G_FPEN, EIRQ_MODE => 2 )
         port map ( clk=>clk, reset_n=>resetn,
                    rom_addr=>rom_addr, rom_data=>rom_data, rom_par=>rom_par,

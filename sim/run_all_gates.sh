@@ -40,6 +40,8 @@ run_gate "run_pf_reset_tb"    ./sim/run_pf_reset_tb.sh
 run_gate "run_cadence_tb"     ./sim/run_cadence_tb.sh
 run_gate "run_vshad3_tb"      ./sim/run_vshad3_tb.sh
 run_gate "run_tasrace"        ./sim/run_tasrace.sh
+# OKICACHE-186: JSA-II OKI cache under jt6295's real access pattern
+run_gate "tb_escape_okicache" sh -c 'python3 sim/tools/make_jsa2_hex.py >/dev/null && ./sim/run_tb.sh tb_escape_okicache 10ms 2>&1 | grep -q "TB_ESCAPE_OKICACHE OK"'
 
 echo "===== SUMMARY ====="
 grep -E '^GATE (PASS|FAIL)' "$LOG"

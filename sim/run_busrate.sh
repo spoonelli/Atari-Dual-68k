@@ -16,12 +16,12 @@
 #
 # sim/run_vshad3_tb.sh runs exactly those as a pass/fail gate.
 #
-# Env: FPEN FP SHAD VS3 VS3ON LAT WARM CLKS BASE TAG
+# Env: FPEN FP SHAD VS3 VS3ON SHFAST LAT WARM CLKS BASE TAG
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="ghdl/ghdl:ubuntu20-mcode"
 FPEN="${FPEN:-1}"; FP="${FP:-1}"; SHAD="${SHAD:-1}"; VS3="${VS3:-1}"
-VS3ON="${VS3ON:-1}"
+VS3ON="${VS3ON:-1}"; SHFAST="${SHFAST:-0}"
 LAT="${LAT:-2}"; WARM="${WARM:-20000}"; CLKS="${CLKS:-200000}"
 BASE="${BASE:-0x050000}"; TAG="${TAG:-b$BASE-v$VS3-on$VS3ON-fp$FP}"
 
@@ -45,6 +45,6 @@ exec docker run --rm --platform linux/amd64 -v "$REPO_ROOT":/work ${TPMOUNT[@]+"
   ghdl -i \$STD --workdir=\$W \$FILES >/dev/null
   ghdl -m \$STD --workdir=\$W tb_escape_busrate >/dev/null
   ghdl -r \$STD --workdir=\$W tb_escape_busrate --ieee-asserts=disable --stop-time=60ms \
-    -gG_FPEN=$FPEN -gG_FP=$FP -gG_SHAD=$SHAD -gG_VS3=$VS3 -gG_VS3ON=$VS3ON -gG_LAT=$LAT \
+    -gG_FPEN=$FPEN -gG_FP=$FP -gG_SHAD=$SHAD -gG_VS3=$VS3 -gG_VS3ON=$VS3ON -gG_SHFAST=$SHFAST -gG_LAT=$LAT \
     -gG_WARM=$WARM -gG_CLKS=$CLKS -gG_HEX=sim/work/busrate_words.hex
 "

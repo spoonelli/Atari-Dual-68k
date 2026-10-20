@@ -55,6 +55,16 @@ entity escape_core is
         -- and Guts Pocket cores move them onto their own hot code (MAME
         -- read profile); with Escape's windows nearly every prototype fetch
         -- went to SDRAM and starved the motion-object fetches.
+        -- SHADFAST-187: 1 = video-CPU ROM shadow reads complete in 4 clocks
+        -- (the real board's zero-wait ROM cycle, the same phase the fastpath
+        -- gives) instead of taking the RAM/IO settle waitstate (5 clocks).
+        -- The shadow BRAM reads the live v_addr, so its word is on v_di one
+        -- clock after the address settles - exactly when the address-change
+        -- guard in dtack_gen first lets DTACK through. 0 keeps Escape's
+        -- released timing bit-for-bit (Escape's PCB parity was measured with
+        -- it); the Klax/Guts Pocket cores, whose hot code now lives in the
+        -- shadows, need the authentic speed back.
+        SHAD_FAST : integer := 0;
         VSHAD1_BASE : integer := 16#00000#;
         VSHAD2_BASE : integer := 16#48000#;
         VSHAD3_BASE : integer := 16#54000#;
@@ -2533,6 +2543,8 @@ begin
                         v_dtack_n <= '1';        -- IACK: autovector via VPA only
                     elsif v_addr(23 downto 1) /= v_addr_q then
                         v_ws <= '0'; v_dtack_n <= '1';
+                    elsif SHAD_FAST = 1 and v_sel_shad = '1' then
+                        v_dtack_n <= '0';        -- SHADFAST-187: 4-clock shadow read
                     elsif v_sel_rom='1' and v_sel_shad='0' then
                         -- SDSCHED-88: fast path completes at the AUTHENTIC
                         -- phase. ready is first sampled at the first rising

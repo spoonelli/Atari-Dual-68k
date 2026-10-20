@@ -52,7 +52,8 @@ check() {
     base="$1"; vs3="$2"; vs3on="$3"; want="$4"; wanthalf="$5"; why="$6"
     rows=$((rows + 1))
     echo "### BASE=$base VS3=$vs3 VS3ON=$vs3on  expect ${want} (x1000)  [$why]"
-    out="$(BASE="$base" VS3="$vs3" VS3ON="$vs3on" FP="$FP" "$REPO/sim/run_busrate.sh" 2>&1 || true)"
+    out="$(BASE="$base" VS3="$vs3" VS3ON="$vs3on" FP="$FP" SHFAST="${SHFAST:-0}" \
+           TAG="vs3gate-$rows" "$REPO/sim/run_busrate.sh" 2>&1 || true)"
     line="$(printf '%s\n' "$out" | grep 'milliclocks_per_cycle=' || true)"
     cnts="$(printf '%s\n' "$out" | grep '^BUSRATE clocks=' || true)"
     if [ -z "$line" ]; then
@@ -115,6 +116,14 @@ check 0x050000 1 1 4015 lo \
   "0x50000-0x53FFF is NO LONGER shadowed; 5.015 here means the range is still 32 KB"
 check 0x054000 0 1 4015 hi \
   "VSHAD3_EN=0 must remove the shadow entirely, toggle or no toggle"
+# SHADFAST-187 (Klax/Guts Pocket cores): SHAD_FAST=1 closes shadow reads at
+# the real board's 4 clocks. Run with a SLOW fastpath (fill latency 8) so a
+# fastpath-served loop would come out well above 4.015 - only the shadow
+# itself answering at 4 clocks can produce 4.015 here.
+SHFAST=1 FP=8 check 0x054000 1 1 4015 hi \
+  "SHAD_FAST=1: the shadow itself must answer in 4 clocks (the fastpath is slowed to 8 here)"
+SHFAST=1 FP=8 check 0x054000 1 0 11015 hi \
+  "control: the same loop on the slowed fastpath (11.015) - proves the row above was the shadow, not the fastpath"
 
 echo
 if [ "$fails" -ne 0 ]; then

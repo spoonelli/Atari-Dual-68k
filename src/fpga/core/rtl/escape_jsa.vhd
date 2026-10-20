@@ -29,7 +29,12 @@ entity escape_jsa is
         BOARD : integer := 1;
         -- GAMESEL-167: 1 = build BOTH boards and pick at runtime with board2
         -- (MiSTer, one rbf for Escape / Klax / Guts). 0 = BOARD alone.
-        BOARD_RT : integer := 0
+        BOARD_RT : integer := 0;
+        -- OKICACHE-186, GHDL only (YM_ENABLE=false): 0 = the address walker
+        -- stub; 1 = a model of jt6295's ROM access pattern (jt6295_rom /
+        -- jt6295_timing: ctrl address on six slots, each channel's ADPCM
+        -- address on two, every region, four channels) for the cache bench.
+        OKI_STUB_MODE : integer := 0
     );
     port (
         clk       : in  std_logic;                      -- 7.159091 MHz
@@ -238,6 +243,43 @@ architecture rtl of escape_jsa is
     signal oki_cen   : std_logic := '0';
     signal oki_cctr  : unsigned(2 downto 0) := (others => '0');
     signal oki_wrctr : unsigned(3 downto 0) := (others => '0');
+    -- OKICACHE-186: jt6295 drives its ROM address EVERY slot - two ADPCM
+    -- slots per channel region (each channel in turn), the other six on the
+    -- control address - whether or not anything is playing. With a single
+    -- 4-byte entry, every ctrl<->ADPCM switch whose groups differed was a
+    -- miss: ~72k SDRAM reads a second, forever, once the first sample had
+    -- moved the channel pointers, each one outranking motion objects in
+    -- core_top. Now:
+    --   * the control address (the 1 KB phrase table, chip address < 0x400)
+    --     keeps its own entry (oki_cache/oki_tag/oki_cv);
+    --   * ADPCM groups go to OKN fully associative entries, FIFO-replaced;
+    --   * every ADPCM access prefetches the channel's next group, so the
+    --     next group is resident before the channel reaches it - jt6295's
+    --     ADPCM slots have NO wait (no rom_ok), whatever is on rom_data two
+    --     slots later is played;
+    --   * a fill is tagged with the group that was REQUESTED (rf_otag). It
+    --     used to take the tag from oki_addr at ack time, so a fill that
+    --     straddled a slot change was filed under the other address and its
+    --     bytes served as that address's data.
+    constant OKN : integer := 16;
+    type okt_t is array (0 to OKN-1) of std_logic_vector(15 downto 0);
+    type okd_t is array (0 to OKN-1) of std_logic_vector(31 downto 0);
+    signal ok_tag    : okt_t := (others => (others => '0'));
+    signal ok_dat    : okd_t := (others => (others => '0'));
+    signal ok_v      : std_logic_vector(OKN-1 downto 0) := (others => '0');
+    signal ok_wp     : integer range 0 to OKN-1 := 0;
+    signal ok_hit    : std_logic;                       -- some ADPCM entry holds oki_addr's group
+    signal ok_hdat   : std_logic_vector(31 downto 0);
+    signal ok_nhave  : std_logic;                       -- ... and the group after it
+    signal oki_grp   : std_logic_vector(15 downto 0);
+    signal oki_nxt   : std_logic_vector(15 downto 0);
+    signal oki_word  : std_logic_vector(31 downto 0);
+    signal oki_pf    : std_logic;                       -- prefetch wanted
+    signal rf_otag   : std_logic_vector(15 downto 0) := (others => '0');
+    -- OKI_STUB_MODE=1 bench taps (GHDL only; unused and pruned otherwise)
+    type pm_a4_t is array (0 to 3) of unsigned(17 downto 0);
+    signal pm_s0     : pm_a4_t := ("00" & x"1000", "00" & x"4800", "00" & x"A800", "01" & x"6000");
+    signal pm_n, pm_badw, pm_badc : integer := 0;
     signal oki_cache : std_logic_vector(31 downto 0) := (others => '0');
     signal oki_tag   : std_logic_vector(15 downto 0) := (others => '0');
     signal oki_cv    : std_logic := '0';
@@ -345,12 +387,36 @@ begin
 
     -- JSA2-164: the OKI's 4-byte group is a miss when its tag differs
     is2 <= '1' when BOARD = 2 else board2 when BOARD_RT = 1 else '0';
-    oki_ok   <= '1' when is2 = '1' and oki_cv = '1' and oki_tag = oki_addr(17 downto 2) else '0';
+    -- OKICACHE-186: lookup. Every entry holds bytes of the same ROM, so a
+    -- tag match in either store is valid data whichever store it is in.
+    oki_grp <= oki_addr(17 downto 2);
+    oki_nxt <= std_logic_vector(unsigned(oki_addr(17 downto 2)) + 1);
+    ok_look : process(oki_grp, oki_nxt, ok_tag, ok_dat, ok_v)
+        variable h, n : std_logic;
+        variable d    : std_logic_vector(31 downto 0);
+    begin
+        h := '0'; n := '0'; d := (others => '0');
+        for i in 0 to OKN-1 loop
+            if ok_v(i) = '1' and ok_tag(i) = oki_grp then
+                h := '1'; d := ok_dat(i);
+            end if;
+            if ok_v(i) = '1' and ok_tag(i) = oki_nxt then
+                n := '1';
+            end if;
+        end loop;
+        ok_hit <= h; ok_hdat <= d; ok_nhave <= n;
+    end process;
+    oki_ok   <= '1' when is2 = '1' and ((oki_cv = '1' and oki_tag = oki_grp) or ok_hit = '1') else '0';
     oki_miss <= '1' when is2 = '1' and oki_rst = '0' and oki_ok = '0' else '0';
-    oki_rdata <= oki_cache(31 downto 24) when oki_addr(1 downto 0) = "00" else
-                 oki_cache(23 downto 16) when oki_addr(1 downto 0) = "01" else
-                 oki_cache(15 downto 8)  when oki_addr(1 downto 0) = "10" else
-                 oki_cache(7 downto 0);
+    -- prefetch only for ADPCM addresses (the phrase table is read a few
+    -- bytes per phrase start and waits on rom_ok anyway)
+    oki_pf   <= '1' when is2 = '1' and oki_rst = '0' and oki_addr(17 downto 10) /= "00000000"
+                         and ok_nhave = '0' else '0';
+    oki_word <= oki_cache when oki_cv = '1' and oki_tag = oki_grp else ok_hdat;
+    oki_rdata <= oki_word(31 downto 24) when oki_addr(1 downto 0) = "00" else
+                 oki_word(23 downto 16) when oki_addr(1 downto 0) = "01" else
+                 oki_word(15 downto 8)  when oki_addr(1 downto 0) = "10" else
+                 oki_word(7 downto 0);
 
     fetch : process(clk)
     begin
@@ -358,6 +424,7 @@ begin
             if reset_n = '0' then
                 rf <= RF_IDLE; rom_req_i <= '0'; rf_oki <= '0';
                 cache_v <= '0'; pref_v <= '0'; oki_cv <= '0';
+                ok_v <= (others => '0'); ok_wp <= 0;
             else
                 case rf is
                     when RF_IDLE =>
@@ -368,7 +435,15 @@ begin
                             rf <= RF_REQ;
                         elsif oki_miss = '1' and rom_ack = '0' then
                             -- 0x240000 | (group << 2): word pair at +0 and +2
-                            rom_addr  <= "001001" & oki_addr(17 downto 2) & "00";
+                            rom_addr  <= "001001" & oki_grp & "00";
+                            rf_otag   <= oki_grp;
+                            rom_req_i <= '1';
+                            rf_oki    <= '1';
+                            rf <= RF_REQ;
+                        elsif oki_pf = '1' and rom_ack = '0' then
+                            -- OKICACHE-186: next-group prefetch, lowest priority
+                            rom_addr  <= "001001" & oki_nxt & "00";
+                            rf_otag   <= oki_nxt;
                             rom_req_i <= '1';
                             rf_oki    <= '1';
                             rf <= RF_REQ;
@@ -377,9 +452,18 @@ begin
                         if rom_ack = '1' then
                             rom_req_i  <= '0';
                             if rf_oki = '1' then
-                                oki_cache <= rom_data;      -- bytes +0..+3, big-endian words
-                                oki_tag   <= oki_addr(17 downto 2);
-                                oki_cv    <= '1';
+                                -- bytes +0..+3, big-endian words; filed under
+                                -- the group that was requested (OKICACHE-186)
+                                if rf_otag(15 downto 8) = "00000000" then
+                                    oki_cache <= rom_data;
+                                    oki_tag   <= rf_otag;
+                                    oki_cv    <= '1';
+                                else
+                                    ok_dat(ok_wp) <= rom_data;
+                                    ok_tag(ok_wp) <= rf_otag;
+                                    ok_v(ok_wp)   <= '1';
+                                    if ok_wp = OKN-1 then ok_wp <= 0; else ok_wp <= ok_wp + 1; end if;
+                                end if;
                             else
                                 cache_word <= rom_data(31 downto 16);
                                 cache_addr <= rom_off(15 downto 1);
@@ -679,6 +763,7 @@ begin
         oki_stub : if not YM_ENABLE generate
             oki_dout <= x"F0";
             oki_snd  <= (others => '0');
+            walk_g : if OKI_STUB_MODE = 0 generate
             walker : process(clk)
             begin
                 if rising_edge(clk) then
@@ -689,6 +774,76 @@ begin
                     end if;
                 end if;
             end process;
+            end generate;
+            -- OKICACHE-186: jt6295 access-pattern model. Same enables as
+            -- jt6295_timing (ss=1: 4 cen per base step, 33 steps a sample),
+            -- same slot ring as jt6295_rom (cen4 loads 0x80, cen32 rotates;
+            -- slots 0x01/0x02 drive the region's channel address, the rest
+            -- the ctrl address). Channel c starts at pm_start(c) and moves
+            -- one byte every two samples; channel 3 restarts somewhere new
+            -- every 120 samples. The bench reads pm_* through external names.
+            pat_g : if OKI_STUB_MODE = 1 generate
+                pat : process(clk)
+                    type a4_t is array (0 to 3) of unsigned(18 downto 0);  -- nibble counters
+                    variable ch    : a4_t := ("000" & x"2000", "000" & x"9000",
+                                              "001" & x"5000", "010" & x"C000");
+                    variable base  : unsigned(2 downto 0) := (others => '0');
+                    variable cnt   : unsigned(5 downto 0) := (others => '0');
+                    variable st    : std_logic_vector(7 downto 0) := x"80";
+                    variable c32, c4, csr : boolean;
+                    variable rgn   : integer range 0 to 3 := 0;
+                    variable nsmp  : integer := 0;
+                    variable rs3   : unsigned(18 downto 0) := "011" & x"1000";
+                begin
+                    if rising_edge(clk) then
+                        c32 := false; c4 := false; csr := false;
+                        if oki_rst = '1' then
+                            base := (others => '0'); cnt := (others => '0'); st := x"80";
+                        elsif oki_cen = '1' then
+                            c32 := cnt(5) = '0' and base = 0;
+                            c4  := cnt(5) = '0' and cnt(2 downto 0) = "000" and base = 0;
+                            csr := cnt = 0 and base = 0;
+                            if base = 3 then base := (others => '0'); else base := base + 1; end if;
+                            if base = 0 then
+                                if cnt = 32 then cnt := (others => '0'); else cnt := cnt + 1; end if;
+                            end if;
+                        end if;
+                        -- jt6295_rom: rom_addr follows the slot it is IN (the
+                        -- registered st), so assign before st advances
+                        if st = x"01" or st = x"02" then
+                            oki_addr <= std_logic_vector(ch(rgn)(18 downto 1));
+                        else
+                            oki_addr <= "00" & x"0018";
+                        end if;
+                        -- the capture point: last clock of slot 0x02 (jt6295_rom
+                        -- latches adpcm_dout <= rom_data on every clock of 0x01/0x02);
+                        -- judged here on the values the chip would latch
+                        if c32 and st = x"02" then
+                            pm_n <= pm_n + 1;
+                            if oki_rdata /= oki_addr(7 downto 0)
+                               or oki_addr /= std_logic_vector(ch(rgn)(18 downto 1)) then
+                                if ch(rgn)(18 downto 1) - pm_s0(rgn) >= 8 then
+                                    pm_badw <= pm_badw + 1;    -- warm: prefetch should have it
+                                else
+                                    pm_badc <= pm_badc + 1;    -- cold: first groups of a phrase
+                                end if;
+                            end if;
+                        end if;
+                        if c4 then st := x"80";
+                        elsif c32 then st := st(6 downto 0) & st(7); end if;
+                        if csr then
+                            nsmp := nsmp + 1;
+                            for c in 0 to 3 loop ch(c) := ch(c) + 1; end loop;
+                            if nsmp mod 120 = 0 then
+                                rs3 := rs3 + ("000" & x"1234");
+                                ch(3) := rs3;
+                                pm_s0(3) <= rs3(18 downto 1);
+                            end if;
+                        end if;
+                        rgn := to_integer(cnt(4 downto 3));
+                    end if;
+                end process;
+            end generate;
         end generate;
     end generate;
 
