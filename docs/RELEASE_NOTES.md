@@ -31,6 +31,7 @@ untouched.
 | Build | Adds |
 |---|---|
 | 42 | First Klax and Guts Pocket cores (POCKETVAR-182): one tree, a build macro per game (`GAME_KLAX` / `GAME_GUTS`; none = Escape), the same constants the MiSTer core selects at runtime — single 68010, JSA-II sound with the OKI6295, Guts' video mode and its own playfield tile ROM at `0x280000`. Controls as on MiSTer: Klax d-pad + Flip/Start (A) + Flip 2nd (B); Guts analogue stick + Button 1/2/3 (A/B/X). 268/308 M10K each; timing positive (Klax hold +0.008 ns, Guts +0.020 ns). |
+| 43 | Klax missing sprites on build 42 (SHADBASE-185): the video CPU's three zero-wait ROM shadows sat on Escape's hot code and covered only 12% of Klax's program reads (8% of Guts'), so the CPU's SDRAM traffic starved the motion-object fetches. The shadow bases are now per game, chosen from a MAME read profile: Klax `0x04000/0x08000/0x10000` (98.8% of reads), Guts `0x20000/0x00000/0x3C000` (92.2%), third shadow enabled on both (+16 M10K: 284/308 each). Timing positive (Klax hold +0.066 ns, Guts hold +0.027 ns). Escape and MiSTer unchanged. |
 
 ## 0.2 — MiSTer v0.2.0 and Pocket v0.2.0 (2026-10-19)
 
