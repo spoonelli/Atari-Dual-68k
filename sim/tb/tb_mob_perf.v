@@ -512,13 +512,13 @@ module tb_mob_perf;
             end
             default: c_trav  = c_trav  + 1;
         endcase
-`ifdef MOB_BASE
-        if(dut.wr_en) n_wren = n_wren + 1;
-`else
-        // MOPAIR-131: two independent bank writes per cycle
+        // MOPAIR-131: two independent bank writes per cycle.
+        // ORDFIX-189: probed in BOTH arms. The MOB_BASE arm still probed the
+        // pre-MOPAIR single port `wr_en`, which no resolvable BASE_REF has had
+        // since 3b8d391 - so run_mob_order_check failed to elaborate on every
+        // base, in every cell, for the same reason ORDFIX-131 fixed above.
         if(dut.wr_en_e) n_wren = n_wren + 1;
         if(dut.wr_en_o) n_wren = n_wren + 1;
-`endif
         // tile-rows blitted entirely into the invisible 344..504 window: the
         // whole 8 pixels are clipped away, so the fetch and the 8 blit cycles
         // bought nothing. (505..511 wraps back into view, so it is NOT dead.)
@@ -651,23 +651,22 @@ module tb_mob_perf;
         // of a line lands its write during x_count==0 - after the abort has
         // flipped build_sel but into the buffer that was being built, which is
         // correct - and it belongs to the line that just finished.
-`ifdef MOB_BASE
-        if(dut.wr_en) begin
-            sh_pen[dut.wr_x] = dut.wr_data[7:0];
-            sh_val[dut.wr_x] = 1'b1;
-        end
-`else
         // MOPAIR-131: shadow both bank writes; address reconstitutes as
         // {bank addr, parity}, pen as {color (wr_hi low nibble), pix}.
-        if(dut.wr_en_e) begin
+        // (ORDFIX-189: both arms - see the wren census above.)
+        // PERFALIGN-189: FIRST write wins, as in the engine's own occupancy
+        // gate (MOPLACE-3, `!occ_e`/`!occ_o`; this bench ties guts low). The
+        // shadow kept the LAST write, so every overlapped pixel counted as a
+        // pen_mismatch (1613 at 50/157) on a frame that matches the golden
+        // model with wrong=0.
+        if(dut.wr_en_e && !sh_val[{dut.wr_xe, 1'b0}]) begin
             sh_pen[{dut.wr_xe, 1'b0}] = {dut.wr_hi[3:0], dut.wr_pen_e};
             sh_val[{dut.wr_xe, 1'b0}] = 1'b1;
         end
-        if(dut.wr_en_o) begin
+        if(dut.wr_en_o && !sh_val[{dut.wr_xo, 1'b1}]) begin
             sh_pen[{dut.wr_xo, 1'b1}] = {dut.wr_hi[3:0], dut.wr_pen_o};
             sh_val[{dut.wr_xo, 1'b1}] = 1'b1;
         end
-`endif
         if(x_count == 10'd0 && y_count >= VID_V_BPORCH-1
            && y_count < VID_V_BPORCH+VID_V_ACTIVE-1) begin
             for(si = 0; si < 512; si = si + 1) begin
@@ -777,14 +776,24 @@ module tb_mob_perf;
     end
     always @(posedge clk) begin
         if(dumping
-           && x_count >= VID_H_BPORCH+1 && x_count < VID_H_BPORCH+VID_H_ACTIVE+1
+           && x_count >= VID_H_BPORCH && x_count < VID_H_BPORCH+VID_H_ACTIVE
            && y_count >= VID_V_BPORCH && y_count < VID_V_BPORCH+VID_V_ACTIVE) begin
-            // disp read is registered: pen for visible_x N is valid one cycle later
+            // PERFALIGN-189: MOALIGN-129 made the DUT read its display buffer at
+            // disp_x+1, so the pen for visible_x N arrives AT visible_x N. That
+            // commit removed the "visible_x - 1" compensation from tb_mob and
+            // tb_stain but missed this bench, which kept logging every pixel one
+            // column LEFT of where the engine put it (column 0 never logged,
+            // cf. MOEDGE-130). Every run_mob_perf score since 90512d1 was
+            // therefore a misalignment, not starvation: scene 50/157 lat8 read
+            // coverage=50.40% wrong=5723, and ghosts=581/pen_mismatch=6431 from
+            // the same off-by-one into dsh_*, identically on all seven engine
+            // revisions tried from 90512d1 to 338886a. Window and index now
+            // match tb_mob.
             if(disp_valid) begin
-                $fwrite(fd, "%0d %0d %h\n", visible_x - 10'd1, visible_y, disp_pen);
+                $fwrite(fd, "%0d %0d %h\n", visible_x, visible_y, disp_pen);
                 px_seen = px_seen + 1;
-                if(!dsh_val[visible_x - 10'd1])          n_ghost    = n_ghost + 1;
-                else if(dsh_pen[visible_x - 10'd1] != disp_pen)
+                if(!dsh_val[visible_x])                  n_ghost    = n_ghost + 1;
+                else if(dsh_pen[visible_x] != disp_pen)
                                                          n_mismatch = n_mismatch + 1;
             end
         end
