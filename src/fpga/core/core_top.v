@@ -2551,7 +2551,7 @@ synch_3 s_mopri(m_mopri_px, m_mopri_sd, clk_sdram);
     // and [3:0] (ver slots 2 and 3; slot 1 sits under the chk2 bit row).
     // Write the build number as hex digits: build 41 = 16'h0041. NOT ASCII -
     // 16'h3431 shows '31' (the v0.2.0 release candidate did exactly that).
-    localparam [15:0] BUILD_ID = 16'h0048;   // AUDFLT-190 test build (Klax / Guts; 47 with MiSTer's default audio IIR) - screen shows '48' (41 = Pocket v0.2.0 release)
+    localparam [15:0] BUILD_ID = 16'h0049;   // MOTEL-191 test build (Klax / Guts; 48 + sprite-telemetry counter fix) - screen shows '49' (41 = Pocket v0.2.0 release)
     // x264..328: fully inside the 336-wide viewport (x300+ was clipped on device)
     wire [8:0] vx0      = visible_x - 9'd264;
     wire       ver_on   = (visible_x >= 'd264) && (visible_x < 'd328);
