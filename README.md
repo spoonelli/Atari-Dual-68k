@@ -484,8 +484,9 @@ owed alongside it. This is inherited from upstream rather than introduced here, 
 
 **GPL-3.0** for this project's own RTL and tooling — see [`LICENSE`](LICENSE).
 Release zips for both platforms carry `LICENSE.txt` and `NOTICE.md` (the
-per-component compliance inventory) alongside the binary, as the GPL and the
-MIT-licensed `psram.sv` require. The tree is not uniformly GPL-3.0, and
+per-component compliance inventory, which also reproduces the T65 and `psram.sv`
+licence texts their BSD-style and MIT licences require with binaries) alongside
+the binary. The tree is not uniformly GPL-3.0, and
 downstream users keep the weaker terms on these files:
 
 | Component | Licence |
