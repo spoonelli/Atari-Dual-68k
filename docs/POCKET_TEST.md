@@ -170,7 +170,7 @@ Write build NN as `16'h00NN` — the digits are hex nibbles, not ASCII
 out). `package.sh` guard 6 refuses a package whose `BUILD_ID` disagrees with
 its own `shows 'NN'` comment, or with `EXPECT_BUILD=NN` when given.
 
-## The Klax and Guts n' Glory cores (milestone 0.3, test builds)
+## The Klax and Guts n' Glory cores (v0.3.0)
 
 Two more cores from the same tree, each its own zip: `spoonelli.klaxp`
 (platform `klaxp`) and `spoonelli.guts` (platform `guts`). Install exactly as
@@ -182,8 +182,10 @@ above, with their own folders and ROM names ([`ROMS.md`](ROMS.md) section 3b).
 | Guts n' Glory | analogue stick or d-pad; **A** Button 1 (fire), **B** Button 2 (the game's own "Left START"), **X** Button 3; Select = coin | no Skip Self-Test, no ROM-shadow toggle; "Sample Volume" |
 
 Both are single-CPU, so the "Waiting for Second Processor" boot hold does not
-appear. The Developer HUD and build number work as on Escape. The device test
-plan for the first test builds is K1–K7 / G1–G7 (owner's test plan).
+appear. The Developer HUD and build number work as on Escape (v0.3.0 shows
+**49**). Holding **R** while the HUD is armed hides every sprite - a layer
+isolation tool, not a fault. The device test plan for the test builds was
+K1–K7 / G1–G7 (owner's test plan).
 
 ## Reporting problems
 

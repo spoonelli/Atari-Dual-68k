@@ -93,7 +93,7 @@ the CPUs and video. `eprom` is the core's platform id, so the folder name is
 fixed too. Full SD layout and the on-device test procedure are in
 [`POCKET_TEST.md`](POCKET_TEST.md).
 
-### 3b. The Klax and Guts n' Glory Pocket cores (milestone 0.3, test builds)
+### 3b. The Klax and Guts n' Glory Pocket cores (v0.3.0)
 
 Each is its own core with its own platform folder (POCKETVAR-182):
 

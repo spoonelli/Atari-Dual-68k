@@ -20,10 +20,16 @@ hidden in a footnote; if you are deciding whether to install it, read the
 
 ---
 
-## Unreleased — Pocket 0.3: the Klax and Guts n' Glory cores
+## Pocket v0.3.0 — 2026-10-22: the Klax and Guts n' Glory cores
 
-Nothing in this section is released. Branch `milestone-0.3`; test builds for
-the owner's device checks. Two new Pocket cores, each its own zip (owner):
+**Released 2026-10-22** as release build **49** (the HUD shows 49), tag
+`v0.3.0`, assets `AtariDual68k-klaxp-v0.3.0.zip` and
+`AtariDual68k-guts-v0.3.0.zip`; the release also carries Escape's unchanged
+`AtariDual68k-pocket-v0.2.0.zip` so its "latest" always holds all three
+cores. Escape's Pocket core is not re-released here: the shared audio-path
+changes below (AUDCDC-189, AUDFLT-190) reach it at its next release, after a
+listen. The table records the test builds that led to it. Two new Pocket
+cores, each its own zip (owner):
 `spoonelli.klaxp` (platform `klaxp`: Klax prototype set 1, set 2 under
 `_alternatives`) and `spoonelli.guts` (platform `guts`). Escape's core is
 untouched.

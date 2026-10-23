@@ -7,7 +7,9 @@ The core implements the **Escape** board — two 68000-family CPUs (68010 by
 default, 68000 selectable) and JSA-I audio. **v0.2.0** (2026-10-19) adds
 Escape set 2 on both platforms (the Pocket picks the set at launch) and, on
 MiSTer, the two unreleased Atari games that ran on this board: the Klax
-prototypes and Guts n' Glory. See [Other games on this hardware](#other-games-on-this-hardware).
+prototypes and Guts n' Glory. **Pocket v0.3.0** (2026-10-22) brings those two
+to the Analogue Pocket as their own cores, `spoonelli.klaxp` and
+`spoonelli.guts`. See [Other games on this hardware](#other-games-on-this-hardware).
 
 > Built for the [Analogue Pocket](https://www.analogue.co/pocket) via the openFPGA framework.
 > This project ships **no ROMs**. You must supply your own dumps.
@@ -78,9 +80,9 @@ candidate and the Klax / Guts cores come later.
 |---|---|---|
 | **`eprom`** | Escape from the Planet of the Robot Monsters (set 1) | **the target — this is what the core runs** |
 | `eprom2` | Escape … (set 2) | **Supported on MiSTer and Pocket (v0.2.0).** Device-tested on MiSTer 169/170 (POST, play through level 1, the canal stage and its result screen). Identical hardware; all-rev-1 program plus a tenth main pair (`1037.50e`/`1036.40e`) at CPU `0x80000–0x9FFFF`, which the video CPU reads once during the power-on checksum. `build_rom.py` detects the set and places that pair at image `0x0A0000` (the extra CPU's unused hole); a one-line address remap in `escape_core.vhd` serves it. MiSTer: its own `(set 2).mra` under `_alternatives/`. Pocket: launched from the set picker's `_alternatives` folder (`atari_escape2.rom`), device-tested on Pocket RC 3. |
-| `klaxp1` | Klax (prototype set 1) | **Supported on MiSTer (v0.2.0; KLAX-165, GAMESEL-167).** Device-tested on MiSTer 169; one Flip/Start button (KLAXBTN-174 — the program reads only Button 1). Pocket core `spoonelli.klaxp`: test builds 42+ on `milestone-0.3` (unreleased). |
+| `klaxp1` | Klax (prototype set 1) | **Supported on MiSTer (v0.2.0; KLAX-165, GAMESEL-167).** Device-tested on MiSTer 169; one Flip/Start button (KLAXBTN-174 — the program reads only Button 1). **Pocket: core `spoonelli.klaxp`, v0.3.0 (release build 49).** |
 | `klaxp2` | Klax (prototype set 2) | As `klaxp1` (the two sets differ only in the main pair). |
-| `guts` | Guts n' Glory (prototype) | **Supported on MiSTer (v0.2.0; video-map mode GUTS-166, special-sprite fix GUTS-169).** Device-tested on MiSTer 169. Pocket core `spoonelli.guts`: test builds 42+ on `milestone-0.3` (unreleased). |
+| `guts` | Guts n' Glory (prototype) | **Supported on MiSTer (v0.2.0; video-map mode GUTS-166, special-sprite fix GUTS-169).** Device-tested on MiSTer 169. **Pocket: core `spoonelli.guts`, v0.3.0 (release build 49).** |
 
 Two structural differences set the Klax and Guts prototypes apart from
 Escape:
